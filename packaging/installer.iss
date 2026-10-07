@@ -1,10 +1,10 @@
 ; Inno Setup 安装器脚本 —— 由 CI 在 Windows runner 上编译
-; 用法: iscc packaging\installer.iss /DMyAppVersion=2.3.5
+; 用法: iscc packaging\installer.iss /DMyAppVersion=2.3.6
 ; 输入: dist\PulsesSwap\  (PyInstaller 目录版产物)
 ; 输出: dist\installer\PulsesSwap-Setup-<version>.exe
 
 #ifndef MyAppVersion
-  #define MyAppVersion "2.3.5"
+  #define MyAppVersion "2.3.6"
 #endif
 
 #define MyAppName "Pulses Swap"

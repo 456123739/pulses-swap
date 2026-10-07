@@ -26,10 +26,15 @@ from pathlib import Path
 #   filled=True  → 填充型图标（实心轮廓）：按 even-odd 把外轮廓和内部的孔
 #                  合并成一个 polygon，Tk 填充时会自动挖洞（已实测）
 #   filled=False → 描边型图标（Lucide/Feather 那种线稿）
+# stroke：该图标在 20px 下用的描边宽度。三个图标必须分开定 ——
+#   home 是细线稿（笔画 38/1024 ≈ 0.74px@20px），不描够 2px 会被 Tk 的
+#        非抗锯齿栅格化成虚线段（就是「抠图没抠干净」那种割裂感）；
+#   log  的横线与间隙都窄，描太粗会糊成一坨；
+#   gear 是实心大块，描粗了中心孔就没了。
 ICONS = {
-    "home": {"file": "home.svg", "filled": True},
-    "gear": {"file": "gear.svg", "filled": True},
-    "log":  {"file": "log.svg",  "filled": True},
+    "home": {"file": "home.svg", "filled": True, "stroke": 2.0},
+    "gear": {"file": "gear.svg", "filled": True, "stroke": 0.8},
+    "log":  {"file": "log.svg",  "filled": True, "stroke": 1.1},
 }
 ICON_DIR = Path(__file__).resolve().parent / "icons"
 
@@ -232,6 +237,15 @@ def svg_to_prims(svg: str, filled: bool = False):
     return prims
 
 
+def render_stroke_block(table: dict) -> str:
+    lines = ["# 每个图标在 20px 下的描边宽度（见 make_icons.py 的选型注释）",
+             "_ICON_STROKE = {"]
+    for key, cfg in ICONS.items():
+        lines.append(f'    "{key}": {cfg.get("stroke", 1.0)},')
+    lines.append("}")
+    return "\n".join(lines)
+
+
 def render_block(table: dict) -> str:
     lines = ["_ICON_PRIMS = {"]
     for key, prims in table.items():
@@ -265,13 +279,15 @@ def main() -> int:
         print(f"  {local:6s} <- icons/{cfg['file']:10s} [{kind}] "
               f"{len(prims):2d} 图元 / {pts} 点")
 
-    block = render_block(table)
+    block = render_block(table) + "\n\n" + render_stroke_block(table)
     if args.dry_run:
         print(block)
         return 0
 
     src = SRC.read_text(encoding="utf-8")
-    pattern = re.compile(r"_ICON_PRIMS = \{.*?\n\}\n", re.S)
+    pattern = re.compile(
+        r"_ICON_PRIMS = \{.*?\n\}\n(?:\n*# .*\n_ICON_STROKE = \{.*?\n\})?\n",
+        re.S)
     if not pattern.search(src):
         print("源码里找不到 _ICON_PRIMS 块", file=sys.stderr)
         return 1

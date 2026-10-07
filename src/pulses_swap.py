@@ -1,9 +1,16 @@
 """
 Pulses Swap - 快速枪包切换器
 作者: NimShade
-版本: 2.3.5
+版本: 2.3.6
 描述: Minecraft Tacz 模组枪包快速切换工具
 UI风格: Pulses 水墨淡色主题（customtkinter 圆角版本）
+
+v2.3.6 更新:
+  - 修：主界面图标线条「割裂/像没抠干净」—— Tk 不做抗锯齿，
+    房子是细线稿（笔画 38/1024 ≈ 0.74px@20px），填充 + 1px 边会被
+    栅格化成虚线段。现在每个图标单独定描边宽度（home 2.0 / log 1.1 /
+    gear 0.8，见 packaging/make_icons.py 的选型注释），导航图标放大到 20px
+  - _ICON_STROKE 与 _ICON_PRIMS 一样由 make_icons.py 烘出，改图标只需重跑脚本
 
 v2.3.5 更新:
   - 图标改用指定的三枚（填充型）：主界面房子 / 设置齿轮 / 日志文档，
@@ -124,7 +131,7 @@ except ImportError:
     FileSystemEventHandler = object
 
 # ==================== 常量定义 ====================
-VERSION = "2.3.5"
+VERSION = "2.3.6"
 AUTHOR = "NimShade"
 PROJECT_NAME = "Pulses Swap"
 
@@ -1497,6 +1504,12 @@ _ICON_PRIMS = {
     ),
 }
 
+# 每个图标在 20px 下的描边宽度（见 make_icons.py 的选型注释）
+_ICON_STROKE = {
+    "home": 2.0,
+    "gear": 0.8,
+    "log": 1.1,
+}
 
 def _icon_points(pts, cx, cy, size, angle, kind="line"):
     """把归一化坐标按 size/角度映射到画布坐标。
@@ -1526,11 +1539,13 @@ def _icon_points(pts, cx, cy, size, angle, kind="line"):
     return out
 
 
-def draw_vector_icon(canvas, name, cx, cy, size, color, angle=0.0, width=1.7):
+def draw_vector_icon(canvas, name, cx, cy, size, color, angle=0.0, width=None):
     """在 canvas 上画一个矢量图标，返回 (图元 id 列表, 图元描述)。"""
     prims = _ICON_PRIMS.get(name)
     if not prims:
         return [], None
+    if width is None:
+        width = _ICON_STROKE.get(name, 1.0)
     ids = []
     for prim in prims:
         pts = _icon_points(prim[1:], cx, cy, size, angle, prim[0])
@@ -4277,8 +4292,9 @@ class PulsesSwapApp:
             radius=R_CONTROL, bg_color=C_CARD_BG, pill_color=C_ACCENT_SOFT,
             hover_color=C_ACCENT_SOFT, text_color=C_TEXT_MAIN,
             active_text_color=C_ACCENT, font_size=FS_BODY, bold_active=True,
-            text_anchor="w", text_pad=14, icon_pad=11, icon_half=9,
-            icon_gap=8, icon_angle=45.0, duration_ms=240, height=nav_height)
+            text_anchor="w", text_pad=14, icon_pad=11, icon_half=10,
+            icon_gap=8, icon_angle=45.0, duration_ms=240, height=nav_height,
+            icon_size=20)
         self.nav.pack(fill=X, padx=PAD_XS)
 
         # ===== 侧边栏底部状态卡 =====
