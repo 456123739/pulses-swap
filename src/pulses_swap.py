@@ -1,9 +1,15 @@
 """
 Pulses Swap - 快速枪包切换器
 作者: NimShade
-版本: 2.3.2
+版本: 2.3.3
 描述: Minecraft Tacz 模组枪包快速切换工具
 UI风格: Pulses 水墨淡色主题（customtkinter 圆角版本）
+
+v2.3.3 更新:
+  - 修：设置图标画成了「圆 + 8 根放射线」，看着是太阳 —— 改成真正的齿形轮廓
+    （8 齿多边形描边）+ 中心孔
+  - 修：旋转时把圆的包围盒角点一起转了，45° 会把中心孔压成一根竖线；
+    圆在旋转下不变，改成只转圆心、半径照旧
 
 v2.3.2 更新:
   - 修：设置页选项卡「上一个」取的是已更新过的当前值，方向永远算成同一个
@@ -97,7 +103,7 @@ except ImportError:
     FileSystemEventHandler = object
 
 # ==================== 常量定义 ====================
-VERSION = "2.3.2"
+VERSION = "2.3.3"
 AUTHOR = "NimShade"
 PROJECT_NAME = "Pulses Swap"
 
@@ -1436,37 +1442,62 @@ class Toast:
 #   · 没装 emoji 字库的机器上直接掉成方框。
 # 这里改成用 Canvas 图元自己画：颜色能逐帧混、角度能逐帧转、任何平台一致。
 # 每个图标用 -1..1 的归一化坐标描述，绘制/旋转都只做一次坐标变换。
+def _gear_profile(teeth=8, r_out=1.0, r_in=0.70):
+    """齿轮轮廓：每个齿 4 个点（齿顶平段 + 齿根平段），连成闭合多边形。
+
+    之前用「圆 + 8 根放射线」画，看着就是太阳；真正的齿轮得有齿形。
+    """
+    pts = []
+    step = 2.0 * math.pi / teeth
+    for i in range(teeth):
+        base = i * step
+        for frac, radius in ((0.04, r_out), (0.42, r_out),
+                             (0.54, r_in), (0.92, r_in)):
+            ang = base + frac * step
+            pts.extend((radius * math.cos(ang), radius * math.sin(ang)))
+    return tuple(round(v, 4) for v in pts)
+
+
 _ICON_PRIMS = {
     "home": (("line", -0.92, 0.08, 0.0, -0.92),
              ("line", 0.0, -0.92, 0.92, 0.08),
              ("line", -0.58, -0.16, -0.58, 0.92),
              ("line", 0.58, -0.16, 0.58, 0.92),
              ("line", -0.58, 0.92, 0.58, 0.92)),
-    "gear": (("oval", -0.50, -0.50, 0.50, 0.50),
-             ("line", 0.62, 0.0, 1.0, 0.0),
-             ("line", 0.44, 0.44, 0.71, 0.71),
-             ("line", 0.0, 0.62, 0.0, 1.0),
-             ("line", -0.44, 0.44, -0.71, 0.71),
-             ("line", -0.62, 0.0, -1.0, 0.0),
-             ("line", -0.44, -0.44, -0.71, -0.71),
-             ("line", 0.0, -0.62, 0.0, -1.0),
-             ("line", 0.44, -0.44, 0.71, -0.71)),
+    # 齿形轮廓（描边不填充）+ 中心孔
+    "gear": (("poly",) + _gear_profile(),
+             ("oval", -0.30, -0.30, 0.30, 0.30)),
     "log": (("line", -0.85, -0.66, 0.85, -0.66),
             ("line", -0.85, 0.0, 0.85, 0.0),
             ("line", -0.85, 0.66, 0.30, 0.66)),
 }
 
 
-def _icon_points(pts, cx, cy, size, angle):
-    """把归一化坐标按 size/角度映射到画布坐标。"""
+def _icon_points(pts, cx, cy, size, angle, kind="line"):
+    """把归一化坐标按 size/角度映射到画布坐标。
+
+    圆要特殊处理：直接旋转包围盒的两个角点会把它压成椭圆甚至一条线
+    （45° 时中心孔会变成一根竖线）。圆在旋转下不变，只转圆心、半径照旧。
+    """
     rad = math.radians(angle or 0.0)
     cos_a, sin_a = math.cos(rad), math.sin(rad)
     half = size / 2.0
+
+    def _map(x, y):
+        return (cx + (x * cos_a - y * sin_a) * half,
+                cy + (x * sin_a + y * cos_a) * half)
+
+    if kind == "oval" and len(pts) == 4:
+        x1, y1, x2, y2 = pts
+        mx, my = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+        rx, ry = abs(x2 - x1) / 2.0, abs(y2 - y1) / 2.0
+        px, py = _map(mx, my)
+        return [px - rx * half, py - ry * half, px + rx * half, py + ry * half]
+
     out = []
     for i in range(0, len(pts), 2):
-        x, y = pts[i] * half, pts[i + 1] * half
-        out.append(cx + x * cos_a - y * sin_a)
-        out.append(cy + x * sin_a + y * cos_a)
+        px, py = _map(pts[i], pts[i + 1])
+        out.extend((px, py))
     return out
 
 
@@ -1477,10 +1508,13 @@ def draw_vector_icon(canvas, name, cx, cy, size, color, angle=0.0, width=1.7):
         return [], None
     ids = []
     for prim in prims:
-        pts = _icon_points(prim[1:], cx, cy, size, angle)
+        pts = _icon_points(prim[1:], cx, cy, size, angle, prim[0])
         try:
             if prim[0] == "oval":
                 ids.append(canvas.create_oval(*pts, outline=color, width=width))
+            elif prim[0] == "poly":
+                ids.append(canvas.create_polygon(*pts, fill="", outline=color,
+                                                  width=width, joinstyle="round"))
             else:
                 ids.append(canvas.create_line(*pts, fill=color, width=width,
                                               capstyle="round"))
@@ -1493,7 +1527,8 @@ def redraw_vector_icon(canvas, ids, prims, cx, cy, size, angle=0.0):
     """只改坐标，不重建图元：逐帧动画时不会闪。"""
     for item, prim in zip(ids, prims):
         try:
-            canvas.coords(item, *_icon_points(prim[1:], cx, cy, size, angle))
+            canvas.coords(item, *_icon_points(prim[1:], cx, cy, size, angle,
+                                              prim[0]))
         except Exception:
             pass
 
@@ -1502,7 +1537,7 @@ def paint_vector_icon(canvas, ids, prims, color):
     """矢量图标的染色：线用 fill，圆用 outline。"""
     for index, item in enumerate(ids):
         try:
-            if prims and prims[index][0] == "oval":
+            if prims and prims[index][0] in ("oval", "poly"):
                 canvas.itemconfigure(item, outline=color)
             else:
                 canvas.itemconfigure(item, fill=color)
