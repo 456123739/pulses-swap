@@ -1,9 +1,23 @@
 """
 Pulses Swap - 快速枪包切换器
 作者: NimShade
-版本: 2.3.0
+版本: 2.3.1
 描述: Minecraft Tacz 模组枪包快速切换工具
 UI风格: Pulses 水墨淡色主题（customtkinter 圆角版本）
+
+v2.3.1 更新:
+  - 修：侧边栏 sticky="nsw" 不横向拉伸 → 一直只有 124px 宽（显得又窄又挤），
+    改为 "nsew" 后按 200px 正常铺开
+  - 页面切换方向按「点哪边内容就往哪边走」：点下面/右面的选项内容往下/右走，
+    点上面/左面的往上/左走；侧边栏是竖排，页面就竖着滑
+  - 切换曲线换成 S 曲线（ease_in_out_cubic）并把时长拉到 420ms，
+    原来的 easeOutQuint 前 20% 就走完 2/3，看着像瞬切
+  - 主界面右列改为：枪包列表 + 一键替换 → 分割线 → 日志栏（与日志页同一份日志流）
+  - 设置页简洁化：删掉所有解释性小字，选项改成带动画的分段控件
+  - 设置页底部常态只留「自动保存」，改动时短暂回显「✓ 已自动保存」
+  - 图标点击动画：主界面轻跳 / 设置齿轮转 45°（切走转回）/ 日志轻摆
+  - 日志分级：过程流水默认不占显示位，只保留最近一条有意义的状态；
+    「设置已保存 / 已切换到 xx 模式」这类回显只在完整日志模式显示
 
 v2.3.0 更新:
   - 顶栏（原生菜单栏）移除：原菜单项全部迁入界面，功能一个不少
@@ -72,7 +86,7 @@ except ImportError:
     FileSystemEventHandler = object
 
 # ==================== 常量定义 ====================
-VERSION = "2.3.0"
+VERSION = "2.3.1"
 AUTHOR = "NimShade"
 PROJECT_NAME = "Pulses Swap"
 
@@ -318,7 +332,8 @@ FS_DISPLAY = 19   # 展示型标题（原 18）
 # ==================== 尺寸 / 间距令牌 ====================
 H_CONTROL   = 32   # 按钮 / 输入框 / 显示框高度（原 28）
 H_DROP_AREA = 76   # 拖入框高度（原 70）
-H_LOG_BOX   = 132  # 日志文本框高度（原 120）
+H_LOG_BOX   = 132  # 日志页文本框高度（原 120）
+H_HOME_LOG  = 112  # 主界面右下角日志栏高度（分割线下面那块）
 H_PROGRESS  = 8    # 进度条高度
 H_BTN_BAR   = 68   # 对话框底部按钮条高度（原 64）
 H_TAB_HEAD  = 52   # 设置页选项卡头部高度（自绘分段控件）
@@ -334,7 +349,7 @@ PAD_INDENT  = 32   # 单选项说明文字的缩进（与指示器对齐，原 3
 PAD_WINDOW  = 8    # 主窗口内容与窗口边框的距离
 
 LEFT_COL_W = 340   # 主界面「Step 1/2/3」列宽度（与宣传片布局一致）
-SIDEBAR_W  = 172   # 侧边导航栏宽度（原顶栏/菜单入口改为侧边栏页面）
+SIDEBAR_W  = 200   # 侧边导航栏宽度（原顶栏/菜单入口改为侧边栏页面）
 H_NAV      = 38    # 侧边栏导航项高度
 
 WINDOW_W, WINDOW_H = 1280, 840             # 主窗口（原 1150x760 偏小）
@@ -777,7 +792,18 @@ class CanvasSegmented(Canvas):
     选中态是一个可以逐帧滑动的药丸，hover 也是逐帧混色 —— 之所以不用
     CTkButton 直接换色，是因为「切换选项」要的是一条连续的曲线轨迹。
     Canvas 同时会把子项裁剪在自身范围内，滑动过程不会溢到隔壁区域。
+
+    items 支持三种写法：
+        (key, text)                    无图标（设置页选项卡用）
+        (key, icon, text)              图标 + 文字
+        (key, icon, text, anim)        anim 见 ICON_ANIMS
+    图标单独成一个 canvas text item，因此可以单独做动画：
+        rotate  选中后转到 icon_angle 度，切走时转回 0（设置齿轮）
+        hop     选中时原地轻轻弹跳一次
+        wobble  选中时左右轻摆一次
     """
+
+    ICON_ANIMS = ("rotate", "hop", "wobble")
 
     def __init__(self, parent, items, command=None, orientation="vertical",
                  item_height=H_NAV, pad=4, gap=4, radius=R_CONTROL,
@@ -785,11 +811,13 @@ class CanvasSegmented(Canvas):
                  hover_color=C_ACCENT_SOFT, text_color=C_TEXT_MAIN,
                  active_text_color=C_ACCENT, font_size=FS_BODY,
                  bold_active=False, text_anchor="w", text_pad=14,
-                 duration_ms=320, hover_ms=160, width=1, height=1):
+                 duration_ms=320, hover_ms=160, width=1, height=1,
+                 icon_pad=13, icon_half=9, icon_gap=8, icon_anim_ms=420,
+                 icon_angle=45.0, icon_hop=6, icon_wobble=16):
         super().__init__(parent, bg=bg_color, highlightthickness=0, bd=0,
                          width=width, height=height)
-        self._items = [(key, str(text)) for key, text in items]
-        self._keys = [key for key, _ in self._items]
+        self._items = [self._normalize_item(item) for item in items]
+        self._keys = [key for key, _, _, _ in self._items]
         self._command = command
         self._orientation = orientation
         self._item_height = item_height
@@ -805,15 +833,27 @@ class CanvasSegmented(Canvas):
         self._font = (FONT_FAMILY, font_size)
         self._font_active = (FONT_FAMILY, font_size,
                              "bold" if bold_active else "normal")
+        self._icon_font = (FONT_FAMILY, font_size)
         self._text_anchor = text_anchor
         self._text_pad = text_pad
         self._duration_ms = duration_ms
         self._hover_ms = hover_ms
+        self._icon_pad = icon_pad
+        self._icon_half = icon_half
+        self._icon_gap = icon_gap
+        self._icon_anim_ms = icon_anim_ms
+        self._icon_angle = float(icon_angle)
+        self._icon_hop = float(icon_hop)
+        self._icon_wobble = float(icon_wobble)
 
         self._active = None
         self._rects = []
         self._text_ids = []
         self._text_colors = {}
+        self._icon_ids = []
+        self._icon_colors = {}
+        self._icon_angles = [0.0] * len(self._items)
+        self._icon_origins = [(0.0, 0.0)] * len(self._items)
         self._pill_id = None
         self._pill_rect = None
         self._pill_alpha = 0.0
@@ -824,14 +864,21 @@ class CanvasSegmented(Canvas):
         self._size = (0, 0)
         self._laid_out = False
 
-        # 层级：悬停层 -> 滑块 -> 文字
+        # 层级：悬停层 -> 滑块 -> 图标 -> 文字
         self._hover_id = self.create_polygon(
             *self._rect_points((-6, -6, -3, -3)), smooth=True, splinesteps=24,
             fill=bg_color, outline="")
         self._pill_id = self.create_polygon(
             *self._rect_points((-6, -6, -3, -3)), smooth=True, splinesteps=24,
             fill=bg_color, outline="")
-        for index, (_, text) in enumerate(self._items):
+        for index, (_, icon, text, _anim) in enumerate(self._items):
+            if icon:
+                self._icon_ids.append(
+                    self.create_text(0, 0, text=icon, fill=text_color,
+                                      anchor="center", font=self._icon_font))
+            else:
+                self._icon_ids.append(None)
+            self._icon_colors[index] = text_color
             self._text_ids.append(
                 self.create_text(0, 0, text=text, fill=text_color,
                                   anchor=text_anchor, font=self._font))
@@ -840,6 +887,15 @@ class CanvasSegmented(Canvas):
         self.bind("<Motion>", self._on_motion)
         self.bind("<Leave>", self._on_leave)
         self.bind("<Button-1>", self._on_click)
+
+    @staticmethod
+    def _normalize_item(item):
+        """统一成 (key, icon, text, anim)。"""
+        if len(item) == 2:
+            return (item[0], "", str(item[1]), None)
+        if len(item) == 3:
+            return (item[0], str(item[1]), str(item[2]), None)
+        return (item[0], str(item[1]), str(item[2]), item[3])
 
     # ---------- 几何 ----------
     def _rect_points(self, rect):
@@ -877,8 +933,17 @@ class CanvasSegmented(Canvas):
         for index, text_id in enumerate(self._text_ids):
             x1, y1, x2, y2 = rects[index]
             center_y = (y1 + y2) / 2.0
+            icon_id = self._icon_ids[index]
+            if icon_id is not None:
+                # 图标单独占位（anchor=center，方便绕自身中心做旋转）
+                icon_x = x1 + self._icon_pad + self._icon_half
+                self._icon_origins[index] = (icon_x, center_y)
+                self.coords(icon_id, icon_x, center_y)
+                label_x = icon_x + self._icon_half + self._icon_gap
+            else:
+                label_x = x1 + self._text_pad
             if self._text_anchor == "w":
-                self.coords(text_id, x1 + self._text_pad, center_y)
+                self.coords(text_id, label_x, center_y)
             else:
                 self.coords(text_id, (x1 + x2) / 2.0, center_y)
         if self._active in self._keys:
@@ -971,6 +1036,7 @@ class CanvasSegmented(Canvas):
         previous = self._active
         self._active = key
         self._animate_texts(previous, index, animate)
+        self._animate_icons(previous, index, animate)
         self._move_pill(index, animate)
         if self._hover_index == index:
             self._set_hover(-1, animate=animate)
@@ -1010,7 +1076,7 @@ class CanvasSegmented(Canvas):
 
         frame(0.0, 0.0)      # 立即落到起点，滑块不等待第一帧
         tween(self, "pill", self._duration_ms, frame, done,
-              easing=ease_out_quint)
+              easing=ease_in_out_cubic)
 
     def _animate_texts(self, previous_key, active_index, animate=True):
         for index, text_id in enumerate(self._text_ids):
@@ -1043,6 +1109,105 @@ class CanvasSegmented(Canvas):
             tween(self, "text{}".format(index), 240, frame,
                   easing=ease_out_cubic)
 
+    # ---------- 图标动画 ----------
+    def _set_icon_angle(self, index, degrees):
+        self._icon_angles[index] = float(degrees)
+        icon_id = self._icon_ids[index]
+        if icon_id is None:
+            return
+        try:
+            # Tk 8.6+ 的 canvas text 才支持 -angle；不支持时静默退化为不旋转
+            self.itemconfigure(icon_id, angle=self._icon_angles[index])
+        except Exception:
+            pass
+
+    def _animate_icons(self, previous_key, active_index, animate=True):
+        previous_index = (self._keys.index(previous_key)
+                          if previous_key in self._keys else -1)
+        for index in dict.fromkeys((active_index, previous_index)):
+            if index is None or index < 0:
+                continue
+            is_active = (index == active_index)
+            self._animate_icon_color(index, is_active, animate)
+            self._play_icon(index, is_active, animate)
+
+    def _animate_icon_color(self, index, is_active, animate=True):
+        icon_id = self._icon_ids[index]
+        if icon_id is None:
+            return
+        target = self._active_text_color if is_active else self._text_color
+        start = self._icon_colors.get(index, self._text_color)
+        if not animate or start == target:
+            self._icon_colors[index] = target
+            try:
+                self.itemconfigure(icon_id, fill=target)
+            except Exception:
+                pass
+            return
+
+        def frame(e, raw):
+            color = lerp_color(start, target, e)
+            self._icon_colors[index] = color
+            try:
+                self.itemconfigure(icon_id, fill=color)
+            except Exception:
+                pass
+
+        tween(self, "iconcolor{}".format(index), 240, frame,
+              easing=ease_out_cubic)
+
+    def _play_icon(self, index, activate, animate=True):
+        """图标动画：rotate 选中后转到 icon_angle、切走转回 0；
+        hop / wobble 是选中时一次性播放的小动效，切走时无需复位。"""
+        if index < 0 or index >= len(self._icon_ids):
+            return
+        icon_id = self._icon_ids[index]
+        anim = self._items[index][3]
+        if icon_id is None or anim not in self.ICON_ANIMS:
+            return
+        key = "icon{}".format(index)
+
+        if anim == "rotate":
+            start = self._icon_angles[index]
+            target = self._icon_angle if activate else 0.0
+            if not animate or abs(target - start) < 0.01:
+                self._set_icon_angle(index, target)
+                return
+
+            def frame(e, raw):
+                self._set_icon_angle(index, lerp(start, target, e))
+
+            frame(0.0, 0.0)
+            tween(self, key, self._icon_anim_ms, frame,
+                  easing=ease_in_out_cubic)
+            return
+
+        if not activate:
+            return
+
+        origin = self._icon_origins[index]
+
+        if anim == "hop":
+            def frame(e, raw):
+                # 三角形包络：起跳 -> 顶点 -> 落回，末帧一定回到原位
+                tri = raw * 2.0 if raw <= 0.5 else (1.0 - raw) * 2.0
+                try:
+                    self.coords(icon_id, origin[0],
+                                origin[1] - self._icon_hop * tri)
+                except Exception:
+                    pass
+
+            frame(0.0, 0.0)
+            tween(self, key, 340, frame, easing=ease_linear)
+            return
+
+        def frame(e, raw):
+            tri = raw * 2.0 if raw <= 0.5 else (1.0 - raw) * 2.0
+            self._set_icon_angle(index, -self._icon_wobble * tri)
+
+        frame(0.0, 0.0)
+        tween(self, key, 400, frame, easing=ease_linear)
+
 
 class SlideStack:
     """把若干页面放进一个 Canvas，用缓动曲线做「推入 / 推出」切换。
@@ -1051,8 +1216,8 @@ class SlideStack:
     这也是这里不直接用 place() 搬页面的原因（Tk 普通容器不裁剪子控件）。
     """
 
-    def __init__(self, parent, bg_color=C_WINDOW_BG, duration_ms=340,
-                 easing=ease_out_quint):
+    def __init__(self, parent, bg_color=C_WINDOW_BG, duration_ms=420,
+                 easing=ease_in_out_cubic):
         self.canvas = Canvas(parent, bg=bg_color, highlightthickness=0, bd=0)
         self.canvas.pack(fill=BOTH, expand=True)
         self.bg_color = bg_color
@@ -1105,10 +1270,12 @@ class SlideStack:
             except Exception:
                 pass
 
-    def show(self, key, animate=True, direction=1):
+    def show(self, key, animate=True, direction=1, axis="x"):
+        """direction: +1 = 新页从右/下方进来（内容往左/上走）；-1 反之。
+        axis: 侧边栏是竖排 → 页面竖着滑；设置页选项卡是横排 → 横着滑。"""
         if key not in self.items or key == self.current:
             return
-        width = float(self._size[0])
+        span = float(self._size[0] if axis == "x" else self._size[1])
         previous = self.current
         new_item = self.items[key]
         try:
@@ -1129,12 +1296,16 @@ class SlideStack:
             return
 
         old_item = self.items[previous]
-        offset = width * (1 if direction >= 0 else -1)
+        offset = span * (1 if direction >= 0 else -1)
 
         def frame(e, raw):
             try:
-                self.canvas.coords(new_item, lerp(offset, 0.0, e), 0)
-                self.canvas.coords(old_item, lerp(0.0, -offset, e), 0)
+                if axis == "x":
+                    self.canvas.coords(new_item, lerp(offset, 0.0, e), 0)
+                    self.canvas.coords(old_item, lerp(0.0, -offset, e), 0)
+                else:
+                    self.canvas.coords(new_item, 0, lerp(offset, 0.0, e))
+                    self.canvas.coords(old_item, 0, lerp(0.0, -offset, e))
             except Exception:
                 pass
 
@@ -2188,13 +2359,30 @@ class AppSettings:
 
 # ==================== 日志系统 ====================
 class LogManager:
+    """日志缓冲 + 显示。
+
+    显示分两档：
+      · 单行模式（默认）：只显示「最近一条非细节日志」，避免回显类噪声刷屏；
+      · 完整日志（日志页「📋 显示完整日志」）：显示全部，含细节/进度条目。
+    细节条目仍然会被记录，只是单行模式下不占用显示位。
+    """
+
+    # 这些层级默认算「细节日志」，只有完整日志模式才显示
+    VERBOSE_LEVELS = ("DEBUG", "PROCESS")
+
     def __init__(self, text_widget, root):
         self.text_widget = text_widget
         self.root = root
-        self.full_log = []
+        self.full_log = []          # [(log_line, level, verbose)]
         self.show_full = False
+        self.widgets = []           # 同一份日志可以同时投到多个文本框
+        self._configure_tags(text_widget)
+        self.widgets.append(text_widget)
+
+    @staticmethod
+    def _configure_tags(widget):
         try:
-            inner = text_widget._textbox
+            inner = widget._textbox
             inner.tag_configure('INFO', foreground=C_TEXT_MAIN)
             inner.tag_configure('WARNING', foreground=C_WARNING)
             inner.tag_configure('ERROR', foreground=C_ERROR)
@@ -2206,10 +2394,22 @@ class LogManager:
         except Exception:
             pass
 
-    def log(self, message: str, level: str = 'INFO'):
+    def attach(self, widget):
+        """把同一份日志同时投到另一个文本框（主界面右下角的日志栏）。"""
+        if widget is None or widget in self.widgets:
+            return widget
+        self._configure_tags(widget)
+        self.widgets.append(widget)
+        self._render(widget)
+        return widget
+
+    def log(self, message: str, level: str = 'INFO', verbose: bool = None):
+        """verbose=None 时按层级判断；显式 True/False 可覆盖。"""
+        if verbose is None:
+            verbose = level in self.VERBOSE_LEVELS
         timestamp = datetime.now().strftime('%H:%M:%S')
         log_line = f"[{timestamp}] [{level}] {message}\n"
-        self.full_log.append((log_line, level))
+        self.full_log.append((log_line, level, bool(verbose)))
         if threading.current_thread() is threading.main_thread():
             self._update_display()
         else:
@@ -2222,38 +2422,47 @@ class LogManager:
         else:
             self.root.after(0, self._update_display)
 
+    def _visible_entries(self):
+        """当前该显示哪些行：完整模式全部，否则只留最近一条非细节日志。"""
+        if self.show_full:
+            return [(line, level) for line, level, _verbose in self.full_log]
+        for log_line, level, verbose in reversed(self.full_log):
+            if not verbose:
+                return [(log_line, level)]
+        return []
+
     def _update_display(self):
+        for widget in list(self.widgets):
+            self._render(widget)
+
+    def _render(self, widget):
         try:
-            self.text_widget.delete("1.0", END)
-            if self.show_full:
-                for log_line, level in self.full_log:
-                    self._insert_log(log_line, level)
-            else:
-                if self.full_log:
-                    log_line, level = self.full_log[-1]
-                    self._insert_log(log_line, level)
-            self.text_widget.see(END)
+            widget.delete("1.0", END)
+            for log_line, level in self._visible_entries():
+                self._insert_log(widget, log_line, level)
+            widget.see(END)
         except Exception:
             pass
 
-    def _insert_log(self, log_line: str, level: str):
+    def _insert_log(self, widget, log_line: str, level: str):
         try:
-            inner = self.text_widget._textbox
+            inner = widget._textbox
             end = log_line.find(']') + 1
             inner.insert(END, log_line[:end], 'timestamp')
             inner.insert(END, log_line[end:], level)
         except Exception:
             try:
-                self.text_widget.insert(END, log_line)
+                widget.insert(END, log_line)
             except Exception:
                 pass
 
     def clear(self):
         self.full_log.clear()
-        try:
-            self.text_widget.delete("1.0", END)
-        except Exception:
-            pass
+        for widget in list(self.widgets):
+            try:
+                widget.delete("1.0", END)
+            except Exception:
+                pass
 
 
 # ==================== 新手引导系统 ====================
@@ -2453,7 +2662,8 @@ class TaczWatcher:
             self.observer.start()
             self._active = True
             if self.log:
-                self.log.log(f"已启动 TACZ 监控: {self.tacz_path}", 'INFO')
+                self.log.log(f"已启动 TACZ 监控: {self.tacz_path}", 'INFO',
+                                  verbose=True)
             return True
         except Exception as e:
             if self.log:
@@ -2478,7 +2688,7 @@ class TaczWatcher:
                 pass
             self.observer = None
         if self._active and self.log:
-            self.log.log("已停止 TACZ 监控", 'INFO')
+            self.log.log("已停止 TACZ 监控", 'INFO', verbose=True)
         self._active = False
 
     def _schedule(self):
@@ -2530,7 +2740,8 @@ class PresetManager:
                 return False
             self.presets = cache_data.get('presets', {})
             self.current_preset = cache_data.get('current_preset')
-            self.log.log(f"从缓存加载预设成功，共 {len(self.presets)} 个预设", 'SUCCESS')
+            self.log.log(f"从缓存加载预设成功，共 {len(self.presets)} 个预设",
+                          'SUCCESS', verbose=True)
             return True
         except Exception as e:
             self.log.log(f"加载缓存失败: {e}", 'WARNING')
@@ -2559,7 +2770,8 @@ class PresetManager:
         for preset_dir in self.database_path.iterdir():
             if preset_dir.is_dir() and not preset_dir.name.startswith('.'):
                 self._load_preset(preset_dir)
-        self.log.log(f"预设加载完成，共 {len(self.presets)} 个预设", 'INFO')
+        self.log.log(f"预设加载完成，共 {len(self.presets)} 个预设", 'INFO',
+                          verbose=True)
         self.save_cache()
 
     def _load_preset(self, preset_path: Path):
@@ -2589,7 +2801,8 @@ class PresetManager:
                 data['gunpacks'] = standard
                 with open(index_file, 'w', encoding='utf-8') as f:
                     json.dump(data, f, indent=2, ensure_ascii=False)
-                self.log.log(f"预设 '{preset_path.name}' 已自动适配为新格式", 'INFO')
+                self.log.log(f"预设 '{preset_path.name}' 已自动适配为新格式", 'INFO',
+                          verbose=True)
 
             version = (data.get('version')
                        or data.get('description')
@@ -2822,7 +3035,8 @@ class PresetManager:
                 moved = self._move_items(self.tacz_path, cur_path, protected_all, progress_callback)
                 cur_info['applied'] = False
                 self._update_preset_status(cur_path, False)
-                self.log.log(f"已回收 {moved} 个枪包到 '{current_applied}'", 'INFO')
+                self.log.log(f"已回收 {moved} 个枪包到 '{current_applied}'", 'INFO',
+                          verbose=True)
             self._clear_dir(self.tacz_path, protected_all)
             moved = self._move_items(target_path, self.tacz_path,
                                      ['description.txt', 'index.json', 'version.txt'],
@@ -2863,10 +3077,12 @@ class PresetManager:
         try:
             if from_tacz and self.tacz_path:
                 gunpacks = self._get_gunpacks_from_folder(self.tacz_path)
-                self.log.log(f"从Tacz读取到 {len(gunpacks)} 个枪包", 'INFO')
+                self.log.log(f"从Tacz读取到 {len(gunpacks)} 个枪包", 'INFO',
+                          verbose=True)
             else:
                 gunpacks = self._get_gunpacks_from_folder(preset_path)
-                self.log.log(f"从预设 '{preset_name}' 读取到 {len(gunpacks)} 个枪包", 'INFO')
+                self.log.log(f"从预设 '{preset_name}' 读取到 {len(gunpacks)} 个枪包",
+                          'INFO', verbose=True)
             index_data = {
                 'name': preset_info['name'],
                 'version': preset_info.get('version', 'v1.0.0'),
@@ -2896,10 +3112,12 @@ class PresetManager:
 
         if was_applied and self.tacz_path and self.tacz_path.exists():
             source_path = self.tacz_path
-            self.log.log(f"预设 '{preset_name}' 已应用，从 TACZ 读取枪包内容", 'INFO')
+            self.log.log(f"预设 '{preset_name}' 已应用，从 TACZ 读取枪包内容",
+                          'INFO', verbose=True)
         else:
             source_path = preset_path
-            self.log.log(f"从预设文件夹读取导出内容: {preset_name}", 'INFO')
+            self.log.log(f"从预设文件夹读取导出内容: {preset_name}", 'INFO',
+                          verbose=True)
 
         try:
             if was_applied and self.tacz_path and self.tacz_path.exists():
@@ -3074,7 +3292,8 @@ class PresetManager:
             self.save_cache()
 
             self.log.log(f"增量更新包导出成功: {export_path.name} (迭代 {increment})", 'SUCCESS')
-            self.log.log(f"校验数据已同步为最新 ({len(new_gunpacks)} 个枪包)", 'SUCCESS')
+            self.log.log(f"校验数据已同步为最新 ({len(new_gunpacks)} 个枪包)",
+                          'SUCCESS', verbose=True)
             if progress_callback:
                 progress_callback(total, total, "完成")
             return True
@@ -3249,14 +3468,15 @@ class PresetManager:
                     show_error("增量更新校验失败", "\n".join(lines))
                     return False
                 else:
-                    self.log.log("✅ 本地枪包与原始状态匹配", 'SUCCESS')
+                    self.log.log("✅ 本地枪包与原始状态匹配", 'SUCCESS', verbose=True)
             else:
                 self.log.log("提示：此增量包未包含原始校验数据，跳过兼容性校验", 'WARNING')
 
             added = changes.get('added', [])
             removed = changes.get('removed', [])
             modified = changes.get('modified', [])
-            self.log.log(f"增量更新: 新增 {len(added)} / 移除 {len(removed)} / 修改 {len(modified)}", 'INFO')
+            self.log.log(f"增量更新: 新增 {len(added)} / 移除 {len(removed)} / "
+                          f"修改 {len(modified)}", 'INFO', verbose=True)
 
             for name in removed:
                 target = self.tacz_path / name
@@ -3345,11 +3565,11 @@ class SettingsPage:
             bg_color=C_CARD_BG, pill_color=C_ACCENT, hover_color=C_ACCENT_SOFT,
             text_color=C_TEXT_SECONDARY, active_text_color=C_TEXT_INVERSE,
             font_size=FS_SMALL, bold_active=True, text_anchor="center",
-            duration_ms=320)
+            duration_ms=380)
         self.tab_bar.pack(fill=BOTH, expand=True, padx=PAD_XS, pady=PAD_XS)
 
         # ===== 选项卡内容：Canvas 承载，切换时整块推入/推出 =====
-        self.stack = SlideStack(self.frame, bg_color=C_WINDOW_BG, duration_ms=320)
+        self.stack = SlideStack(self.frame, bg_color=C_WINDOW_BG, duration_ms=420)
         self.stack.canvas.pack_configure(pady=(PAD_GAP, 0))
 
         self.storage_var = StringVar(value=self.settings.storage_mode)
@@ -3383,7 +3603,8 @@ class SettingsPage:
         self.show_tab("general", animate=False)
 
     def _saved_hint(self):
-        return "改动即时生效 · 自动保存到数据库目录的 .settings.json"
+        # 需求：设置项简洁 —— 常态只留四个字，改动时短暂回显「已自动保存」
+        return "自动保存"
 
     # ==================== 选项卡切换 ====================
     def _on_tab_selected(self, key):
@@ -3397,44 +3618,33 @@ class SettingsPage:
         if previous is not None and previous != key:
             old_index = self.tab_bar.index_of(previous)
             new_index = self.tab_bar.index_of(key)
-            if old_index >= 0 and new_index >= 0 and new_index < old_index:
+            # 同 show_page：点右面的选项卡内容往右走，点左面的往左走
+            if old_index >= 0 and new_index >= 0 and new_index > old_index:
                 direction = -1
         self.tab_bar.select(key, animate=animate, notify=False)
-        self.stack.show(key, animate=animate, direction=direction)
+        self.stack.show(key, animate=animate, direction=direction, axis="x")
 
     # ==================== 选项卡：常规 ====================
     def _build_general(self, tab):
-        make_label(tab, text="数据库存储模式", fg=C_ACCENT,
+        # 需求：设置项要简洁 —— 不留解释性小字，选项本身就是完整说明；
+        # 选中态用带动画的分段控件（滑块逐帧滑动），切换即可见。
+        make_label(tab, text="存储模式", fg=C_ACCENT,
                     font_size=FS_SUBHEAD, bold=True).pack(
                         anchor=W, pady=(PAD_TIGHT, PAD_TIGHT))
         mode_card = ctk.CTkFrame(tab, fg_color=C_CARD_BG, corner_radius=R_CARD,
                                   border_width=BORDER_W, border_color=C_BORDER_SOFT)
         mode_card.pack(fill=X, pady=(0, PAD_DIALOG))
         attach_hover_glow(mode_card)
-
-        ctk.CTkRadioButton(mode_card, text="隔离存储（推荐，每个整合包独立预设）",
-                            variable=self.storage_var, value="isolated",
-                            command=self._on_auto_save,
-                            text_color=C_TEXT_MAIN, font=(FONT_FAMILY, FS_SMALL),
-                            fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
-                            border_color=C_BORDER).pack(
-                                anchor=W, padx=PAD_CARD_X,
-                                pady=(PAD_CARD_Y, PAD_MICRO))
-        make_label(mode_card, text="  数据库保存在各整合包目录下，避免文件重名",
-                    fg=C_TEXT_MUTED, font_size=FS_TINY).pack(
-                        anchor=W, padx=PAD_INDENT, pady=(0, PAD_TIGHT))
-        ctk.CTkRadioButton(mode_card, text="合并存储（所有整合包共用预设）",
-                            variable=self.storage_var, value="merged",
-                            command=self._on_auto_save,
-                            text_color=C_TEXT_MAIN, font=(FONT_FAMILY, FS_SMALL),
-                            fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
-                            border_color=C_BORDER).pack(
-                                anchor=W, padx=PAD_CARD_X,
-                                pady=(PAD_TIGHT, PAD_MICRO))
-        make_label(mode_card, text="  数据库保存在指定位置，所有整合包共享预设列表\n"
-                                    "  ⚠ 不同整合包的同名枪包可能互相覆盖",
-                    fg=C_TEXT_MUTED, font_size=FS_TINY, justify=LEFT).pack(
-                        anchor=W, padx=PAD_INDENT, pady=(0, PAD_CARD_Y))
+        self.mode_seg = CanvasSegmented(
+            mode_card, [("isolated", "隔离存储"), ("merged", "合并存储")],
+            command=self._on_mode_selected, orientation="vertical",
+            item_height=H_NAV, pad=6, gap=PAD_XS, radius=R_CONTROL,
+            bg_color=C_CARD_BG, pill_color=C_ACCENT_SOFT,
+            hover_color=C_ACCENT_SOFT, text_color=C_TEXT_MAIN,
+            active_text_color=C_ACCENT, font_size=FS_BODY, bold_active=True,
+            text_anchor="w", text_pad=16, duration_ms=380,
+            height=2 * (H_NAV + PAD_XS) + 12)
+        self.mode_seg.pack(fill=X, padx=PAD_TIGHT, pady=PAD_TIGHT)
 
         make_label(tab, text="用户身份", fg=C_ACCENT,
                     font_size=FS_SUBHEAD, bold=True).pack(
@@ -3443,29 +3653,24 @@ class SettingsPage:
                                   border_width=BORDER_W, border_color=C_BORDER_SOFT)
         role_card.pack(fill=X, pady=(0, PAD_DIALOG))
         attach_hover_glow(role_card)
+        self.role_seg = CanvasSegmented(
+            role_card, [("player", "玩家"), ("developer", "开发者")],
+            command=self._on_role_selected, orientation="vertical",
+            item_height=H_NAV, pad=6, gap=PAD_XS, radius=R_CONTROL,
+            bg_color=C_CARD_BG, pill_color=C_ACCENT_SOFT,
+            hover_color=C_ACCENT_SOFT, text_color=C_TEXT_MAIN,
+            active_text_color=C_ACCENT, font_size=FS_BODY, bold_active=True,
+            text_anchor="w", text_pad=16, duration_ms=380,
+            height=2 * (H_NAV + PAD_XS) + 12)
+        self.role_seg.pack(fill=X, padx=PAD_TIGHT, pady=PAD_TIGHT)
 
-        ctk.CTkRadioButton(role_card, text="玩家（默认）",
-                            variable=self.role_var, value="player",
-                            command=self._on_auto_save,
-                            text_color=C_TEXT_MAIN, font=(FONT_FAMILY, FS_SMALL),
-                            fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
-                            border_color=C_BORDER).pack(
-                                anchor=W, padx=PAD_CARD_X,
-                                pady=(PAD_CARD_Y, PAD_MICRO))
-        make_label(role_card, text="  检测到变更时提示检查枪包",
-                    fg=C_TEXT_MUTED, font_size=FS_TINY).pack(
-                        anchor=W, padx=PAD_INDENT, pady=(0, PAD_TIGHT))
-        ctk.CTkRadioButton(role_card, text="开发者",
-                            variable=self.role_var, value="developer",
-                            command=self._on_auto_save,
-                            text_color=C_TEXT_MAIN, font=(FONT_FAMILY, FS_SMALL),
-                            fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
-                            border_color=C_BORDER).pack(
-                                anchor=W, padx=PAD_CARD_X,
-                                pady=(PAD_TIGHT, PAD_MICRO))
-        make_label(role_card, text="  检测到变更时提示导出增量更新",
-                    fg=C_TEXT_MUTED, font_size=FS_TINY).pack(
-                        anchor=W, padx=PAD_INDENT, pady=(0, PAD_CARD_Y))
+    def _on_mode_selected(self, key):
+        self.storage_var.set(key)
+        self._on_auto_save()
+
+    def _on_role_selected(self, key):
+        self.role_var.set(key)
+        self._on_auto_save()
 
     # ==================== 选项卡：数据库 ====================
     def _build_database(self, tab):
@@ -3503,10 +3708,8 @@ class SettingsPage:
         make_button(btn_row2, "⚠ 强制更新校验数据",
                      command=self.app.force_update_validation).pack(
             side=LEFT, padx=PAD_TIGHT)
-        make_label(db_mgr_card,
-            text="提示：右键预设可迁移到其他整合包/数据库。",
-            fg=C_TEXT_MUTED, font_size=FS_TINY).pack(
-                anchor=W, padx=PAD_CARD_X, pady=(0, PAD_CARD_Y))
+        make_label(db_mgr_card, text="", font_size=FS_TINY).pack(
+                anchor=W, padx=PAD_CARD_X, pady=(0, PAD_TIGHT))
 
     # ==================== 选项卡：关于 ====================
     def _build_about(self, tab):
@@ -3549,6 +3752,12 @@ class SettingsPage:
         try:
             self.storage_var.set(self.settings.storage_mode)
             self.role_var.set(self.settings.role)
+            for seg, key in ((getattr(self, "mode_seg", None),
+                              self.settings.storage_mode),
+                             (getattr(self, "role_seg", None),
+                              self.settings.role)):
+                if seg is not None and seg.current() != key:
+                    seg.select(key, animate=False)
         except Exception:
             pass
         self._update_db_labels()
@@ -3809,15 +4018,21 @@ class PulsesSwapApp:
         self.db_ready = True
         self.update_recent_list()
         self.log_manager.log(f"{PROJECT_NAME} v{VERSION} 启动成功，作者: {AUTHOR}", 'SUCCESS')
-        self.log_manager.log(f"数据库位置: {db_path}", 'INFO')
-        self.log_manager.log(f"存储模式: {'合并' if self.settings.storage_mode == 'merged' else '隔离'}", 'INFO')
-        self.log_manager.log(f"用户身份: {'玩家' if self.settings.role == 'player' else '开发者'}", 'INFO')
+        self.log_manager.log(f"数据库位置: {db_path}", 'INFO', verbose=True)
+        self.log_manager.log(
+            f"存储模式: {'合并' if self.settings.storage_mode == 'merged' else '隔离'}",
+            'INFO', verbose=True)
+        self.log_manager.log(
+            f"用户身份: {'玩家' if self.settings.role == 'player' else '开发者'}",
+            'INFO', verbose=True)
         if HAS_WATCHDOG:
-            self.log_manager.log("watchdog 已就绪，可实时监控 TACZ 文件变化", 'INFO')
+            self.log_manager.log("watchdog 已就绪，可实时监控 TACZ 文件变化",
+                                 'INFO', verbose=True)
         else:
             self.log_manager.log("watchdog 未安装，文件变更需手动刷新 (pip install watchdog)", 'WARNING')
         if IS_WINDOWS:
-            self.log_manager.log("已启用 Windows 原生回收站删除", 'INFO')
+            self.log_manager.log("已启用 Windows 原生回收站删除", 'INFO',
+                                 verbose=True)
         self.log_manager.log("Step 1 · 拖入整合包根目录（或整合包内任意文件）", 'GUIDE')
         self._update_guide()
 
@@ -3840,7 +4055,9 @@ class PulsesSwapApp:
         sidebar = ctk.CTkFrame(main_frame, fg_color=C_CARD_BG, corner_radius=R_CARD,
                                 border_width=BORDER_W, border_color=C_BORDER_SOFT,
                                 width=SIDEBAR_W)
-        sidebar.grid(row=0, column=0, sticky="nsw", padx=(0, PAD_GAP))
+        # 注意 sticky 必须带 e：只写 "nsw" 时 Tk 只把控件贴西边、不横向拉伸，
+        # 侧边栏会被压到内容的自然宽度（124px），看起来又窄又挤。
+        sidebar.grid(row=0, column=0, sticky="nsew", padx=(0, PAD_GAP))
         sidebar.grid_propagate(False)
         self.sidebar = sidebar
 
@@ -3851,10 +4068,11 @@ class PulsesSwapApp:
                     font_size=FS_TINY).pack(anchor=W, padx=PAD_CARD_X,
                                             pady=(PAD_MICRO, PAD_GAP))
 
-        # 导航项用 Canvas 自绘：选中滑块可以逐帧滑到目标项（见 CanvasSegmented）
-        nav_items = (("home", "🏠   主界面"),
-                     ("settings", "⚙   设置"),
-                     ("log", "📋   日志"))
+        # 导航项用 Canvas 自绘：选中滑块可以逐帧滑到目标项，图标各自带动效
+        # （主界面=轻跳、设置=齿轮转 45°、日志=轻摆，见 CanvasSegmented）
+        nav_items = (("home", "🏠", "主界面", "hop"),
+                     ("settings", "⚙", "设置", "rotate"),
+                     ("log", "📋", "日志", "wobble"))
         nav_height = len(nav_items) * (H_NAV + PAD_XS) + 2 * PAD_XS
         self.nav = CanvasSegmented(
             sidebar, nav_items, command=self.show_page,
@@ -3862,7 +4080,8 @@ class PulsesSwapApp:
             radius=R_CONTROL, bg_color=C_CARD_BG, pill_color=C_ACCENT_SOFT,
             hover_color=C_ACCENT_SOFT, text_color=C_TEXT_MAIN,
             active_text_color=C_ACCENT, font_size=FS_BODY, bold_active=True,
-            text_anchor="w", text_pad=14, duration_ms=340, height=nav_height)
+            text_anchor="w", text_pad=14, icon_pad=11, icon_half=9,
+            icon_gap=8, icon_angle=45.0, duration_ms=380, height=nav_height)
         self.nav.pack(fill=X, padx=PAD_XS)
 
         # ===== 右侧内容列：页面区 + 全局状态条（进度条） =====
@@ -3876,7 +4095,7 @@ class PulsesSwapApp:
         self.page_host.grid(row=0, column=0, sticky="nsew")
         # 页面放在 Canvas 里：Canvas 会裁剪子窗口，推入/推出的过程不会溢到侧边栏
         self.stack = SlideStack(self.page_host, bg_color=C_WINDOW_BG,
-                                 duration_ms=340)
+                                 duration_ms=420)
         self.page_canvas = self.stack.canvas
 
         # 进度条移到全局状态条：原来在右栏里，show_progress/hide_progress 的
@@ -3900,6 +4119,9 @@ class PulsesSwapApp:
         self.pages = {}
         self.pages["home"] = self._build_home_page()
         self.pages["log"] = self._build_log_page()
+        # 主界面右下角的日志栏与「日志」页共用同一份日志流
+        if getattr(self, "home_log_text", None) is not None:
+            self.log_manager.attach(self.home_log_text)
         self.settings_page = SettingsPage(
             self.stack.canvas, self,
             on_save_callback=self._on_settings_saved,
@@ -3943,7 +4165,13 @@ class PulsesSwapApp:
     PAGE_ORDER = ("home", "settings", "log")
 
     def show_page(self, name, animate=True):
-        """切换右侧页面：整页在 Canvas 里推入/推出，侧边栏滑块同步滑动。"""
+        """切换右侧页面：整页在 Canvas 里推入/推出，侧边栏滑块同步滑动。
+
+        方向按需求走「点哪边内容就往哪边走」：
+          点下面/右面的选项 → 内容往下/右走（新页从下/右方进来）
+          点上面/左面的选项 → 内容往上/左走（新页从上/左方进来）
+        侧边栏是竖排，所以页面竖着滑（axis="y"）。
+        """
         if name not in self.pages or name == self.active_page:
             return
         cancel_tween(self.stack.canvas, "entrance")
@@ -3952,13 +4180,13 @@ class PulsesSwapApp:
         if previous is not None:
             try:
                 if (self.PAGE_ORDER.index(name)
-                        < self.PAGE_ORDER.index(previous)):
+                        > self.PAGE_ORDER.index(previous)):
                     direction = -1
             except ValueError:
                 direction = 1
         self.active_page = name
         self._update_nav_state(name, animate=animate)
-        self.stack.show(name, animate=animate, direction=direction)
+        self.stack.show(name, animate=animate, direction=direction, axis="y")
         if name == "settings" and self.settings_page is not None:
             self.settings_page.reload()
 
@@ -4256,6 +4484,29 @@ class PulsesSwapApp:
                                       state="disabled", accent=True)
         self.apply_btn.grid(row=1, column=0, sticky="ew")
 
+        # ===== 分割线 + 日志栏 =====
+        # 需求：分割线上面是「一键替换 + 工具条按钮 + 枪包列表」，下面放日志
+        divider = ctk.CTkFrame(right_panel, fg_color=C_BORDER_SOFT, height=1)
+        divider.grid(row=2, column=0, sticky="ew", pady=(PAD_GAP, PAD_GAP))
+
+        home_log_group = ctk.CTkFrame(right_panel, fg_color=C_CARD_BG,
+                                       corner_radius=R_CARD, border_width=BORDER_W,
+                                       border_color=C_BORDER_SOFT)
+        home_log_group.grid(row=3, column=0, sticky="ew")
+        attach_hover_glow(home_log_group)
+        log_head = ctk.CTkFrame(home_log_group, fg_color="transparent")
+        log_head.pack(fill=X, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
+        make_label(log_head, text="日志", fg=C_TEXT_MUTED,
+                    font_size=FS_TINY).pack(side=LEFT)
+        make_button(log_head, "清空", command=self.clear_log,
+                     width=48).pack(side=RIGHT)
+        self.home_log_text = ctk.CTkTextbox(
+            home_log_group, height=H_HOME_LOG, fg_color=C_INPUT_BG,
+            border_color=C_BORDER_SOFT, border_width=BORDER_W,
+            corner_radius=R_CONTROL, text_color=C_TEXT_MAIN,
+            font=(FONT_FAMILY_MONO, FS_SMALL), wrap="word")
+        self.home_log_text.pack(fill=X, padx=PAD_CARD_X, pady=(0, PAD_CARD_Y))
+
         return page
 
     # ==================== 日志页 ====================
@@ -4382,7 +4633,8 @@ class PulsesSwapApp:
         try:
             if self.current_pack_path.exists():
                 os.startfile(str(self.current_pack_path))
-                self.log_manager.log(f"已打开整合包路径: {self.current_pack_path}", 'INFO')
+                self.log_manager.log(f"已打开整合包路径: {self.current_pack_path}",
+                                      'INFO', verbose=True)
             else:
                 show_error("错误", f"路径不存在: {self.current_pack_path}")
         except Exception as e:
@@ -4398,7 +4650,8 @@ class PulsesSwapApp:
             return
         try:
             os.startfile(str(self.tacz_path))
-            self.log_manager.log(f"已打开 TACZ 文件夹: {self.tacz_path}", 'INFO')
+            self.log_manager.log(f"已打开 TACZ 文件夹: {self.tacz_path}", 'INFO',
+                                      verbose=True)
         except Exception as e:
             self.log_manager.log(f"打开 TACZ 文件夹失败: {e}", 'ERROR')
             show_error("错误", f"打开失败: {e}")
@@ -4413,9 +4666,10 @@ class PulsesSwapApp:
 
     def _on_settings_saved(self):
         """自动保存回调：只写日志 + 右上角浮一条提示，不再弹模态框打断操作。"""
+        # 「已切换到 xx 存储」这类回显属于细节：只在完整日志模式下保留
         self.log_manager.log(
             f"设置已保存: 存储模式={self.settings.storage_mode}, 身份={self.settings.role}",
-            'SUCCESS')
+            'SUCCESS', verbose=True)
         self.toast("设置已自动保存", "success")
 
     def _on_db_action(self, action: str):
@@ -5039,6 +5293,12 @@ class PulsesSwapApp:
         self._stop_loading_dots()
         self._disable_buttons(False)
         self._update_preset_list()
+        # 单行日志模式下这条就是「加载完成」的主信息（细节条目见完整日志）
+        pack_name = (self.current_pack_path.name
+                     if self.current_pack_path else "整合包")
+        self.log_manager.log(
+            f"整合包已就绪: {pack_name} · 预设 {len(self.preset_manager.presets)} 个",
+            'SUCCESS')
         if self.preset_manager.current_preset:
             self._check_applied_changes(self.preset_manager.current_preset)
         if self.preset_manager.presets:
@@ -5151,7 +5411,7 @@ class PulsesSwapApp:
         self.open_pack_btn.configure(state="disabled")
         self.open_tacz_btn.configure(state="disabled")
         self._disable_buttons(True)
-        self.log_manager.log("已关闭整合包", 'INFO')
+        self.log_manager.log("已关闭整合包", 'INFO', verbose=True)
         self._update_guide()
 
     # ==================== TACZ 监控 ====================
@@ -5234,7 +5494,7 @@ class PulsesSwapApp:
         self._stop_loading_dots()
         self._disable_buttons(False)
         self._update_preset_list()
-        self.log_manager.log("预设列表刷新完成", 'INFO')
+        self.log_manager.log("预设列表刷新完成", 'INFO', verbose=True)
         self._update_guide()
 
     def on_preset_selected(self, event):
@@ -5267,7 +5527,7 @@ class PulsesSwapApp:
             self.export_incremental_btn.configure(state="disabled")
         self.export_preset_btn.configure(state="normal")
         self.refresh_gunpacks(use_cache=False)
-        self.log_manager.log(f"选择预设: {name}", 'INFO')
+        self.log_manager.log(f"选择预设: {name}", 'INFO', verbose=True)
         self._update_guide()
 
     def show_preset_context_menu(self, event):
