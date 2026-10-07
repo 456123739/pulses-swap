@@ -33,7 +33,10 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 from tkinter import *
-from tkinter import filedialog, messagebox
+# 故意不导入 tkinter.messagebox：它是 Tk 原生模态对话框，必然新开系统窗口。
+# 本文件所有提示/确认都走主窗口内的覆盖层（见 show_message），下方另有同名
+# 兼容垫片 messagebox，保证漏改的调用点也不会退回系统新窗口。
+from tkinter import filedialog
 
 import customtkinter as ctk
 
@@ -59,15 +62,107 @@ VERSION = "2.1"
 AUTHOR = "NimShade"
 PROJECT_NAME = "Pulses Swap"
 
+IS_WINDOWS = sys.platform.startswith('win')
+
 if getattr(sys, 'frozen', False):
     PROGRAM_DIR = Path(sys.executable).parent
 else:
     PROGRAM_DIR = Path(__file__).parent
 
-BOOTSTRAP_FILE = PROGRAM_DIR / "PulsesSwap_config.json"
-DEFAULT_DB_DIR = PROGRAM_DIR / "PulsesSwap_database"
+CONFIG_FILENAME = "PulsesSwap_config.json"
+DATABASE_DIRNAME = "PulsesSwap_database"
+APP_DIRNAME = "PulsesSwap"
 
-IS_WINDOWS = sys.platform.startswith('win')
+
+def safe_print(*args, **kwargs) -> None:
+    """windowed 打包（console=False）时 sys.stdout 为 None，直接 print 会抛
+    AttributeError 并把异常处理路径本身弄崩，这里统一兜底。"""
+    try:
+        print(*args, **kwargs)
+    except Exception:
+        pass
+
+
+def is_dir_writable(directory: Path) -> bool:
+    """真实写测试：建目录 → 写临时文件 → 删掉。
+
+    不用 os.access()：在 Windows 上它只看只读属性位，
+    对 C:\\Program Files 这类 ACL 拒绝的目录会误报为可写。
+    """
+    probe = None
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        probe = directory / f".pulses_write_test_{os.getpid()}_{time.time_ns()}"
+        with open(probe, 'w', encoding='utf-8') as f:
+            f.write('ok')
+        return True
+    except Exception:
+        return False
+    finally:
+        if probe is not None:
+            try:
+                probe.unlink()
+            except Exception:
+                pass
+
+
+def get_user_data_dir() -> Path:
+    """跨平台用户数据目录：Windows 用 %LOCALAPPDATA%\\PulsesSwap，
+    其他平台用 $XDG_DATA_HOME/PulsesSwap 或 ~/.local/share/PulsesSwap。"""
+    if IS_WINDOWS:
+        base = os.environ.get('LOCALAPPDATA') or os.environ.get('APPDATA')
+        if base:
+            return Path(base) / APP_DIRNAME
+        return Path.home() / 'AppData' / 'Local' / APP_DIRNAME
+    xdg = os.environ.get('XDG_DATA_HOME')
+    if xdg:
+        return Path(xdg) / APP_DIRNAME
+    return Path.home() / '.local' / 'share' / APP_DIRNAME
+
+
+def resolve_data_base_dir() -> tuple[Path, bool]:
+    """解析数据根目录。返回 (根目录, 是否处于便携模式)。
+
+    优先级：
+      1. 程序目录可写 → 直接用程序目录（绿色/便携模式，行为与旧版完全一致）
+      2. 程序目录不可写，但数据库确实就在程序目录下
+         → 仍然用程序目录（不改变已有用户的数据位置）
+      3. 否则 → 用户数据目录（安装到 C:\\Program Files 时的正常路径）。
+         即使回退，旧版写在程序目录的 PulsesSwap_config.json 仍会被
+         load_db_path() 读到，老用户记下的数据库位置不会丢。
+    """
+    if is_dir_writable(PROGRAM_DIR):
+        return PROGRAM_DIR, True
+    if (PROGRAM_DIR / DATABASE_DIRNAME).exists():
+        return PROGRAM_DIR, True
+    return get_user_data_dir(), False
+
+
+DATA_BASE_DIR, IS_PORTABLE_MODE = resolve_data_base_dir()
+
+# v2.1 及以前固定把配置写在程序目录，读取时仍需兼容旧文件
+LEGACY_BOOTSTRAP_FILE = PROGRAM_DIR / CONFIG_FILENAME
+
+BOOTSTRAP_FILE = DATA_BASE_DIR / CONFIG_FILENAME
+DEFAULT_DB_DIR = DATA_BASE_DIR / DATABASE_DIRNAME
+
+
+def resource_path(filename: str) -> Path:
+    """解析随程序分发的资源文件路径（源码运行 / PyInstaller frozen 都适用）。"""
+    candidates = []
+    meipass = getattr(sys, '_MEIPASS', None)
+    if meipass:
+        candidates.append(Path(meipass) / filename)
+    here = Path(__file__).resolve().parent
+    candidates.append(here / filename)                       # 与源码同级
+    candidates.append(here.parent / 'packaging' / filename)  # 仓库内 packaging/
+    for c in candidates:
+        try:
+            if c.exists():
+                return c
+        except Exception:
+            continue
+    return candidates[0]
 
 LEGACY_DB_DIRNAME = "FGC_database"
 LEGACY_CACHE_FILE = ".cache.json"
@@ -223,16 +318,29 @@ PAD_INNER   = 8    # 控件内部文字与边框的距离
 PAD_INDENT  = 32   # 单选项说明文字的缩进（与指示器对齐，原 32）
 PAD_WINDOW  = 8    # 主窗口内容与窗口边框的距离
 
-LEFT_COL_W = 340   # 主窗口左栏宽度（与宣传片布局一致）
+LEFT_COL_W = 340   # 主界面「Step 1/2/3」列宽度（与宣传片布局一致）
+SIDEBAR_W  = 172   # 侧边导航栏宽度（原顶栏/菜单入口改为侧边栏页面）
+H_NAV      = 38    # 侧边栏导航项高度
 
-WINDOW_W, WINDOW_H = 1150, 760             # 主窗口（与宣传片一致）
-WINDOW_MIN_W, WINDOW_MIN_H = 1000, 700     # 主窗口最小尺寸
+WINDOW_W, WINDOW_H = 1280, 840             # 主窗口（原 1150x760 偏小）
+WINDOW_MIN_W, WINDOW_MIN_H = 1140, 800     # 主窗口最小尺寸（纵向预算见 H_STEP_*_MIN）
 
-# 固定尺寸对话框 (宽, 高)：字号放大后需同步留足按钮行宽度
-DLG_LOCATOR  = (680, 520)   # 数据库定位（含 4 个长文本按钮，原 580x500）
-DLG_SETTINGS = (560, 800)   # 设置（可滚动，原 540x780）
-DLG_CHOICE   = (540, 380)   # 迁移后处理 / 身份提示 / 冲突处理（原 480~520x320~340）
-DLG_SMALL    = (520, 340)   # 迁移预设（原 480x300）
+# 主界面左列纵向预算（px）。逐项按 FS_*/H_*/PAD_* 令牌累加：
+#   Step1 整合包 ≈ 215 = 标题(12+6+17) + 拖入框 126 + 间隔 6 + 状态两行 36 + 内边距 12
+#   Step2 预设   ≈ 275 = 标题 35 + 列表 ≥110 + 导入框 76 + 间隔 10 + 按钮行 32 + 内边距 12
+#   Step3 详情   ≈ 138 = 标题 35 + 三行信息 51 + 版本行(8+32) + 内边距 12
+#   合计 628 + 两个 PAD_GAP(10) = 648
+# 最小窗口内容高度 = 800 - 菜单栏 ~20 - 上下 PAD_WINDOW 16 = 764 ≥ 648，
+# 余量 116px 通过 grid 行权重全部给 Step2 的预设列表（它会先被压缩），
+# 因此 Step1/Step3 在任何允许的窗口尺寸下都不会被裁切。
+H_STEP1_MIN = 215
+H_STEP2_MIN = 275
+H_STEP3_MIN = 138
+
+# 覆盖层卡片 (宽, 高)：改为主窗口内覆盖层后高度由内容自适应，这里只取宽度
+DLG_LOCATOR  = (680, 520)   # 数据库定位（含 4 个长文本按钮）
+DLG_CHOICE   = (540, 380)   # 迁移后处理 / 身份提示 / 冲突处理
+DLG_SMALL    = (520, 340)   # 迁移预设
 
 
 def resolve_font_family(stack, fallback):
@@ -411,29 +519,413 @@ def make_label(parent, text="", fg=None, bg=None, font_size=FS_BODY, bold=False)
     return ctk.CTkLabel(parent, **kwargs)
 
 
+# ==================== 窗口内覆盖层对话框 ====================
+# 需求：所有提示/确认都出现在主程序窗口内部，不开新的系统窗口。
+# tkinter.messagebox 是 Tk 原生模态对话框（必然新开窗口），所以这里自绘：
+#   · 遮罩 + 居中卡片用 place() 铺在主窗口内容区（含侧边栏）之上；
+#   · 全部用 relx/rely/relwidth/relheight 相对定位，窗口 resize 时由 Tk 自动跟随，
+#     因此不需要任何 <Configure> 绑定，也就不会在拖拽窗口时触发重排；
+#   · 模态阻塞用 root.wait_variable() 的嵌套事件循环，不创建任何窗口，无需 grab_set；
+#   · 模态性：遮罩吃掉鼠标事件、focus_set 把键盘焦点收进卡片、Tab 只在卡片内循环、
+#     ESC 关闭（等价于「取消/否」）、点遮罩本身不关闭；
+#   · Tk 控件不支持逐控件 alpha，遮罩用纯色 C_PANEL_ALT_BG 近似半透明。
+
+_OVERLAY_HOST = None      # 由 PulsesSwapApp.setup_ui() 注册的宿主（见 set_overlay_host）
+_OVERLAY_WIDTH = {"info": 460, "warning": 480, "error": 560, "question": 480}
+_DEFAULT_BUTTONS = {
+    "info":     [("确定", True, True)],
+    "warning":  [("确定", True, True)],
+    "error":    [("确定", True, True)],
+    "question": [("是", True, True), ("否", False, False)],
+}
+
+
+def set_overlay_host(host):
+    """注册覆盖层宿主（PulsesSwapApp 实例）；必须晚于主窗口骨架创建。"""
+    global _OVERLAY_HOST
+    _OVERLAY_HOST = host
+
+
+def get_overlay_host():
+    return _OVERLAY_HOST
+
+
+def _run_modal(build_and_wait):
+    """
+    把「建卡片 + 嵌套等待」整体切到主线程执行。
+    导入/导出等 worker 线程里也会弹确认框，而 Tk 调用不是线程安全的，
+    所以这里统一用 root.after 回主线程，再用 Event 把结果带回业务线程。
+    """
+    if threading.current_thread() is threading.main_thread():
+        return build_and_wait()
+    host = _OVERLAY_HOST
+    if host is None:
+        # 宿主未注册（主窗口骨架还没建好）时没有可用的 after 通道，只能就地构建
+        return build_and_wait()
+    box, done = {}, threading.Event()
+
+    def _call():
+        try:
+            box['value'] = build_and_wait()
+        except Exception as exc:            # pragma: no cover - 纯防御
+            box['error'] = exc
+        finally:
+            done.set()
+
+    try:
+        host.root.after(0, _call)
+    except Exception:
+        return None
+    done.wait()
+    if 'error' in box:
+        raise box['error']
+    return box.get('value')
+
+
+class _OverlayCardBase:
+    """
+    覆盖层卡片的内容构建 + 关闭/等待语义。
+    容器（窗口内遮罩 / 启动兜底的 Toplevel）由子类提供，内容代码完全复用。
+    """
+
+    def __init__(self, width=480, escape_value=None):
+        self.width = width
+        self.escape_value = escape_value
+        self.result = escape_value
+        self.focusables = []
+        self._closed = False
+        self.root = None
+        self.body = None
+
+    # ---------- 生命周期（容器部分由子类实现） ----------
+    def _teardown(self):
+        raise NotImplementedError
+
+    def _release(self):
+        """子类用于唤醒阻塞中的 wait()。"""
+        return None
+
+    def wait(self):
+        raise NotImplementedError
+
+    def close(self, value=None):
+        if self._closed:
+            return
+        self._closed = True
+        self.result = value
+        try:
+            self._teardown()
+        except Exception:
+            pass
+        try:
+            self._release()
+        except Exception:
+            pass
+
+    # ---------- 键盘模态 ----------
+    def _on_escape(self, event=None):
+        self.close(self.escape_value)
+        return "break"
+
+    def _on_return(self, value):
+        self.close(value)
+        return "break"
+
+    def _on_tab(self, event=None):
+        return self._cycle_focus(1)
+
+    def _on_tab_back(self, event=None):
+        return self._cycle_focus(-1)
+
+    def _cycle_focus(self, step):
+        """Tab 只在卡片内循环，避免焦点跑到遮罩下面的主界面控件上。"""
+        ring = [w for w in self.focusables if w is not None]
+        if not ring:
+            return "break"
+        try:
+            index = ring.index(self.root.focus_get())
+        except Exception:
+            index = -1 if step > 0 else 0
+        try:
+            ring[(index + step) % len(ring)].focus_set()
+        except Exception:
+            pass
+        return "break"
+
+    def register_focusable(self, widget):
+        self.focusables.append(widget)
+        return widget
+
+    def _key_widgets(self):
+        return []
+
+    # ---------- 内容构建 ----------
+    def add_title(self, text, fg=None):
+        label = make_label(self.body, text=text,
+                            fg=C_ACCENT if fg is None else fg,
+                            font_size=FS_SUBHEAD, bold=True)
+        label.pack(anchor=W, pady=(0, PAD_TIGHT))
+        return label
+
+    def add_text(self, text, fg=None, font_size=FS_BODY, wrap_extra=6):
+        label = make_label(self.body, text=text,
+                            fg=C_TEXT_MAIN if fg is None else fg,
+                            font_size=font_size)
+        label.configure(
+            wraplength=max(200, self.width - 2 * PAD_DIALOG - wrap_extra),
+            justify=LEFT, anchor=W)
+        label.pack(anchor=W, fill=X, pady=(0, PAD_INNER))
+        return label
+
+    def add_buttons(self, buttons, default=None):
+        """buttons: [(文字, 返回值, 是否强调色)]；default 为回车触发的返回值。"""
+        default_value = buttons[0][1] if default is None else default
+        bar = ctk.CTkFrame(self.body, fg_color="transparent")
+        bar.pack(fill=X, side=BOTTOM, pady=(PAD_DIALOG, 0))
+        for text, value, accent in reversed(buttons):
+            btn = make_button(bar, text,
+                               command=lambda v=value: self.close(v),
+                               accent=accent)
+            btn.pack(side=RIGHT, padx=(PAD_TIGHT, 0))
+            self.register_focusable(btn)
+            try:
+                btn.bind("<Return>", lambda e, v=value: self._on_return(v))
+            except Exception:
+                pass
+        for widget in self._key_widgets():
+            try:
+                widget.bind("<Return>",
+                             lambda e, v=default_value: self._on_return(v))
+            except Exception:
+                pass
+        return bar
+
+
+class OverlayCard(_OverlayCardBase):
+    """窗口内覆盖层：遮罩 + 居中卡片，全部相对定位，窗口 resize 时自动跟随。"""
+
+    def __init__(self, host, width=480, escape_value=None):
+        super().__init__(width=width, escape_value=escape_value)
+        self.host = host
+        self.root = host.root
+        self._esc_funcid = None
+        self._var = IntVar(master=self.root)
+
+        self.mask = ctk.CTkFrame(host.overlay_host, fg_color=C_PANEL_ALT_BG,
+                                  corner_radius=0)
+        self.mask.place(relx=0.0, rely=0.0, relwidth=1.0, relheight=1.0)
+        self.mask.lift()
+        # height=1 让卡片高度完全由内容决定（CTkFrame 默认 200x200 会撑出空白）
+        self.card = ctk.CTkFrame(self.mask, fg_color=C_PANEL_BG,
+                                  corner_radius=R_CARD, border_width=BORDER_W,
+                                  border_color=C_BORDER_SOFT,
+                                  width=width, height=1)
+        self.card.place(relx=0.5, rely=0.5, anchor="center")
+        self.body = ctk.CTkFrame(self.card, fg_color="transparent")
+        self.body.pack(fill=BOTH, expand=True, padx=PAD_DIALOG, pady=PAD_DIALOG)
+
+        try:
+            # ESC 走 root 级绑定（子控件拿到焦点后仍然有效），关闭时按 funcid 解绑
+            self._esc_funcid = self.root.bind("<Escape>", self._on_escape, add="+")
+            for widget in self._key_widgets():
+                widget.bind("<Escape>", self._on_escape)
+                widget.bind("<Tab>", self._on_tab)
+                widget.bind("<Shift-Tab>", self._on_tab_back)
+            self.mask.focus_set()
+        except Exception:
+            pass
+
+    def _key_widgets(self):
+        return [self.mask, self.card, self.body]
+
+    def _teardown(self):
+        try:
+            if self._esc_funcid is not None:
+                self.root.unbind("<Escape>", self._esc_funcid)
+        except Exception:
+            pass
+        try:
+            self.mask.destroy()
+        except Exception:
+            pass
+
+    def _release(self):
+        self._var.set(1)          # 唤醒 wait_variable 的嵌套事件循环
+
+    def wait(self):
+        self.root.wait_variable(self._var)
+        return self.result
+
+
+class ToplevelCard(_OverlayCardBase):
+    """
+    兜底容器：宿主尚未注册（主窗口骨架还没建好）时才会用到，退化成一个 Toplevel。
+    内容代码与窗口内覆盖层完全共用，保证极端情况下提示不会静默丢失。
+    """
+
+    def __init__(self, parent, width=520, height=560, escape_value=None,
+                 title=PROJECT_NAME):
+        super().__init__(width=width, escape_value=escape_value)
+        self.root = parent
+        self.window = ctk.CTkToplevel(parent)
+        self.window.title(title)
+        self.window.geometry(f"{width}x{height}")
+        self.window.configure(fg_color=C_WINDOW_BG)
+        self.body = ctk.CTkFrame(self.window, fg_color="transparent")
+        self.body.pack(fill=BOTH, expand=True, padx=PAD_DIALOG, pady=PAD_DIALOG)
+        try:
+            self.window.transient(parent)
+        except Exception:
+            pass
+        try:
+            self.window.grab_set()
+            self.window.protocol("WM_DELETE_WINDOW",
+                                  lambda: self.close(escape_value))
+            self.window.bind("<Escape>", self._on_escape)
+        except Exception:
+            pass
+
+    def _key_widgets(self):
+        return [self.window, self.body]
+
+    def _teardown(self):
+        try:
+            self.window.destroy()
+        except Exception:
+            pass
+
+    def wait(self):
+        self.window.wait_window()
+        return self.result
+
+
+def make_card(host, parent, width=520, escape_value=None, title=PROJECT_NAME):
+    """有宿主就用窗口内覆盖层；没有宿主（启动极早期）才退化成 Toplevel。"""
+    if host is not None:
+        return OverlayCard(host, width=width, escape_value=escape_value)
+    return ToplevelCard(parent, width=width, escape_value=escape_value,
+                         title=title)
+
+
+def show_message(parent, title, text, kind="info", buttons=None, escape_value=None):
+    """
+    自绘的窗口内对话框（替代 messagebox.*）。
+    parent 只用于兼容原调用形式；宿主统一走 set_overlay_host 注册的实例。
+    返回被点击按钮的值：普通提示为 True，ask 类为 True/False，ESC 为 escape_value。
+    """
+    if escape_value is None:
+        escape_value = False if kind == "question" else True
+    specs = buttons if buttons is not None else _DEFAULT_BUTTONS.get(
+        kind, _DEFAULT_BUTTONS["info"])
+
+    def _build_and_wait():
+        card = make_card(_OVERLAY_HOST, parent,
+                          width=_OVERLAY_WIDTH.get(kind, 480),
+                          escape_value=escape_value, title=title)
+        card.add_title(title)
+        card.add_text(text)
+        card.add_buttons(specs)
+        return card.wait()
+
+    return _run_modal(_build_and_wait)
+
+
+def show_info(title, message="", parent=None, **kwargs):
+    return show_message(parent, title, message, "info")
+
+
+def show_warning(title, message="", parent=None, **kwargs):
+    return show_message(parent, title, message, "warning")
+
+
+def show_error(title, message="", parent=None, **kwargs):
+    return show_message(parent, title, message, "error")
+
+
+def ask_yes_no(title, message="", parent=None, **kwargs):
+    return bool(show_message(parent, title, message, "question"))
+
+
+def ask_ok_cancel(title, message="", parent=None, **kwargs):
+    return bool(show_message(
+        parent, title, message, "question",
+        buttons=[("确定", True, True), ("取消", False, False)],
+        escape_value=False))
+
+
+class _MessageBoxCompat:
+    """
+    兼容垫片：本文件已把所有 messagebox.* 调用点换成 show_*/ask_*（见上方），
+    这个对象保证万一还有漏改或后续新增的 messagebox.xxx(...) 调用，
+    也仍然走窗口内覆盖层，而不是退回系统新窗口。
+    """
+
+    @staticmethod
+    def showinfo(title=None, message="", **kwargs):
+        return show_info(title, message)
+
+    @staticmethod
+    def showwarning(title=None, message="", **kwargs):
+        return show_warning(title, message)
+
+    @staticmethod
+    def showerror(title=None, message="", **kwargs):
+        return show_error(title, message)
+
+    @staticmethod
+    def askyesno(title=None, message="", **kwargs):
+        return ask_yes_no(title, message)
+
+    @staticmethod
+    def askokcancel(title=None, message="", **kwargs):
+        return ask_ok_cancel(title, message)
+
+    @staticmethod
+    def askquestion(title=None, message="", **kwargs):
+        return "yes" if ask_yes_no(title, message) else "no"
+
+
+messagebox = _MessageBoxCompat()
+
+
 # ==================== 数据库定位 ====================
 class DatabaseLocator:
     @staticmethod
     def load_db_path() -> Path | None:
-        if BOOTSTRAP_FILE.exists():
+        # 先读当前数据目录下的配置，再兼容旧版写在程序目录的配置
+        candidates = [BOOTSTRAP_FILE]
+        if LEGACY_BOOTSTRAP_FILE != BOOTSTRAP_FILE:
+            candidates.append(LEGACY_BOOTSTRAP_FILE)
+        for cfg in candidates:
             try:
-                with open(BOOTSTRAP_FILE, 'r', encoding='utf-8') as f:
+                if not cfg.exists():
+                    continue
+                with open(cfg, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 path = data.get('database_path')
                 if path:
                     return Path(path)
             except Exception:
-                pass
+                continue
         return None
 
     @staticmethod
-    def save_db_path(path: Path):
-        try:
-            with open(BOOTSTRAP_FILE, 'w', encoding='utf-8') as f:
-                json.dump({'database_path': str(path)}, f,
-                          indent=2, ensure_ascii=False)
-        except Exception as e:
-            print(f"保存数据库位置失败: {e}")
+    def save_db_path(path: Path) -> bool:
+        targets = [BOOTSTRAP_FILE]
+        if LEGACY_BOOTSTRAP_FILE != BOOTSTRAP_FILE:
+            targets.append(LEGACY_BOOTSTRAP_FILE)
+        last_error = None
+        for cfg in targets:
+            try:
+                cfg.parent.mkdir(parents=True, exist_ok=True)
+                with open(cfg, 'w', encoding='utf-8') as f:
+                    json.dump({'database_path': str(path)}, f,
+                              indent=2, ensure_ascii=False)
+                return True
+            except Exception as e:
+                last_error = e
+        safe_print(f"保存数据库位置失败: {type(last_error).__name__}: {last_error}")
+        return False
 
     @staticmethod
     def is_valid_database(path: Path) -> bool:
@@ -459,7 +951,8 @@ class DatabaseLocator:
             return False
 
     @staticmethod
-    def init_database(path: Path) -> bool:
+    def init_database_detailed(path: Path) -> tuple[bool, str]:
+        """创建数据库。失败时把真实异常类型与消息一并返回，交给调用方展示。"""
         try:
             path.mkdir(parents=True, exist_ok=True)
             sf = path / '.settings.json'
@@ -471,10 +964,16 @@ class DatabaseLocator:
             if not gf.exists():
                 with open(gf, 'w', encoding='utf-8') as f:
                     json.dump({'recent_packs': []}, f, indent=2, ensure_ascii=False)
-            return True
+            return True, ""
         except Exception as e:
-            print(f"初始化数据库失败: {e}")
-            return False
+            detail = f"{type(e).__name__}: {e}"
+            safe_print(f"初始化数据库失败: {detail} (位置: {path})")
+            return False, detail
+
+    @staticmethod
+    def init_database(path: Path) -> bool:
+        ok, _ = DatabaseLocator.init_database_detailed(path)
+        return ok
 
 
 # ==================== 旧版 FGC v2 数据库适配 ====================
@@ -678,27 +1177,13 @@ class DatabaseLocatorDialog:
         self.legacy_to_migrate: Path | None = None
 
     def show(self) -> Path | None:
-        dlg_w, dlg_h = DLG_LOCATOR
-        dialog = ctk.CTkToplevel(self.parent)
-        dialog.title("初始化 Pulses Swap")
-        dialog.geometry(f"{dlg_w}x{dlg_h}")
-        dialog.resizable(False, False)
-        dialog.transient(self.parent)
-        dialog.grab_set()
-        dialog.configure(fg_color=C_WINDOW_BG)
-        try:
-            dialog.attributes('-alpha', 1.0)
-            dialog.attributes('-transparentcolor', '')
-        except Exception:
-            pass
-
-        dialog.update_idletasks()
-        x = self.parent.winfo_x() + (self.parent.winfo_width() - dlg_w) // 2
-        y = self.parent.winfo_y() + (self.parent.winfo_height() - dlg_h) // 2
-        dialog.geometry(f"+{x}+{y}")
-
-        frame = ctk.CTkFrame(dialog, fg_color="transparent")
-        frame.pack(fill=BOTH, expand=True, padx=PAD_DIALOG, pady=PAD_DIALOG)
+        # 改为主窗口内覆盖层，不再新开窗口。启动流程里 setup_ui() 先于
+        # _init_database_flow() 执行，所以这里主窗口骨架一定已经建好；
+        # 万一宿主未注册，make_card 会退化成 Toplevel，保证提示不会静默丢失。
+        dlg_w = DLG_LOCATOR[0]
+        card = make_card(get_overlay_host(), self.parent, width=dlg_w,
+                          escape_value=None, title="初始化 Pulses Swap")
+        frame = card.body
 
         make_label(frame, text="欢迎使用 Pulses Swap",
                     fg=C_ACCENT, font_size=FS_TITLE, bold=True).pack(
@@ -721,7 +1206,9 @@ class DatabaseLocatorDialog:
                                    border_width=BORDER_W, border_color=C_BORDER_SOFT)
         loc_frame.pack(fill=X, pady=(0, PAD_DIALOG))
 
-        make_label(loc_frame, text="默认数据库位置（与程序同目录）:",
+        make_label(loc_frame,
+                    text=("默认数据库位置（与程序同目录）:" if IS_PORTABLE_MODE
+                          else "默认数据库位置（用户数据目录）:"),
                     fg=C_TEXT_SECONDARY, font_size=FS_SMALL).pack(
                         anchor=W, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
         make_label(loc_frame, text=str(DEFAULT_DB_DIR),
@@ -745,96 +1232,100 @@ class DatabaseLocatorDialog:
                 except Exception:
                     pass
 
+        def _init_or_report(path, title):
+            """创建数据库；失败时把真实异常类型/消息带进弹窗，而不是只说一句失败。"""
+            ok, err = DatabaseLocator.init_database_detailed(path)
+            if not ok:
+                show_error(
+                    "错误", f"{title}：{err}\n位置: {path}", parent=self.parent)
+            return ok
+
+        def _choose(path, legacy=None):
+            """选定数据库并关闭覆盖层。"""
+            self.result = path
+            if legacy is not None:
+                self.legacy_to_migrate = legacy
+            card.close(True)
+
         def on_existing():
             folder = filedialog.askdirectory(
                 title="选择已有的数据库文件夹",
                 initialdir=str(PROGRAM_DIR),
-                parent=dialog)
+                parent=self.parent)
             if not folder:
                 return
             path = Path(folder)
             if LegacyDatabaseMigrator.is_legacy_database(path):
-                if messagebox.askyesno("检测到旧版数据库",
+                if ask_yes_no("检测到旧版数据库",
                     "该文件夹是旧版 FGC_database。\n\n"
-                    "是否先适配为新版数据库？", parent=dialog):
-                    if DatabaseLocator.init_database(DEFAULT_DB_DIR):
-                        self.result = DEFAULT_DB_DIR
-                        self.legacy_to_migrate = path
-                        dialog.destroy()
+                    "是否先适配为新版数据库？", parent=self.parent):
+                    if _init_or_report(DEFAULT_DB_DIR, "创建数据库失败"):
+                        _choose(DEFAULT_DB_DIR, legacy=path)
                 return
             if DatabaseLocator.is_valid_database(path):
-                self.result = path
-                dialog.destroy()
+                _choose(path)
             else:
-                messagebox.showerror("错误",
+                show_error("错误",
                     "所选文件夹不是有效的数据库。\n\n"
                     "有效的数据库应包含 .settings.json 或预设子文件夹。",
-                    parent=dialog)
+                    parent=self.parent)
 
         def on_legacy():
             folder = filedialog.askdirectory(
                 title="选择旧版 FGC_database 文件夹",
                 initialdir=str(PROGRAM_DIR),
-                parent=dialog)
+                parent=self.parent)
             if not folder:
                 return
             path = Path(folder)
             if not LegacyDatabaseMigrator.is_legacy_database(path):
                 if (path / LEGACY_MIGRATED_MARKER).exists():
-                    messagebox.showinfo("已迁移",
+                    show_info("已迁移",
                         "该旧版数据库已被标记为「已迁移」。\n\n"
                         "如需重新适配，请手动删除旧库根目录下的\n"
                         f"{LEGACY_MIGRATED_MARKER} 文件后再试。",
-                        parent=dialog)
+                        parent=self.parent)
                 else:
-                    messagebox.showerror("错误",
+                    show_error("错误",
                         "所选文件夹不是旧版 FGC_database。\n\n"
                         "旧版数据库应包含预设子文件夹和 index.json。",
-                        parent=dialog)
+                        parent=self.parent)
                 return
-            if DatabaseLocator.init_database(DEFAULT_DB_DIR):
-                self.result = DEFAULT_DB_DIR
-                self.legacy_to_migrate = path
-                dialog.destroy()
+            if _init_or_report(DEFAULT_DB_DIR, "创建数据库失败"):
+                _choose(DEFAULT_DB_DIR, legacy=path)
 
         def on_new():
-            # 默认在程序目录下新建
-            if messagebox.askyesno("新建数据库",
-                f"是否在程序目录下新建数据库？\n\n"
+            # 默认在数据目录下新建（便携模式即程序目录）
+            default_hint = ("程序目录" if IS_PORTABLE_MODE else "用户数据目录")
+            if ask_yes_no("新建数据库",
+                f"是否在{default_hint}下新建数据库？\n\n"
                 f"位置: {DEFAULT_DB_DIR}\n\n"
                 f"选「否」可手动选择其他文件夹。",
-                parent=dialog):
+                parent=self.parent):
                 path = DEFAULT_DB_DIR
             else:
                 folder = filedialog.askdirectory(
                     title="选择用于新建数据库的文件夹",
                     initialdir=str(PROGRAM_DIR),
-                    parent=dialog)
+                    parent=self.parent)
                 if not folder:
                     return
                 path = Path(folder)
             if path.exists() and not DatabaseLocator.is_empty_folder(path):
                 if DatabaseLocator.is_valid_database(path):
-                    self.result = path
-                    dialog.destroy()
+                    _choose(path)
                     return
-                messagebox.showerror("错误",
+                show_error("错误",
                     "所选文件夹非空且不是有效数据库。\n\n"
                     "请选择一个空文件夹用于新建数据库。",
-                    parent=dialog)
+                    parent=self.parent)
                 return
-            if DatabaseLocator.init_database(path):
-                self.result = path
-                dialog.destroy()
-            else:
-                messagebox.showerror("错误", "创建数据库失败", parent=dialog)
+            if _init_or_report(path, "创建数据库失败"):
+                _choose(path)
 
         def on_default():
-            if DatabaseLocator.init_database(DEFAULT_DB_DIR):
-                self.result = DEFAULT_DB_DIR
-                dialog.destroy()
-            else:
-                messagebox.showerror("错误", "创建默认数据库失败", parent=dialog)
+            if _init_or_report(DEFAULT_DB_DIR, "创建默认数据库失败"):
+                _choose(DEFAULT_DB_DIR)
 
         b_exist = make_button(btn_frame, "📂 定位已有数据库", command=on_existing)
         b_exist.pack(side=LEFT, padx=(0, PAD_TIGHT))
@@ -851,7 +1342,7 @@ class DatabaseLocatorDialog:
         }
         _highlight('new')
 
-        self.parent.wait_window(dialog)
+        card.wait()
         return self.result
 
 
@@ -1816,7 +2307,7 @@ class PresetManager:
                                                     index_data.get('description', 'v1.0.0'))
             index_data['incremental_count'] = index_data.get('incremental_count', 0)
             if preset_name in self.presets:
-                if not messagebox.askyesno("确认覆盖", f"预设 '{preset_name}' 已存在，是否覆盖？"):
+                if not ask_yes_no("确认覆盖", f"预设 '{preset_name}' 已存在，是否覆盖？"):
                     shutil.rmtree(temp_dir)
                     return False
                 old_path = Path(self.presets[preset_name]['path'])
@@ -1882,7 +2373,7 @@ class PresetManager:
             if preset_info.get('version', '') != version:
                 self.log.log(f"版本不匹配: 本地 '{preset_info.get('version','')}' vs 更新 '{version}'", 'ERROR')
                 shutil.rmtree(temp_dir)
-                messagebox.showerror("版本不匹配",
+                show_error("版本不匹配",
                     f"增量更新包版本与本地不一致：\n\n"
                     f"本地版本: {preset_info.get('version','')}\n"
                     f"更新版本: {version}\n\n"
@@ -1891,7 +2382,7 @@ class PresetManager:
             if not preset_info.get('applied', False):
                 self.log.log(f"预设 '{preset_name}' 未应用，无法导入增量更新", 'ERROR')
                 shutil.rmtree(temp_dir)
-                messagebox.showerror("无法应用",
+                show_error("无法应用",
                     f"预设 '{preset_name}' 当前未应用。\n\n"
                     f"请先切换到该预设后再导入增量更新。")
                 return False
@@ -1940,7 +2431,7 @@ class PresetManager:
                     lines.append("请先恢复这些枪包到原始状态后再重试。")
 
                     shutil.rmtree(temp_dir)
-                    messagebox.showerror("增量更新校验失败", "\n".join(lines))
+                    show_error("增量更新校验失败", "\n".join(lines))
                     return False
                 else:
                     self.log.log("✅ 本地枪包与原始状态匹配", 'SUCCESS')
@@ -2153,7 +2644,7 @@ class SettingsDialog:
                                     pady=(H_BTN_BAR - H_CONTROL) // 2)
 
     def on_switch_db(self):
-        messagebox.showinfo("切换数据库",
+        show_info("切换数据库",
             "切换数据库后需要重新打开整合包。\n\n"
             "原数据库不会被删除，可随时切回。", parent=self.dialog)
         self.dialog.destroy()
@@ -2183,20 +2674,20 @@ class SettingsDialog:
         self.settings.storage_mode = self.storage_var.get()
         self.settings.role = self.role_var.get()
         if not self.settings.save():
-            messagebox.showerror("错误",
+            show_error("错误",
                 "保存设置失败，请检查数据库文件夹是否可写",
                 parent=self.dialog)
             return
         if old_mode != self.settings.storage_mode:
             if self.settings.storage_mode == "merged":
-                messagebox.showwarning("提示",
+                show_warning("提示",
                     "已切换到合并存储。\n\n"
                     "所有整合包将共用同一套预设。\n"
                     "不同整合包的同名枪包可能互相覆盖。\n\n"
                     "重新打开整合包后生效。",
                     parent=self.dialog)
             else:
-                messagebox.showinfo("提示",
+                show_info("提示",
                     "已切换到隔离存储。\n\n"
                     "每个整合包使用独立数据库。\n"
                     "重新打开整合包后生效。",
@@ -2293,7 +2784,7 @@ class PulsesSwapApp:
             return
 
         if db_path and LegacyDatabaseMigrator.is_legacy_database(db_path):
-            if messagebox.askyesno("检测到旧版数据库",
+            if ask_yes_no("检测到旧版数据库",
                 f"检测到旧版 FGC_database:\n{db_path}\n\n"
                 f"是否适配为新版数据库？\n"
                 f"（可选择迁移后标记或删除原库）"):
@@ -2693,7 +3184,7 @@ class PulsesSwapApp:
         if self.is_applying or self.loading_presets:
             return
         if not self.db_ready:
-            messagebox.showwarning("提示", "数据库未初始化")
+            show_warning("提示", "数据库未初始化")
             return
         try:
             files = self.root.tk.splitlist(event.data)
@@ -2713,7 +3204,7 @@ class PulsesSwapApp:
 
         tacz_path = locate_tacz_by_path(drop_path)
         if not tacz_path:
-            messagebox.showerror("未找到 tacz",
+            show_error("未找到 tacz",
                 f"从该路径未能定位到 tacz 文件夹：\n{drop_path}\n\n"
                 f"请拖入整合包根目录，或整合包内的任意文件/文件夹。")
             return
@@ -2725,36 +3216,36 @@ class PulsesSwapApp:
     # ==================== 打开文件夹 ====================
     def open_pack_folder(self):
         if not self.current_pack_path:
-            messagebox.showwarning("提示", "请先选择一个整合包")
+            show_warning("提示", "请先选择一个整合包")
             return
         try:
             if self.current_pack_path.exists():
                 os.startfile(str(self.current_pack_path))
                 self.log_manager.log(f"已打开整合包路径: {self.current_pack_path}", 'INFO')
             else:
-                messagebox.showerror("错误", f"路径不存在: {self.current_pack_path}")
+                show_error("错误", f"路径不存在: {self.current_pack_path}")
         except Exception as e:
             self.log_manager.log(f"打开整合包路径失败: {e}", 'ERROR')
-            messagebox.showerror("错误", f"打开失败: {e}")
+            show_error("错误", f"打开失败: {e}")
 
     def open_tacz_folder(self):
         if not self.tacz_path:
-            messagebox.showwarning("提示", "请先选择一个整合包")
+            show_warning("提示", "请先选择一个整合包")
             return
         if not self.tacz_path.exists():
-            messagebox.showerror("错误", f"TACZ 路径不存在: {self.tacz_path}")
+            show_error("错误", f"TACZ 路径不存在: {self.tacz_path}")
             return
         try:
             os.startfile(str(self.tacz_path))
             self.log_manager.log(f"已打开 TACZ 文件夹: {self.tacz_path}", 'INFO')
         except Exception as e:
             self.log_manager.log(f"打开 TACZ 文件夹失败: {e}", 'ERROR')
-            messagebox.showerror("错误", f"打开失败: {e}")
+            show_error("错误", f"打开失败: {e}")
 
     # ==================== 设置 ====================
     def open_settings(self):
         if not self.db_ready:
-            messagebox.showwarning("提示", "数据库未初始化，请重启程序")
+            show_warning("提示", "数据库未初始化，请重启程序")
             return
         SettingsDialog(self.root, self.settings,
                        on_save_callback=self._on_settings_saved,
@@ -2765,7 +3256,7 @@ class PulsesSwapApp:
             f"设置已保存: 存储模式={self.settings.storage_mode}, 身份={self.settings.role}",
             'SUCCESS')
         if self.current_pack_path:
-            messagebox.showinfo("提示",
+            show_info("提示",
                 "设置已保存。\n\n如需让存储模式变更生效，请关闭并重新打开整合包。")
 
     def _on_db_action(self, action: str):
@@ -2779,7 +3270,7 @@ class PulsesSwapApp:
     # ==================== 数据库管理 ====================
     def switch_database(self):
         if self.is_applying:
-            messagebox.showwarning("操作进行中", "请等待当前操作完成")
+            show_warning("操作进行中", "请等待当前操作完成")
             return
         folder = filedialog.askdirectory(title="选择新的数据库文件夹",
                                           initialdir=str(PROGRAM_DIR))
@@ -2787,19 +3278,19 @@ class PulsesSwapApp:
             return
         path = Path(folder)
         if LegacyDatabaseMigrator.is_legacy_database(path):
-            if messagebox.askyesno("检测到旧版数据库",
+            if ask_yes_no("检测到旧版数据库",
                 "该文件夹是旧版 FGC_database。\n\n"
                 "是否先适配为新版数据库？"):
                 self.migrate_legacy_database(path)
             return
         if (path / LEGACY_MIGRATED_MARKER).exists():
-            messagebox.showinfo("提示",
+            show_info("提示",
                 "该文件夹是已迁移的旧版数据库。\n\n"
                 "如需重新适配，请删除旧库根目录下的\n"
                 f"{LEGACY_MIGRATED_MARKER} 文件后再试。")
             return
         if not DatabaseLocator.is_valid_database(path):
-            if messagebox.askyesno("新建数据库",
+            if ask_yes_no("新建数据库",
                 "该文件夹不是有效数据库，是否初始化为新数据库？"):
                 DatabaseLocator.init_database(path)
             else:
@@ -2809,12 +3300,12 @@ class PulsesSwapApp:
         if self.recent_manager:
             self.recent_manager = RecentPacksManager(path / ".global.json")
         self.log_manager.log(f"数据库已切换: {path}", 'SUCCESS')
-        messagebox.showinfo("完成", "数据库已切换，请重新打开整合包。")
+        show_info("完成", "数据库已切换，请重新打开整合包。")
         self.close_pack()
 
     def merge_database(self):
         if not self.db_ready:
-            messagebox.showwarning("提示", "数据库未初始化")
+            show_warning("提示", "数据库未初始化")
             return
         folder = filedialog.askdirectory(title="选择要合并的数据库文件夹",
                                           initialdir=str(PROGRAM_DIR))
@@ -2825,7 +3316,7 @@ class PulsesSwapApp:
         if not dst:
             return
         if src == dst:
-            messagebox.showwarning("提示", "不能合并到自身")
+            show_warning("提示", "不能合并到自身")
             return
 
         src_presets = [p.name for p in src.iterdir()
@@ -2847,9 +3338,9 @@ class PulsesSwapApp:
             f"合并完成: 迁移 {stats['migrated']}, 重命名 {stats['renamed']}, "
             f"跳过 {stats['skipped']}, 错误 {len(stats['errors'])}", 'SUCCESS')
         if stats['errors']:
-            messagebox.showwarning("部分失败", "\n".join(stats['errors'][:10]))
+            show_warning("部分失败", "\n".join(stats['errors'][:10]))
         else:
-            messagebox.showinfo("完成", "数据库合并完成。")
+            show_info("完成", "数据库合并完成。")
         self.refresh_presets()
 
     def migrate_legacy_database(self, legacy_path: Path = None):
@@ -2862,19 +3353,19 @@ class PulsesSwapApp:
 
         if not LegacyDatabaseMigrator.is_legacy_database(legacy_path):
             if (legacy_path / LEGACY_MIGRATED_MARKER).exists():
-                if not messagebox.askyesno("已迁移过",
+                if not ask_yes_no("已迁移过",
                     f"该数据库已被标记为「已迁移」:\n{legacy_path}\n\n"
                     f"是否仍要再次适配？（可能产生重复预设）"):
                     return
             else:
-                messagebox.showerror("错误", "所选文件夹不是旧版数据库")
+                show_error("错误", "所选文件夹不是旧版数据库")
                 return
 
         dst = (self.settings._settings_file.parent
                if self.settings._settings_file else DEFAULT_DB_DIR)
 
         if self.settings.storage_mode == 'isolated':
-            if messagebox.askyesno("选择目标数据库",
+            if ask_yes_no("选择目标数据库",
                 f"当前为隔离存储模式。\n\n"
                 f"是否将旧库适配到全局默认数据库？\n"
                 f"{DEFAULT_DB_DIR}\n\n"
@@ -2887,13 +3378,13 @@ class PulsesSwapApp:
                     return
                 dst = Path(folder)
                 if not DatabaseLocator.is_valid_database(dst):
-                    if messagebox.askyesno("新建数据库",
+                    if ask_yes_no("新建数据库",
                         "目标不是有效数据库，是否初始化为新数据库？"):
                         DatabaseLocator.init_database(dst)
                     else:
                         return
 
-        if not messagebox.askyesno("确认适配",
+        if not ask_yes_no("确认适配",
             f"将把旧版数据库:\n{legacy_path}\n\n"
             f"适配并合并到:\n{dst}\n\n"
             f"是否继续？"):
@@ -2958,14 +3449,14 @@ class PulsesSwapApp:
             err_text = "\n".join(stats['errors'][:10])
             if len(stats['errors']) > 10:
                 err_text += f"\n... 还有 {len(stats['errors'])-10} 个"
-            messagebox.showwarning("部分失败",
+            show_warning("部分失败",
                 f"旧版数据库适配完成，部分预设失败:\n\n{err_text}")
         else:
             self.log_manager.log(
                 f"旧版数据库适配完成: 迁移 {stats['migrated']}, "
                 f"重命名 {stats['renamed']}, 跳过 {stats['skipped']}",
                 'SUCCESS')
-            messagebox.showinfo("完成",
+            show_info("完成",
                 f"旧版数据库适配完成。\n\n"
                 f"迁移预设: {stats['migrated']}\n"
                 f"重命名: {stats['renamed']}\n"
@@ -3094,12 +3585,12 @@ class PulsesSwapApp:
 
     def force_update_validation(self):
         if not self.preset_manager:
-            messagebox.showwarning("提示", "请先加载整合包")
+            show_warning("提示", "请先加载整合包")
             return
         if not self.current_selected_preset:
-            messagebox.showwarning("提示", "请先选择一个预设")
+            show_warning("提示", "请先选择一个预设")
             return
-        if not messagebox.askyesno("⚠ 危险操作警告",
+        if not ask_yes_no("⚠ 危险操作警告",
             "⚠ 强制更新校验数据是危险操作！\n\n"
             "确定要继续吗？", icon='warning'):
             return
@@ -3111,9 +3602,9 @@ class PulsesSwapApp:
         if self.preset_manager.update_preset_index(name, from_tacz=from_tacz):
             self.refresh_gunpacks(use_cache=False)
             self.log_manager.log(f"⚠ 已强制更新预设 '{name}' 的校验数据", 'WARNING')
-            messagebox.showinfo("完成", f"预设 '{name}' 的校验数据已强制更新。")
+            show_info("完成", f"预设 '{name}' 的校验数据已强制更新。")
         else:
-            messagebox.showerror("错误", "强制更新失败，请查看日志")
+            show_error("错误", "强制更新失败，请查看日志")
 
     # ==================== 身份提示 ====================
     def _show_role_dialog(self, title, message) -> str:
@@ -3247,7 +3738,7 @@ class PulsesSwapApp:
             return
         path = recent[idx].get('path', '')
         if not Path(path).exists():
-            messagebox.showerror("错误", f"路径不存在: {path}")
+            show_error("错误", f"路径不存在: {path}")
             return
         self.load_pack(Path(path))
 
@@ -3270,7 +3761,7 @@ class PulsesSwapApp:
         if self.is_applying or self.loading_presets:
             return
         if not self.preset_manager:
-            messagebox.showwarning("提示", "请先选择整合包")
+            show_warning("提示", "请先选择整合包")
             return
         p = filedialog.askopenfilename(
             title="选择预设包或增量更新包",
@@ -3283,13 +3774,13 @@ class PulsesSwapApp:
 
     def handle_import_file(self, file_path: Path):
         if not self.preset_manager:
-            messagebox.showwarning("提示", "请先选择整合包")
+            show_warning("提示", "请先选择整合包")
             return
         if self.is_applying:
-            messagebox.showwarning("操作进行中", "请等待当前操作完成")
+            show_warning("操作进行中", "请等待当前操作完成")
             return
         if not file_path.exists():
-            messagebox.showerror("错误", f"文件不存在: {file_path}")
+            show_error("错误", f"文件不存在: {file_path}")
             return
         suffix = file_path.suffix.lower()
         if suffix == '.fgcupdate':
@@ -3304,18 +3795,18 @@ class PulsesSwapApp:
                     else:
                         self.do_import_preset(file_path)
             except Exception as e:
-                messagebox.showerror("错误", f"无法识别文件: {e}")
+                show_error("错误", f"无法识别文件: {e}")
 
     # ==================== 整合包管理 ====================
     def select_pack(self):
         if not self.db_ready:
-            messagebox.showwarning("提示", "数据库未初始化，请重启程序")
+            show_warning("提示", "数据库未初始化，请重启程序")
             return
         if self.is_applying:
-            messagebox.showwarning("操作进行中", "请等待当前操作完成")
+            show_warning("操作进行中", "请等待当前操作完成")
             return
         if self.loading_presets:
-            messagebox.showinfo("加载中", "预设列表正在加载，请稍候...")
+            show_info("加载中", "预设列表正在加载，请稍候...")
             return
         folder = filedialog.askdirectory(title="选择整合包根目录")
         if not folder:
@@ -3324,16 +3815,16 @@ class PulsesSwapApp:
 
     def load_pack(self, pack_path: Path):
         if not self.db_ready:
-            messagebox.showwarning("提示", "数据库未初始化")
+            show_warning("提示", "数据库未初始化")
             return
         tacz_path = pack_path / 'tacz'
         if not tacz_path.exists() or not tacz_path.is_dir():
-            messagebox.showerror("错误", "未找到tacz文件夹，请选择正确的整合包根目录")
+            show_error("错误", "未找到tacz文件夹，请选择正确的整合包根目录")
             return
 
         legacy_dirs = LegacyDatabaseMigrator.find_legacy_databases(pack_path)
         if legacy_dirs:
-            if messagebox.askyesno("检测到旧版数据库",
+            if ask_yes_no("检测到旧版数据库",
                 f"在整合包中发现旧版数据库:\n{legacy_dirs[0]}\n\n"
                 f"是否适配到当前数据库？\n"
                 f"（可选择迁移后标记或删除原库）"):
@@ -3442,10 +3933,10 @@ class PulsesSwapApp:
 
     def close_pack(self):
         if self.is_applying:
-            messagebox.showwarning("操作进行中", "请等待当前操作完成")
+            show_warning("操作进行中", "请等待当前操作完成")
             return
         if self.loading_presets:
-            messagebox.showinfo("加载中", "预设列表正在加载，请稍候...")
+            show_info("加载中", "预设列表正在加载，请稍候...")
             return
         self._stop_watcher()
         self.current_pack_path = None
@@ -3615,14 +4106,14 @@ class PulsesSwapApp:
         if not self.preset_manager or self.loading_presets:
             return
         if self.is_applying:
-            messagebox.showwarning("操作进行中", "请等待当前操作完成")
+            show_warning("操作进行中", "请等待当前操作完成")
             return
 
         info = self.preset_manager.presets.get(preset_name)
         if not info:
             return
         if info.get('applied', False):
-            messagebox.showwarning("提示",
+            show_warning("提示",
                 f"预设 '{preset_name}' 当前已应用。\n\n"
                 f"请先切换到其他预设，再执行迁移。")
             return
@@ -3637,7 +4128,7 @@ class PulsesSwapApp:
                 return
             target_pack = Path(folder)
             if not (target_pack / 'tacz').exists():
-                messagebox.showerror("错误",
+                show_error("错误",
                     "目标文件夹不是有效的整合包（缺少 tacz 文件夹）")
                 return
             target_db = self.settings.get_db_path(target_pack)
@@ -3648,10 +4139,10 @@ class PulsesSwapApp:
                 return
             target_db = Path(folder)
             if not target_db.exists():
-                messagebox.showerror("错误", f"目标数据库不存在: {target_db}")
+                show_error("错误", f"目标数据库不存在: {target_db}")
                 return
             if not DatabaseLocator.is_valid_database(target_db):
-                if messagebox.askyesno("新建数据库",
+                if ask_yes_no("新建数据库",
                     "目标文件夹不是有效数据库，是否初始化为新数据库？"):
                     DatabaseLocator.init_database(target_db)
                 else:
@@ -3661,7 +4152,7 @@ class PulsesSwapApp:
 
         conflict_mode = 'rename'
         if (target_db / preset_name).exists():
-            if not messagebox.askyesno("预设已存在",
+            if not ask_yes_no("预设已存在",
                 f"目标数据库中已存在预设 '{preset_name}'。\n\n"
                 f"是否覆盖？（原预设会被移入回收站）"):
                 return
@@ -3670,7 +4161,7 @@ class PulsesSwapApp:
         src_path = Path(info['path'])
         target_path = target_db / preset_name
 
-        if not messagebox.askyesno("确认迁移",
+        if not ask_yes_no("确认迁移",
             f"将把预设 '{preset_name}' 迁移到:\n{target_db}\n\n"
             f"源预设会被删除（移入回收站，可找回）。\n\n"
             f"是否继续？"):
@@ -3786,12 +4277,12 @@ class PulsesSwapApp:
             if src_removed:
                 self.log_manager.log(
                     f"源预设已移入回收站，可随时找回", 'INFO')
-            messagebox.showinfo("迁移成功",
+            show_info("迁移成功",
                 f"预设 '{preset_name}' 已迁移到:\n{target_db}\n\n"
                 f"源预设已{'移入回收站' if src_removed else '保留'}。")
             self.refresh_presets()
         else:
-            messagebox.showerror("迁移失败", "预设迁移失败，请查看日志")
+            show_error("迁移失败", "预设迁移失败，请查看日志")
 
     def rename_preset(self, preset_name):
         if not self.preset_manager or self.loading_presets:
@@ -3806,11 +4297,11 @@ class PulsesSwapApp:
         if new_name == preset_name:
             return
         if new_name in self.preset_manager.presets:
-            messagebox.showerror("错误", f"预设 '{new_name}' 已存在")
+            show_error("错误", f"预设 '{new_name}' 已存在")
             return
         for char in r'\/:*?"<>|':
             if char in new_name:
-                messagebox.showerror("错误", f"预设名称不能包含非法字符: {char}")
+                show_error("错误", f"预设名称不能包含非法字符: {char}")
                 return
         self.root.config(cursor="watch")
         try:
@@ -3821,9 +4312,9 @@ class PulsesSwapApp:
                         self.preset_listbox.selection_set(i)
                         self.on_preset_selected(None)
                         break
-                messagebox.showinfo("成功", f"预设已重命名为: {new_name}")
+                show_info("成功", f"预设已重命名为: {new_name}")
             else:
-                messagebox.showerror("错误", "预设重命名失败")
+                show_error("错误", "预设重命名失败")
         finally:
             self.root.config(cursor="")
 
@@ -3831,16 +4322,16 @@ class PulsesSwapApp:
         if not self.preset_manager or self.loading_presets:
             return
         if preset_name == "default":
-            messagebox.showwarning("提示", "不能删除默认预设")
+            show_warning("提示", "不能删除默认预设")
             return
         info = self.preset_manager.presets.get(preset_name)
         if not info:
             return
         if info.get('applied', False):
-            messagebox.showwarning("提示",
+            show_warning("提示",
                 f"预设 '{preset_name}' 已应用，请先切换到其他预设再删除")
             return
-        if not messagebox.askyesno("确认删除",
+        if not ask_yes_no("确认删除",
                 f"确定要删除预设 '{preset_name}' 吗？\n\n此操作不可恢复！"):
             return
         try:
@@ -3857,12 +4348,12 @@ class PulsesSwapApp:
                     self.gunpack_listbox.delete(0, END)
                     self.gunpack_count_label.configure(text="共 0 个枪包")
                 self._update_preset_list()
-                messagebox.showinfo("成功", f"预设 '{preset_name}' 已删除")
+                show_info("成功", f"预设 '{preset_name}' 已删除")
                 self._update_guide()
             else:
-                messagebox.showerror("错误", "删除预设失败")
+                show_error("错误", "删除预设失败")
         except Exception as e:
-            messagebox.showerror("错误", f"删除失败: {e}")
+            show_error("错误", f"删除失败: {e}")
 
     def create_preset(self):
         if not self.preset_manager or self.loading_presets:
@@ -3873,7 +4364,7 @@ class PulsesSwapApp:
             return
         name = name.strip()
         if name in self.preset_manager.presets:
-            messagebox.showerror("错误", f"预设 '{name}' 已存在")
+            show_error("错误", f"预设 '{name}' 已存在")
             return
         version = simpledialog.askstring("版本号", "请输入版本号 (可选，默认 v1.0.0):")
         if version is None:
@@ -3886,7 +4377,7 @@ class PulsesSwapApp:
             except Exception:
                 pass
             self._update_preset_list()
-            messagebox.showinfo("创建成功",
+            show_info("创建成功",
                 f"预设 '{name}' 创建成功！\n\n"
                 f"版本号: {version}\n\n"
                 f"请在打开的文件夹中放入枪包文件(ZIP和文件夹)\n"
@@ -3904,10 +4395,10 @@ class PulsesSwapApp:
     # ==================== 导出 ====================
     def export_preset(self):
         if not self.preset_manager or not self.current_selected_preset or self.loading_presets:
-            messagebox.showwarning("提示", "请先选择一个预设")
+            show_warning("提示", "请先选择一个预设")
             return
         if self.is_applying:
-            messagebox.showwarning("操作进行中", "请等待当前操作完成")
+            show_warning("操作进行中", "请等待当前操作完成")
             return
 
         name = self.current_selected_preset
@@ -3916,7 +4407,7 @@ class PulsesSwapApp:
             return
 
         if name == "default":
-            messagebox.showwarning("无法导出",
+            show_warning("无法导出",
                 "不允许导出名为 'default' 的预设。\n\n"
                 "请先通过右键菜单「重命名」将该预设改为其他名称，再执行导出。")
             return
@@ -3950,24 +4441,24 @@ class PulsesSwapApp:
 
     def export_incremental(self):
         if not self.preset_manager or not self.current_selected_preset or self.loading_presets:
-            messagebox.showwarning("提示", "请先选择一个预设")
+            show_warning("提示", "请先选择一个预设")
             return
         if self.is_applying:
-            messagebox.showwarning("操作进行中", "请等待当前操作完成")
+            show_warning("操作进行中", "请等待当前操作完成")
             return
         name = self.current_selected_preset
         info = self.preset_manager.presets.get(name)
         if not info:
             return
         if not info.get('applied', False):
-            messagebox.showwarning("提示", "只能对已应用的预设导出增量更新")
+            show_warning("提示", "只能对已应用的预设导出增量更新")
             return
         changes = self.preset_manager.detect_changes(name)
         total = len(changes['added']) + len(changes['removed']) + len(changes['modified'])
         if total == 0:
-            messagebox.showinfo("提示", "未检测到任何变更，无需导出")
+            show_info("提示", "未检测到任何变更，无需导出")
             return
-        if not messagebox.askyesno("确认导出增量包",
+        if not ask_yes_no("确认导出增量包",
             f"检测到以下变更:\n\n"
             f"新增: {len(changes['added'])} 个\n"
             f"移除: {len(changes['removed'])} 个\n"
@@ -4007,20 +4498,20 @@ class PulsesSwapApp:
         self.hide_progress()
         self.set_busy_state(False, "")
         if success:
-            messagebox.showinfo("导出成功", f"预设已导出到:\n{export_path}")
+            show_info("导出成功", f"预设已导出到:\n{export_path}")
         else:
-            messagebox.showerror("导出失败", "预设导出失败，请查看日志")
+            show_error("导出失败", "预设导出失败，请查看日志")
         self._update_preset_list()
 
     def _on_export_inc_finished(self, success, export_path):
         self.hide_progress()
         self.set_busy_state(False, "")
         if success:
-            messagebox.showinfo("导出成功",
+            show_info("导出成功",
                 f"增量更新包已导出到:\n{export_path}\n\n"
                 f"✅ 校验数据已自动同步为最新")
         else:
-            messagebox.showerror("导出失败", "增量包导出失败，请查看日志")
+            show_error("导出失败", "增量包导出失败，请查看日志")
         self._update_preset_list()
         self.refresh_gunpacks(use_cache=False)
 
@@ -4063,7 +4554,7 @@ class PulsesSwapApp:
         self.hide_progress()
         self.set_busy_state(False, "")
         if not success:
-            messagebox.showerror("导入失败", "预设导入失败，请查看日志")
+            show_error("导入失败", "预设导入失败，请查看日志")
             return
         self._update_preset_list()
         self.refresh_gunpacks(use_cache=False)
@@ -4074,7 +4565,7 @@ class PulsesSwapApp:
         self.hide_progress()
         self.set_busy_state(False, "")
         if not success:
-            messagebox.showerror("更新失败", "增量更新失败，请查看日志")
+            show_error("更新失败", "增量更新失败，请查看日志")
             return
         self.refresh_gunpacks(use_cache=False)
         self._update_preset_list()
@@ -4084,13 +4575,13 @@ class PulsesSwapApp:
     def _ask_delete_source_package(self, import_path: Path, success_msg: str):
         try:
             if not import_path.exists():
-                messagebox.showinfo("导入完成", success_msg)
+                show_info("导入完成", success_msg)
                 return
             try:
                 size_str = format_size(import_path.stat().st_size)
             except Exception:
                 size_str = "未知"
-            reply = messagebox.askyesno(
+            reply = ask_yes_no(
                 "导入完成",
                 f"{success_msg}\n\n"
                 f"是否删除源压缩包以节省存储空间？\n\n"
@@ -4110,11 +4601,11 @@ class PulsesSwapApp:
                     f"已删除源压缩包（无法移入回收站）: {import_path.name}", 'SUCCESS')
             except Exception as e:
                 self.log_manager.log(f"删除源压缩包失败: {e}", 'WARNING')
-                messagebox.showwarning("警告",
+                show_warning("警告",
                     f"删除源压缩包失败，请手动处理。\n\n错误: {e}")
         except Exception as e:
             self.log_manager.log(f"处理源压缩包时出错: {e}", 'WARNING')
-            messagebox.showinfo("导入完成", success_msg)
+            show_info("导入完成", success_msg)
 
     # ==================== 进度条 ====================
     def show_progress(self, current, total, message=""):
@@ -4280,18 +4771,18 @@ class PulsesSwapApp:
         if not self.preset_manager or not self.tacz_path or self.loading_presets:
             return
         if self.is_applying:
-            messagebox.showwarning("操作进行中", "请等待当前操作完成")
+            show_warning("操作进行中", "请等待当前操作完成")
             return
         if not self.current_selected_preset:
-            messagebox.showwarning("提示", "请先选择一个预设")
+            show_warning("提示", "请先选择一个预设")
             return
         name = self.current_selected_preset
         if name not in self.preset_manager.presets:
             return
         if self.preset_manager.presets[name].get('applied', False):
-            messagebox.showinfo("提示", f"预设 '{name}' 已经应用")
+            show_info("提示", f"预设 '{name}' 已经应用")
             return
-        if not messagebox.askyesno("确认替换",
+        if not ask_yes_no("确认替换",
                 f"确定要应用预设 '{name}' 吗？\n\n这将替换Tacz文件夹中的所有枪包！"):
             return
 
@@ -4328,7 +4819,7 @@ class PulsesSwapApp:
                         break
             self.log_manager.log("预设应用成功！", 'SUCCESS')
         else:
-            messagebox.showerror("错误", "预设应用失败，请查看日志")
+            show_error("错误", "预设应用失败，请查看日志")
         self._start_watcher()
         self._update_guide()
 
@@ -4346,7 +4837,7 @@ class PulsesSwapApp:
 
     def refresh_all(self):
         if self.loading_presets:
-            messagebox.showinfo("加载中", "预设列表正在加载，请稍候...")
+            show_info("加载中", "预设列表正在加载，请稍候...")
             return
         self.refresh_presets()
         if self.current_selected_preset:
@@ -4355,7 +4846,7 @@ class PulsesSwapApp:
 
     def open_preset_manager(self):
         if not self.preset_manager:
-            messagebox.showwarning("提示", "请先加载整合包")
+            show_warning("提示", "请先加载整合包")
             return
         try:
             os.startfile(str(self.preset_manager.database_path))
@@ -4363,7 +4854,7 @@ class PulsesSwapApp:
             self.log_manager.log(f"打开文件夹失败: {e}", 'ERROR')
 
     def show_tutorial(self):
-        messagebox.showinfo("使用教程",
+        show_info("使用教程",
             f"{PROJECT_NAME} v{VERSION}\n作者: {AUTHOR}\n\n"
             "【基础使用】\n"
             "Step 1 · 拖入整合包根目录（或整合包内任意文件）\n"
@@ -4390,7 +4881,7 @@ class PulsesSwapApp:
         db_str = "未初始化"
         if self.settings._settings_file:
             db_str = str(self.settings._settings_file.parent)
-        messagebox.showinfo("关于",
+        show_info("关于",
             f"{PROJECT_NAME} v{VERSION}\n\n"
             f"作者: {AUTHOR}\n"
             "描述: Minecraft Tacz 模组枪包快速切换工具\n\n"
@@ -4415,6 +4906,27 @@ class PulsesSwapApp:
 
 
 # ==================== 程序入口 ====================
+def apply_window_icon(window) -> None:
+    """设置窗口/任务栏/Alt-Tab 图标。任一方式失败都不影响启动。"""
+    # 1) Windows：iconbitmap(default=...) 最稳，同时作用于后续所有 toplevel
+    try:
+        ico = resource_path("icon.ico")
+        if IS_WINDOWS and ico.exists():
+            window.iconbitmap(default=str(ico))
+    except Exception:
+        pass
+    # 2) 跨平台：iconphoto。PhotoImage 必须挂在对象上保留引用，
+    #    否则被 GC 回收后图标会消失。
+    try:
+        png = resource_path("icon.png")
+        if png.exists():
+            img = PhotoImage(file=str(png))
+            window.iconphoto(True, img)
+            window._pulses_icon_ref = img
+    except Exception:
+        pass
+
+
 def main():
     if HAS_DND:
         try:
@@ -4424,6 +4936,9 @@ def main():
             root = ctk.CTk()
     else:
         root = ctk.CTk()
+
+    # 窗口图标：源码运行取 packaging/，打包运行取 sys._MEIPASS
+    apply_window_icon(root)
 
     # 字体回退链：root 就绪后解析一次，供所有控件工厂使用
     apply_font_fallbacks()
@@ -4487,7 +5002,7 @@ def main():
 
     def on_closing():
         if app.is_applying:
-            if messagebox.askyesno("操作进行中",
+            if ask_yes_no("操作进行中",
                     "正在操作中，确定要退出吗？\n\n程序将在任务完成后自动退出。"):
                 app._stop_watcher()
                 root.quit()
