@@ -1,9 +1,17 @@
 """
 Pulses Swap - 快速枪包切换器
 作者: NimShade
-版本: 2.4.0
+版本: 2.4.1
 描述: Minecraft Tacz 模组枪包快速切换工具
 UI风格: Pulses 水墨淡色主题（customtkinter 圆角版本）
+
+v2.4.1 更新:
+  - 新增 Windows 绿色版（免安装）：Release 里多一个
+    PulsesSwap-Portable-<版本>.zip，解压即用、不写注册表，
+    数据存在同目录的 PulsesSwap_database\，整个文件夹拷走即搬家
+    （数据目录优先级本来就是「程序目录可写 → 写在程序旁边」，
+    这次只是把它打成 zip 并附上使用说明）
+  - 启动日志补一行「运行模式: 绿色版 / 安装版」，便于确认当前形态
 
 v2.4.0 更新（方向调整：去掉图标与动画）:
   - 侧边栏导航改为纯文字（主界面 / 设置 / 日志），不再有任何图标；
@@ -102,7 +110,7 @@ except ImportError:
     FileSystemEventHandler = object
 
 # ==================== 常量定义 ====================
-VERSION = "2.4.0"
+VERSION = "2.4.1"
 AUTHOR = "NimShade"
 PROJECT_NAME = "Pulses Swap"
 
@@ -3898,6 +3906,10 @@ class PulsesSwapApp:
         self.update_recent_list()
         self.log_manager.log(f"{PROJECT_NAME} v{VERSION} 启动成功，作者: {AUTHOR}", 'SUCCESS')
         self.log_manager.log(f"数据库位置: {db_path}", 'INFO', verbose=True)
+        self.log_manager.log(
+            "运行模式: " + ("绿色版（数据写在程序目录）" if IS_PORTABLE_MODE
+                        else "安装版（数据写在用户目录）"),
+            'INFO', verbose=True)
         self.log_manager.log(
             f"存储模式: {'合并' if self.settings.storage_mode == 'merged' else '隔离'}",
             'INFO', verbose=True)

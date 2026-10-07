@@ -1,6 +1,6 @@
 # Pulses Swap
 
-Tacz 枪包一键切换工具 · v2.4.0
+Tacz 枪包一键切换工具 · v2.4.1
 
 面向 Minecraft Tacz 模组玩家的枪包管理工具：拖入整合包 → 选预设 → 一键替换，
 支持增量同步、二次校验、多预设管理与版本号管理。
@@ -12,6 +12,7 @@ Tacz 枪包一键切换工具 · v2.4.0
 | 平台 | 文件 | 说明 |
 |---|---|---|
 | Windows | `PulsesSwap-Setup-x.y.z.exe` | 安装器，双击安装 |
+| Windows | `PulsesSwap-Portable-x.y.z.zip` | **绿色版**：解压即用，数据在同目录，不写注册表 |
 | Linux | `PulsesSwap-linux-x86_64.tar.gz` | 解压后直接运行 `PulsesSwap` |
 
 ## 从源码运行
