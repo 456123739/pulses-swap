@@ -307,6 +307,7 @@ H_DROP_AREA = 76   # 拖入框高度（原 70）
 H_LOG_BOX   = 132  # 日志文本框高度（原 120）
 H_PROGRESS  = 8    # 进度条高度
 H_BTN_BAR   = 68   # 对话框底部按钮条高度（原 64）
+H_TAB_HEAD  = 52   # 设置页选项卡头部高度（自绘分段控件）
 PAD_CARD_X  = 16   # 卡片内左右内边距（原 12）
 PAD_CARD_Y  = 12   # 卡片内上下内边距（原 10）
 PAD_DIALOG  = 18   # 对话框内容边距（原 15/20）
@@ -330,8 +331,8 @@ WINDOW_MIN_W, WINDOW_MIN_H = 1140, 800     # 主窗口最小尺寸（纵向预�
 #   Step2 预设   ≈ 275 = 标题 35 + 列表 ≥110 + 导入框 76 + 间隔 10 + 按钮行 32 + 内边距 12
 #   Step3 详情   ≈ 138 = 标题 35 + 三行信息 51 + 版本行(8+32) + 内边距 12
 #   合计 628 + 两个 PAD_GAP(10) = 648
-# 最小窗口内容高度 = 800 - 菜单栏 ~20 - 上下 PAD_WINDOW 16 = 764 ≥ 648，
-# 余量 116px 通过 grid 行权重全部给 Step2 的预设列表（它会先被压缩），
+# 顶栏（原生菜单栏）已移除，最小窗口内容高度 = 800 - 上下 PAD_WINDOW 16 = 784 ≥ 648，
+# 余量 136px 通过 grid 行权重全部给 Step2 的预设列表（它会先被压缩），
 # 因此 Step1/Step3 在任何允许的窗口尺寸下都不会被裁切。
 H_STEP1_MIN = 215
 H_STEP2_MIN = 275
@@ -468,19 +469,754 @@ def locate_tacz_by_path(path: Path) -> Path | None:
     return None
 
 
+# ==================== 动画引擎 ====================
+# 需求：所有交互都要有过渡动画。Tk 控件没有逐控件 alpha，能动的只有
+# 「位置 / 尺寸 / 颜色」三样，所以这里统一提供缓动函数 + 颜色插值 +
+# 基于 after 的补间调度，上层只描述「从哪到哪」。
+#
+# 每个补间用 (widget, key) 标识：重复触发会自动取消上一帧序列，
+# 不会出现两条动画互相拉扯；控件销毁后 after 回调由 Tk 自动丢弃。
+_TWEENS: dict = {}
+
+
+def clamp01(t):
+    return 0.0 if t < 0 else (1.0 if t > 1 else float(t))
+
+
+# ---------- 缓动曲线 ----------
+def ease_linear(t):
+    return t
+
+
+def ease_out_cubic(t):
+    """快速起步、缓慢收尾：位移类动画的默认曲线。"""
+    return 1 - (1 - t) ** 3
+
+
+def ease_out_quint(t):
+    """比 cubic 更「急起缓停」，用于滑块/页面这种需要干脆利落的大位移。"""
+    return 1 - (1 - t) ** 5
+
+
+def ease_in_out_cubic(t):
+    return 4 * t * t * t if t < 0.5 else 1 - pow(-2 * t + 2, 3) / 2
+
+
+def ease_out_back(t, overshoot=1.4):
+    """带一点点回弹，用于浮层/提示的入场。"""
+    t -= 1
+    return t * t * ((overshoot + 1) * t + overshoot) + 1
+
+
+# ---------- 数值 / 颜色插值 ----------
+def lerp(a, b, t):
+    return a + (b - a) * t
+
+
+def hex_to_rgb(color):
+    """把 '#RRGGBB' / '#RGB' 解析成 (r,g,b)；解析不了返回 None。"""
+    if not isinstance(color, str):
+        return None
+    value = color.strip()
+    if not value.startswith("#"):
+        return None
+    value = value[1:]
+    try:
+        if len(value) == 3:
+            return tuple(int(c * 2, 16) for c in value)
+        if len(value) >= 6:
+            return (int(value[0:2], 16), int(value[2:4], 16),
+                    int(value[4:6], 16))
+    except ValueError:
+        return None
+    return None
+
+
+def rgb_to_hex(rgb):
+    return "#{:02X}{:02X}{:02X}".format(
+        int(max(0, min(255, round(rgb[0])))),
+        int(max(0, min(255, round(rgb[1])))),
+        int(max(0, min(255, round(rgb[2])))))
+
+
+def lerp_color(c1, c2, t):
+    """颜色插值；任一端不是合法 hex 时退化为端点取色，绝不抛异常。"""
+    a = hex_to_rgb(c1)
+    b = hex_to_rgb(c2)
+    if a is None or b is None:
+        return c1 if t < 0.5 else c2
+    return rgb_to_hex((lerp(a[0], b[0], t), lerp(a[1], b[1], t),
+                       lerp(a[2], b[2], t)))
+
+
+# ---------- 补间调度 ----------
+def cancel_tween(widget, key):
+    job = _TWEENS.pop((id(widget), key), None)
+    if job is not None:
+        try:
+            widget.after_cancel(job)
+        except Exception:
+            pass
+
+
+def cancel_all_tweens(widget):
+    for token in [k for k in _TWEENS if k[0] == id(widget)]:
+        cancel_tween(widget, token[1])
+
+
+def tween(widget, key, duration_ms, on_frame, on_done=None,
+          easing=ease_out_cubic, fps=60):
+    """
+    用 widget.after 驱动一条补间时间线。
+
+    on_frame(缓动值, 线性进度) 每帧调用；进度按真实耗时计算，掉帧不会变慢。
+    另有帧数上限兜底：即使事件循环被压缩（例如同步 after 的测试环境），
+    动画也一定会在有限帧内收敛到终点，不会自锁。
+    """
+    cancel_tween(widget, key)
+    interval = max(1, int(round(1000.0 / max(1, fps))))
+    duration_ms = max(1, int(duration_ms))
+    max_frames = int(duration_ms / interval) + 3
+    token = (id(widget), key)
+    start = time.perf_counter()
+    state = {"frames": 0}
+
+    def step():
+        if token not in _TWEENS:
+            return
+        state["frames"] += 1
+        elapsed = (time.perf_counter() - start) * 1000.0
+        raw = clamp01(elapsed / duration_ms)
+        if state["frames"] >= max_frames:
+            raw = 1.0
+        try:
+            on_frame(easing(raw), raw)
+        except Exception:
+            pass
+        if raw >= 1.0:
+            _TWEENS.pop(token, None)
+            if on_done is not None:
+                try:
+                    on_done()
+                except Exception:
+                    pass
+            return
+        try:
+            _TWEENS[token] = widget.after(interval, step)
+        except Exception:
+            _TWEENS.pop(token, None)
+
+    # 先占位再排期：万一宿主把 after 做成同步回调，step 里的守卫也能认出自己
+    _TWEENS[token] = -1
+    try:
+        job = widget.after(interval, step)
+    except Exception:
+        _TWEENS.pop(token, None)
+        return
+    if token in _TWEENS:
+        _TWEENS[token] = job
+
+
+def attach_hover_glow(widget, base_color=None, hover_color=None, duration_ms=200):
+    """卡片/拖入框的 hover 描边过渡：进入混向强调色，离开混回原色。
+
+    卡片里通常还嵌着按钮/标签，鼠标从卡片移到子控件上时 Tk 会给卡片发
+    <Leave>，直接响应会来回闪。这里把「离开」延后 90ms，期间若有 <Enter>
+    就撤销，等效于「指针真的移出卡片」才收光。
+    """
+    try:
+        base_color = base_color or widget.cget("border_color")
+    except Exception:
+        base_color = C_BORDER_SOFT
+    if hex_to_rgb(base_color) is None:
+        base_color = C_BORDER_SOFT
+    hover_color = hover_color or C_ACCENT_SOFT
+    state = {"color": base_color, "leave_job": None}
+
+    def _to(target, ms=duration_ms):
+        start = state["color"]
+        if start == target:
+            return
+
+        def frame(e, raw):
+            state["color"] = lerp_color(start, target, e)
+            try:
+                widget.configure(border_color=state["color"])
+            except Exception:
+                pass
+
+        frame(0.0, 0.0)
+        tween(widget, "glow", ms, frame, easing=ease_in_out_cubic)
+
+    def _cancel_leave():
+        if state["leave_job"] is not None:
+            try:
+                widget.after_cancel(state["leave_job"])
+            except Exception:
+                pass
+            state["leave_job"] = None
+
+    def _on_enter(_event=None):
+        _cancel_leave()
+        _to(hover_color)
+
+    def _on_leave(_event=None):
+        _cancel_leave()
+
+        def fire():
+            state["leave_job"] = None
+            _to(base_color)
+
+        try:
+            state["leave_job"] = widget.after(90, fire)
+        except Exception:
+            fire()
+
+    try:
+        widget.bind("<Enter>", _on_enter, add="+")
+        widget.bind("<Leave>", _on_leave, add="+")
+    except Exception:
+        pass
+    return widget
+
+
+# ==================== 动画控件 ====================
+class AnimatedButton(ctk.CTkButton):
+    """带曲线过渡的按钮：hover / 按下都是逐帧混色，而不是瞬间跳色。
+
+    CTk 自带的 hover 是「瞬时换色」，这里把它的 hover 目标设成底色把它架空，
+    再由本类用补间驱动 fg_color。CTk 内部处理器与本类处理器在同一次事件
+    分发里先后执行，本类每次都从当前插值色继续，因此不会看到跳变。
+    """
+
+    def __init__(self, master, base_color, hover_target, press_color=None,
+                 **kwargs):
+        kwargs["fg_color"] = base_color
+        kwargs["hover_color"] = base_color
+        super().__init__(master, **kwargs)
+        self._base_color = base_color
+        self._hover_target = hover_target
+        self._press_color = press_color or hover_target
+        self._current = base_color
+        self._hovering = False
+        try:
+            self.bind("<Enter>", self._on_enter, add="+")
+            self.bind("<Leave>", self._on_leave, add="+")
+            self.bind("<ButtonPress-1>", self._on_press, add="+")
+            self.bind("<ButtonRelease-1>", self._on_release, add="+")
+        except Exception:
+            pass
+
+    def _enabled(self):
+        try:
+            return str(self.cget("state")) == "normal"
+        except Exception:
+            return True
+
+    def _reassert(self):
+        try:
+            self.configure(fg_color=self._current)
+        except Exception:
+            pass
+
+    def _to(self, target, duration=150):
+        if target == self._current:
+            return
+        start = self._current
+
+        def frame(e, raw):
+            self._current = lerp_color(start, target, e)
+            try:
+                self.configure(fg_color=self._current)
+            except Exception:
+                pass
+
+        frame(0.0, 0.0)
+        tween(self, "bg", duration, frame, easing=ease_out_cubic)
+
+    def _on_enter(self, _event=None):
+        self._hovering = True
+        self._reassert()
+        if self._enabled():
+            self._to(self._hover_target)
+
+    def _on_leave(self, _event=None):
+        self._hovering = False
+        self._reassert()
+        self._to(self._base_color)
+
+    def _on_press(self, _event=None):
+        self._reassert()
+        if self._enabled():
+            self._to(self._press_color, 90)
+
+    def _on_release(self, _event=None):
+        self._reassert()
+        if not self._enabled():
+            return
+        self._to(self._hover_target if self._hovering else self._base_color, 180)
+
+
+class CanvasSegmented(Canvas):
+    """自绘分段控件（侧边栏导航 / 设置页选项卡共用）。
+
+    选中态是一个可以逐帧滑动的药丸，hover 也是逐帧混色 —— 之所以不用
+    CTkButton 直接换色，是因为「切换选项」要的是一条连续的曲线轨迹。
+    Canvas 同时会把子项裁剪在自身范围内，滑动过程不会溢到隔壁区域。
+    """
+
+    def __init__(self, parent, items, command=None, orientation="vertical",
+                 item_height=H_NAV, pad=4, gap=4, radius=R_CONTROL,
+                 bg_color=C_CARD_BG, pill_color=C_ACCENT_SOFT,
+                 hover_color=C_ACCENT_SOFT, text_color=C_TEXT_MAIN,
+                 active_text_color=C_ACCENT, font_size=FS_BODY,
+                 bold_active=False, text_anchor="w", text_pad=14,
+                 duration_ms=320, hover_ms=160, width=1, height=1):
+        super().__init__(parent, bg=bg_color, highlightthickness=0, bd=0,
+                         width=width, height=height)
+        self._items = [(key, str(text)) for key, text in items]
+        self._keys = [key for key, _ in self._items]
+        self._command = command
+        self._orientation = orientation
+        self._item_height = item_height
+        self._pad = pad
+        self._gap = gap
+        self._radius = radius
+        self._bg = bg_color
+        self._pill_color = pill_color
+        self._hover_color = hover_color
+        self._text_color = text_color
+        self._active_text_color = active_text_color
+        # 字体族要在构造时取（apply_font_fallbacks 会就地改写全局名）
+        self._font = (FONT_FAMILY, font_size)
+        self._font_active = (FONT_FAMILY, font_size,
+                             "bold" if bold_active else "normal")
+        self._text_anchor = text_anchor
+        self._text_pad = text_pad
+        self._duration_ms = duration_ms
+        self._hover_ms = hover_ms
+
+        self._active = None
+        self._rects = []
+        self._text_ids = []
+        self._text_colors = {}
+        self._pill_id = None
+        self._pill_rect = None
+        self._pill_alpha = 0.0
+        self._hover_id = None
+        self._hover_rect = None
+        self._hover_alpha = 0.0
+        self._hover_index = -1
+        self._size = (0, 0)
+        self._laid_out = False
+
+        # 层级：悬停层 -> 滑块 -> 文字
+        self._hover_id = self.create_polygon(
+            *self._rect_points((-6, -6, -3, -3)), smooth=True, splinesteps=24,
+            fill=bg_color, outline="")
+        self._pill_id = self.create_polygon(
+            *self._rect_points((-6, -6, -3, -3)), smooth=True, splinesteps=24,
+            fill=bg_color, outline="")
+        for index, (_, text) in enumerate(self._items):
+            self._text_ids.append(
+                self.create_text(0, 0, text=text, fill=text_color,
+                                  anchor=text_anchor, font=self._font))
+            self._text_colors[index] = text_color
+        self.bind("<Configure>", self._on_configure)
+        self.bind("<Motion>", self._on_motion)
+        self.bind("<Leave>", self._on_leave)
+        self.bind("<Button-1>", self._on_click)
+
+    # ---------- 几何 ----------
+    def _rect_points(self, rect):
+        x1, y1, x2, y2 = rect
+        radius = max(0.0, min(float(self._radius), (x2 - x1) / 2.0,
+                              (y2 - y1) / 2.0))
+        return [x1 + radius, y1, x2 - radius, y1, x2, y1, x2, y1 + radius,
+                x2, y2 - radius, x2, y2, x2 - radius, y2, x1 + radius, y2,
+                x1, y2, x1, y2 - radius, x1, y1 + radius, x1, y1]
+
+    def _on_configure(self, event):
+        size = (max(1, event.width), max(1, event.height))
+        if size == self._size:
+            return
+        self._size = size
+        self._layout(*size)
+
+    def _layout(self, width, height):
+        count = max(1, len(self._items))
+        rects = []
+        if self._orientation == "vertical":
+            x1, x2 = self._pad, width - self._pad
+            for index in range(count):
+                y1 = self._pad + index * (self._item_height + self._gap)
+                rects.append((x1, y1, x2, y1 + self._item_height))
+        else:
+            inner = width - 2 * self._pad - (count - 1) * self._gap
+            item_w = inner / float(count)
+            y1, y2 = self._pad, height - self._pad
+            x = self._pad
+            for _ in range(count):
+                rects.append((x, y1, x + item_w, y2))
+                x += item_w + self._gap
+        self._rects = rects
+        for index, text_id in enumerate(self._text_ids):
+            x1, y1, x2, y2 = rects[index]
+            center_y = (y1 + y2) / 2.0
+            if self._text_anchor == "w":
+                self.coords(text_id, x1 + self._text_pad, center_y)
+            else:
+                self.coords(text_id, (x1 + x2) / 2.0, center_y)
+        if self._active in self._keys:
+            target = rects[self._keys.index(self._active)]
+            resizing = self._pill_rect is not None
+            self._pill_rect = target
+            self.coords(self._pill_id, *self._rect_points(target))
+            if resizing:
+                # 窗口尺寸变化会打乱滑块的动画轨迹：取消补间并直接落到目标项
+                cancel_tween(self, "pill")
+                self._pill_alpha = 1.0
+                self.itemconfigure(self._pill_id, fill=self._pill_color)
+            elif not self._laid_out:
+                # 首次拿到真实尺寸：补一次带淡入的选中，滑块不会「啪」地出现
+                self._laid_out = True
+                self.select(self._active, animate=True)
+            else:
+                self._pill_alpha = 1.0
+                self.itemconfigure(self._pill_id, fill=self._pill_color)
+        if 0 <= self._hover_index < len(rects):
+            self._hover_rect = rects[self._hover_index]
+            self.coords(self._hover_id, *self._rect_points(self._hover_rect))
+
+    def _index_at(self, x, y):
+        for index, (x1, y1, x2, y2) in enumerate(self._rects):
+            if x1 <= x <= x2 and y1 <= y <= y2:
+                return index
+        return -1
+
+    # ---------- 交互 ----------
+    def _on_motion(self, event):
+        self._set_hover(self._index_at(event.x, event.y))
+
+    def _on_leave(self, _event=None):
+        self._set_hover(-1)
+
+    def _on_click(self, event):
+        index = self._index_at(event.x, event.y)
+        if index < 0:
+            return
+        self.select(self._keys[index], notify=True)
+
+    def _set_hover(self, index, animate=True):
+        if index == self._hover_index:
+            return
+        self._hover_index = index
+        active_index = (self._keys.index(self._active)
+                        if self._active in self._keys else -1)
+        target_alpha = 1.0 if (0 <= index < len(self._rects)
+                               and index != active_index) else 0.0
+        if 0 <= index < len(self._rects):
+            self._hover_rect = self._rects[index]
+            try:
+                self.coords(self._hover_id,
+                            *self._rect_points(self._hover_rect))
+            except Exception:
+                pass
+        start_alpha = self._hover_alpha
+
+        def paint(alpha):
+            self._hover_alpha = alpha
+            try:
+                self.itemconfigure(
+                    self._hover_id,
+                    fill=lerp_color(self._bg, self._hover_color, alpha))
+            except Exception:
+                pass
+
+        if not animate or self._hover_ms <= 0:
+            paint(target_alpha)
+            return
+
+        def frame(e, raw):
+            paint(lerp(start_alpha, target_alpha, e))
+
+        tween(self, "hover", self._hover_ms, frame, easing=ease_out_cubic)
+
+    # ---------- 选中 ----------
+    def current(self):
+        """当前选中项的 key（未选中返回 None）。"""
+        return self._active
+
+    def index_of(self, key):
+        return self._keys.index(key) if key in self._keys else -1
+
+    def select(self, key, animate=True, notify=False):
+        if key not in self._keys:
+            return
+        index = self._keys.index(key)
+        previous = self._active
+        self._active = key
+        self._animate_texts(previous, index, animate)
+        self._move_pill(index, animate)
+        if self._hover_index == index:
+            self._set_hover(-1, animate=animate)
+        if notify and callable(self._command):
+            try:
+                self._command(key)
+            except Exception:
+                pass
+
+    def _move_pill(self, index, animate=True):
+        if not self._rects:
+            return
+        target = self._rects[index]
+        if not animate:
+            self._pill_rect = target
+            self._pill_alpha = 1.0
+            self.coords(self._pill_id, *self._rect_points(target))
+            self.itemconfigure(self._pill_id, fill=self._pill_color)
+            return
+        start = self._pill_rect or target
+        start_alpha = self._pill_alpha
+
+        def frame(e, raw):
+            self._pill_rect = tuple(lerp(a, b, e)
+                                    for a, b in zip(start, target))
+            self._pill_alpha = lerp(start_alpha, 1.0, e)
+            self.coords(self._pill_id, *self._rect_points(self._pill_rect))
+            self.itemconfigure(
+                self._pill_id,
+                fill=lerp_color(self._bg, self._pill_color, self._pill_alpha))
+
+        def done():
+            self._pill_rect = target
+            self._pill_alpha = 1.0
+            self.coords(self._pill_id, *self._rect_points(target))
+            self.itemconfigure(self._pill_id, fill=self._pill_color)
+
+        frame(0.0, 0.0)      # 立即落到起点，滑块不等待第一帧
+        tween(self, "pill", self._duration_ms, frame, done,
+              easing=ease_out_quint)
+
+    def _animate_texts(self, previous_key, active_index, animate=True):
+        for index, text_id in enumerate(self._text_ids):
+            is_active = (index == active_index)
+            target = self._active_text_color if is_active else self._text_color
+            start = self._text_colors.get(index, self._text_color)
+            try:
+                self.itemconfigure(text_id,
+                                   font=self._font_active if is_active
+                                   else self._font)
+            except Exception:
+                pass
+            if not animate or start == target:
+                self._text_colors[index] = target
+                try:
+                    self.itemconfigure(text_id, fill=target)
+                except Exception:
+                    pass
+                continue
+
+            def frame(e, raw, i=index, s=start, t=target, item=text_id):
+                color = lerp_color(s, t, e)
+                self._text_colors[i] = color
+                try:
+                    self.itemconfigure(item, fill=color)
+                except Exception:
+                    pass
+
+            frame(0.0, 0.0)
+            tween(self, "text{}".format(index), 240, frame,
+                  easing=ease_out_cubic)
+
+
+class SlideStack:
+    """把若干页面放进一个 Canvas，用缓动曲线做「推入 / 推出」切换。
+
+    Canvas 会裁剪内嵌窗口，所以页面在滑动过程中不会溢到侧边栏上 ——
+    这也是这里不直接用 place() 搬页面的原因（Tk 普通容器不裁剪子控件）。
+    """
+
+    def __init__(self, parent, bg_color=C_WINDOW_BG, duration_ms=340,
+                 easing=ease_out_quint):
+        self.canvas = Canvas(parent, bg=bg_color, highlightthickness=0, bd=0)
+        self.canvas.pack(fill=BOTH, expand=True)
+        self.bg_color = bg_color
+        self.duration_ms = duration_ms
+        self.easing = easing
+        self.frames = {}
+        self.items = {}
+        self.order = []
+        self.current = None
+        self._size = (1, 1)
+        self.canvas.bind("<Configure>", self._on_configure)
+
+    def add(self, key, frame):
+        try:
+            frame.configure(fg_color=self.bg_color)
+        except Exception:
+            pass
+        item = self.canvas.create_window(
+            0, 0, window=frame, anchor="nw",
+            width=self._size[0], height=self._size[1])
+        self.canvas.itemconfigure(item, state="hidden")
+        self.frames[key] = frame
+        self.items[key] = item
+        if key not in self.order:
+            self.order.append(key)
+        return item
+
+    def _on_configure(self, event):
+        self._size = (max(1, event.width), max(1, event.height))
+        for item in self.items.values():
+            try:
+                self.canvas.itemconfigure(item, width=self._size[0],
+                                          height=self._size[1])
+            except Exception:
+                pass
+        if (id(self.canvas), "slide") in _TWEENS:
+            # 切换动画进行中被重排：轨迹已失效，直接落到终点
+            cancel_tween(self.canvas, "slide")
+            self._settle()
+        if self.current in self.items:
+            self.canvas.coords(self.items[self.current], 0, 0)
+
+    def _settle(self):
+        """把所有页面归位：当前页贴左可见，其余隐藏。"""
+        for key, item in self.items.items():
+            try:
+                self.canvas.coords(item, 0, 0)
+                self.canvas.itemconfigure(
+                    item, state="normal" if key == self.current else "hidden")
+            except Exception:
+                pass
+
+    def show(self, key, animate=True, direction=1):
+        if key not in self.items or key == self.current:
+            return
+        width = float(self._size[0])
+        previous = self.current
+        new_item = self.items[key]
+        try:
+            self.canvas.itemconfigure(new_item, state="normal")
+            self.canvas.tag_raise(new_item)
+        except Exception:
+            pass
+        self.current = key
+        if previous is None or not animate:
+            try:
+                self.canvas.coords(new_item, 0, 0)
+                if previous is not None and previous in self.items:
+                    self.canvas.itemconfigure(self.items[previous],
+                                              state="hidden")
+                    self.canvas.coords(self.items[previous], 0, 0)
+            except Exception:
+                pass
+            return
+
+        old_item = self.items[previous]
+        offset = width * (1 if direction >= 0 else -1)
+
+        def frame(e, raw):
+            try:
+                self.canvas.coords(new_item, lerp(offset, 0.0, e), 0)
+                self.canvas.coords(old_item, lerp(0.0, -offset, e), 0)
+            except Exception:
+                pass
+
+        def done():
+            try:
+                self.canvas.coords(new_item, 0, 0)
+                self.canvas.coords(old_item, 0, 0)
+                self.canvas.itemconfigure(old_item, state="hidden")
+            except Exception:
+                pass
+
+        frame(0.0, 0.0)      # 先摆到起点，避免第一帧前闪一下原位
+        tween(self.canvas, "slide", self.duration_ms, frame, done,
+              easing=self.easing)
+
+
+class Toast:
+    """右上角浮出提示：曲线滑入 + 自动淡出，全程不阻塞操作。"""
+
+    def __init__(self, host, text, kind="success", duration_ms=1700):
+        self.host = host
+        self.color = {"success": C_SUCCESS, "info": C_ACCENT,
+                      "warning": C_WARNING, "error": C_ERROR}.get(kind, C_ACCENT)
+        self.frame = ctk.CTkFrame(host.overlay_host, fg_color=C_PANEL_BG,
+                                   corner_radius=R_CONTROL,
+                                   border_width=BORDER_W,
+                                   border_color=self.color)
+        self.label = ctk.CTkLabel(self.frame, text=text, text_color=self.color,
+                                   font=(FONT_FAMILY, FS_SMALL),
+                                   fg_color="transparent")
+        self.label.pack(padx=PAD_CARD_X, pady=PAD_TIGHT)
+        self._offset = 28
+        self._hold_ms = duration_ms
+        self._place()
+        self._play_in()
+
+    def _place(self):
+        try:
+            self.frame.place(relx=1.0, rely=0.0, anchor="ne",
+                              x=-PAD_WINDOW - self._offset, y=PAD_WINDOW)
+        except Exception:
+            pass
+
+    def _play_in(self):
+        def frame(e, raw):
+            self._offset = lerp(28.0, 0.0, e)
+            self._place()
+
+        def done():
+            try:
+                self.host.root.after(self._hold_ms, self._play_out)
+            except Exception:
+                pass
+
+        frame(0.0, 0.0)
+        tween(self.frame, "toast_in", 280, frame, done, easing=ease_out_back)
+
+    def _play_out(self):
+        def frame(e, raw):
+            self._offset = lerp(0.0, 28.0, e)
+            self._place()
+            try:
+                self.frame.configure(
+                    fg_color=lerp_color(C_PANEL_BG, C_WINDOW_BG, e),
+                    border_color=lerp_color(self.color, C_WINDOW_BG, e))
+                self.label.configure(
+                    text_color=lerp_color(self.color, C_WINDOW_BG, e))
+            except Exception:
+                pass
+
+        tween(self.frame, "toast_out", 260, frame, self.close,
+              easing=ease_in_out_cubic)
+
+    def close(self):
+        cancel_all_tweens(self.frame)
+        try:
+            self.frame.destroy()
+        except Exception:
+            pass
+
+
 # ==================== 控件工厂 ====================
 def make_button(parent, text, command=None, width=None, state="normal", accent=False):
+    """统一按钮工厂：返回的按钮自带 hover / 按下的曲线过渡。"""
     kwargs = dict(
         text=text, command=command,
-        fg_color=C_ACCENT if accent else C_PANEL_ALT_BG,
-        hover_color=C_ACCENT_HOVER if accent else C_ACCENT_SOFT,
         text_color=C_TEXT_INVERSE if accent else C_TEXT_MAIN,
         border_color=C_ACCENT if accent else C_BORDER_SOFT,
         border_width=BORDER_W, corner_radius=R_CONTROL,
         font=(FONT_FAMILY, FS_BODY), height=H_CONTROL, state=state)
     if width is not None:
         kwargs['width'] = width
-    return ctk.CTkButton(parent, **kwargs)
+    if accent:
+        return AnimatedButton(parent, C_ACCENT, C_ACCENT_HOVER,
+                               press_color=C_ACCENT_HOVER, **kwargs)
+    return AnimatedButton(parent, C_PANEL_ALT_BG, C_ACCENT_SOFT, **kwargs)
 
 
 def make_entry(parent, textvariable=None, placeholder="", width=None):
@@ -746,7 +1482,21 @@ class OverlayCard(_OverlayCardBase):
             self.mask.focus_set()
         except Exception:
             pass
+        self._play_entrance()
         _OVERLAY_STACK.append(self)
+
+    def _play_entrance(self):
+        """卡片入场：从下方 4.5% 处曲线滑到居中，同时描边从强调色淡回发丝色。"""
+        def frame(e, raw):
+            try:
+                self.card.place_configure(rely=lerp(0.545, 0.5, e))
+                self.card.configure(
+                    border_color=lerp_color(C_ACCENT_SOFT, C_BORDER_SOFT, e))
+            except Exception:
+                pass
+
+        frame(0.0, 0.0)
+        tween(self.card, "entrance", 260, frame, easing=ease_out_cubic)
 
     def _key_widgets(self):
         return [self.mask, self.card, self.body]
@@ -1543,14 +2293,32 @@ class GuideManager:
                     'border_color': orig_bc,
                     'border_width': orig_bw,
                 }
-            widget.configure(border_color=color, border_width=width)
+            widget.configure(border_width=width)
+            self._pulse(widget, color)
         except Exception:
             pass
+
+    def _pulse(self, widget, color):
+        """描边呼吸：在强调色与提亮色之间来回缓动（三角波），直到 hide()。"""
+        light = lerp_color(color, "#FFFFFF", 0.6)
+
+        def frame(e, raw):
+            triangle = raw if raw <= 0.5 else (1.0 - raw)
+            try:
+                widget.configure(
+                    border_color=lerp_color(color, light, triangle))
+            except Exception:
+                pass
+
+        frame(0.0, 0.0)
+        tween(widget, "guide", 1400, frame, on_done=lambda: self._pulse(
+            widget, color), easing=ease_linear)
 
     def _restore_all(self):
         for wid, saved in list(self._originals.items()):
             try:
                 w = saved['widget']
+                cancel_tween(w, "guide")
                 w.configure(border_color=saved['border_color'],
                             border_width=saved['border_width'])
             except Exception:
@@ -2531,9 +3299,11 @@ class PresetManager:
 # ==================== 设置对话框 ====================
 class SettingsPage:
     """
-    设置页面（取代原 SettingsDialog 弹窗）：挂在侧边栏「设置」页里，
-    页面内部用选项卡（常规 / 数据库 / 关于）分类，不再新开窗口。
-    原弹窗里的「保存 / 取消」语义保留为页面底部的「保存设置 / 放弃修改」。
+    设置页面（侧边栏「设置」页）：
+    · 选项卡改成自绘的 CanvasSegmented，选中滑块带曲线滑动动画；
+    · 选项卡内容用 SlideStack 做同款推入/推出切换；
+    · 所有选项改完立即自动保存（写数据库目录下的 .settings.json），
+      底部按钮条只保留「恢复默认」和自动保存状态回显。
     """
 
     def __init__(self, parent_frame, app, on_save_callback=None,
@@ -2544,47 +3314,79 @@ class SettingsPage:
         self.settings: AppSettings = app.settings
         self.on_save_callback = on_save_callback
         self.on_db_action = on_db_action
+        self._loading = False
 
-        self.frame = ctk.CTkFrame(parent_frame, fg_color="transparent")
+        self.frame = ctk.CTkFrame(parent_frame, fg_color=C_WINDOW_BG)
 
-        self.tabview = ctk.CTkTabview(
-            self.frame, fg_color=C_WINDOW_BG, corner_radius=R_CARD,
-            border_width=BORDER_W, border_color=C_BORDER_SOFT,
-            segmented_button_fg_color=C_PANEL_ALT_BG,
-            segmented_button_selected_color=C_ACCENT,
-            segmented_button_selected_hover_color=C_ACCENT_HOVER,
-            segmented_button_unselected_color=C_PANEL_ALT_BG,
-            segmented_button_unselected_hover_color=C_ACCENT_SOFT,
-            text_color=C_TEXT_MAIN)
-        self.tabview.pack(fill=BOTH, expand=True)
-        tab_general = self.tabview.add("常规")
-        tab_database = self.tabview.add("数据库")
-        tab_about = self.tabview.add("关于")
+        # ===== 选项卡头部：自绘分段控件（滑块带动画） =====
+        head = ctk.CTkFrame(self.frame, fg_color=C_CARD_BG,
+                             corner_radius=R_CARD, border_width=BORDER_W,
+                             border_color=C_BORDER_SOFT, height=H_TAB_HEAD)
+        head.pack(fill=X)
+        head.pack_propagate(False)
+        self.tab_bar = CanvasSegmented(
+            head, [("general", "常规"), ("database", "数据库"), ("about", "关于")],
+            command=self._on_tab_selected, orientation="horizontal",
+            item_height=H_CONTROL, pad=8, gap=6, radius=R_CONTROL,
+            bg_color=C_CARD_BG, pill_color=C_ACCENT, hover_color=C_ACCENT_SOFT,
+            text_color=C_TEXT_SECONDARY, active_text_color=C_TEXT_INVERSE,
+            font_size=FS_SMALL, bold_active=True, text_anchor="center",
+            duration_ms=320)
+        self.tab_bar.pack(fill=BOTH, expand=True, padx=PAD_XS, pady=PAD_XS)
+
+        # ===== 选项卡内容：Canvas 承载，切换时整块推入/推出 =====
+        self.stack = SlideStack(self.frame, bg_color=C_WINDOW_BG, duration_ms=320)
+        self.stack.canvas.pack_configure(pady=(PAD_GAP, 0))
 
         self.storage_var = StringVar(value=self.settings.storage_mode)
         self.role_var = StringVar(value=self.settings.role)
 
-        self._build_general(tab_general)
-        self._build_database(tab_database)
-        self._build_about(tab_about)
+        self.tabs = {}
+        for key in ("general", "database", "about"):
+            tab = ctk.CTkFrame(self.stack.canvas, fg_color=C_WINDOW_BG)
+            self.tabs[key] = tab
+            self.stack.add(key, tab)
 
+        self._build_general(self.tabs["general"])
+        self._build_database(self.tabs["database"])
+        self._build_about(self.tabs["about"])
+
+        # ===== 底部按钮条：自动保存状态 + 恢复默认 =====
         self.btn_bar = ctk.CTkFrame(self.frame, fg_color=C_CARD_BG,
                                      corner_radius=R_CARD, height=H_BTN_BAR,
                                      border_width=BORDER_W,
                                      border_color=C_BORDER_SOFT)
         self.btn_bar.pack(fill=X, pady=(PAD_GAP, 0))
         self.btn_bar.pack_propagate(False)
-        make_button(self.btn_bar, "保存设置", command=self.save, accent=True,
+        make_button(self.btn_bar, "恢复默认", command=self._reset_defaults,
                      width=100).pack(side=RIGHT, padx=(PAD_TIGHT, PAD_DIALOG),
                                      pady=(H_BTN_BAR - H_CONTROL) // 2)
-        make_button(self.btn_bar, "放弃修改", command=self.reload,
-                     width=100).pack(side=RIGHT, padx=(0, PAD_TIGHT),
-                                     pady=(H_BTN_BAR - H_CONTROL) // 2)
-        make_label(self.btn_bar, text="设置保存在数据库目录的 .settings.json",
-                    fg=C_TEXT_MUTED, font_size=FS_TINY).pack(
-                        side=LEFT, padx=PAD_DIALOG)
+        self.saved_label = make_label(self.btn_bar, text=self._saved_hint(),
+                                       fg=C_TEXT_MUTED, font_size=FS_TINY)
+        self.saved_label.pack(side=LEFT, padx=PAD_DIALOG)
 
         self.reload()
+        self.show_tab("general", animate=False)
+
+    def _saved_hint(self):
+        return "改动即时生效 · 自动保存到数据库目录的 .settings.json"
+
+    # ==================== 选项卡切换 ====================
+    def _on_tab_selected(self, key):
+        self.show_tab(key)
+
+    def show_tab(self, key, animate=True):
+        if key not in self.tabs:
+            return
+        direction = 1
+        previous = self.tab_bar.current()
+        if previous is not None and previous != key:
+            old_index = self.tab_bar.index_of(previous)
+            new_index = self.tab_bar.index_of(key)
+            if old_index >= 0 and new_index >= 0 and new_index < old_index:
+                direction = -1
+        self.tab_bar.select(key, animate=animate, notify=False)
+        self.stack.show(key, animate=animate, direction=direction)
 
     # ==================== 选项卡：常规 ====================
     def _build_general(self, tab):
@@ -2594,9 +3396,11 @@ class SettingsPage:
         mode_card = ctk.CTkFrame(tab, fg_color=C_CARD_BG, corner_radius=R_CARD,
                                   border_width=BORDER_W, border_color=C_BORDER_SOFT)
         mode_card.pack(fill=X, pady=(0, PAD_DIALOG))
+        attach_hover_glow(mode_card)
 
         ctk.CTkRadioButton(mode_card, text="隔离存储（推荐，每个整合包独立预设）",
                             variable=self.storage_var, value="isolated",
+                            command=self._on_auto_save,
                             text_color=C_TEXT_MAIN, font=(FONT_FAMILY, FS_SMALL),
                             fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
                             border_color=C_BORDER).pack(
@@ -2607,6 +3411,7 @@ class SettingsPage:
                         anchor=W, padx=PAD_INDENT, pady=(0, PAD_TIGHT))
         ctk.CTkRadioButton(mode_card, text="合并存储（所有整合包共用预设）",
                             variable=self.storage_var, value="merged",
+                            command=self._on_auto_save,
                             text_color=C_TEXT_MAIN, font=(FONT_FAMILY, FS_SMALL),
                             fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
                             border_color=C_BORDER).pack(
@@ -2623,9 +3428,11 @@ class SettingsPage:
         role_card = ctk.CTkFrame(tab, fg_color=C_CARD_BG, corner_radius=R_CARD,
                                   border_width=BORDER_W, border_color=C_BORDER_SOFT)
         role_card.pack(fill=X, pady=(0, PAD_DIALOG))
+        attach_hover_glow(role_card)
 
         ctk.CTkRadioButton(role_card, text="玩家（默认）",
                             variable=self.role_var, value="player",
+                            command=self._on_auto_save,
                             text_color=C_TEXT_MAIN, font=(FONT_FAMILY, FS_SMALL),
                             fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
                             border_color=C_BORDER).pack(
@@ -2636,6 +3443,7 @@ class SettingsPage:
                         anchor=W, padx=PAD_INDENT, pady=(0, PAD_TIGHT))
         ctk.CTkRadioButton(role_card, text="开发者",
                             variable=self.role_var, value="developer",
+                            command=self._on_auto_save,
                             text_color=C_TEXT_MAIN, font=(FONT_FAMILY, FS_SMALL),
                             fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
                             border_color=C_BORDER).pack(
@@ -2675,9 +3483,12 @@ class SettingsPage:
             side=LEFT, padx=PAD_TIGHT)
 
         btn_row2 = ctk.CTkFrame(db_mgr_card, fg_color="transparent")
-        btn_row2.pack(fill=X, padx=PAD_CARD_X, pady=(0, PAD_CARD_Y))
+        btn_row2.pack(fill=X, padx=PAD_CARD_X, pady=(0, PAD_TIGHT))
         make_button(btn_row2, "打开数据库文件夹", command=self.on_open_db).pack(
             side=LEFT, padx=(0, PAD_TIGHT))
+        make_button(btn_row2, "⚠ 强制更新校验数据",
+                     command=self.app.force_update_validation).pack(
+            side=LEFT, padx=PAD_TIGHT)
         make_label(db_mgr_card,
             text="提示：右键预设可迁移到其他整合包/数据库。",
             fg=C_TEXT_MUTED, font_size=FS_TINY).pack(
@@ -2695,6 +3506,7 @@ class SettingsPage:
         info_card = ctk.CTkFrame(tab, fg_color=C_CARD_BG, corner_radius=R_CARD,
                                   border_width=BORDER_W, border_color=C_BORDER_SOFT)
         info_card.pack(fill=X, pady=(0, PAD_DIALOG))
+        attach_hover_glow(info_card)
         self.about_db_label = make_label(info_card, text="", fg=C_TEXT_MAIN,
                                          font_size=FS_SMALL)
         self.about_db_label.configure(wraplength=620, justify=LEFT, anchor=W)
@@ -2712,16 +3524,21 @@ class SettingsPage:
         make_button(btn_row, "📄 功能列表",
                      command=self.app.show_about_detail).pack(
                         side=LEFT, padx=PAD_TIGHT)
+        make_button(btn_row, "⏻ 退出程序",
+                     command=self.app.request_exit).pack(
+                        side=LEFT, padx=PAD_TIGHT)
 
     # ==================== 状态同步 ====================
     def reload(self):
-        """把当前设置重新读进控件（进入页面 / 点「放弃修改」时调用）。"""
+        """把当前设置重新读进控件（进入页面时调用）。不触发自动保存。"""
+        self._loading = True
         try:
             self.storage_var.set(self.settings.storage_mode)
             self.role_var.set(self.settings.role)
         except Exception:
             pass
         self._update_db_labels()
+        self._loading = False
 
     def _update_db_labels(self):
         db_str = (str(self.settings._settings_file.parent)
@@ -2738,10 +3555,7 @@ class SettingsPage:
                 pass
 
     def show_about_tab(self):
-        try:
-            self.tabview.set("关于")
-        except Exception:
-            pass
+        self.show_tab("about")
 
     # ==================== 行为（语义与原 SettingsDialog 一致） ====================
     def on_switch_db(self):
@@ -2767,15 +3581,42 @@ class SettingsPage:
             except Exception:
                 pass
 
-    def save(self):
+    # ==================== 自动保存 ====================
+    def _can_persist(self):
+        """没有数据库就没有落盘位置：只提示，不弹模态打断。"""
+        if self.settings._settings_file is None:
+            if hasattr(self.app, "toast"):
+                self.app.toast("数据库未初始化，设置无法保存", "warning")
+            return False
+        return True
+
+    def _on_auto_save(self):
+        """单选项一改就落盘：不再需要「保存设置」按钮。"""
+        if self._loading:
+            return
+        changed = (self.storage_var.get() != self.settings.storage_mode
+                   or self.role_var.get() != self.settings.role)
+        if not changed:
+            return          # 重复点同一个单选项不算改动，不刷提示
+        if not self._can_persist():
+            self.reload()   # 回退控件，保持界面与真实设置一致
+            return
+        self.save(notify=True)
+
+    def save(self, notify=True):
+        """把控件当前值写进 settings 并落盘；返回是否成功。"""
         old_mode = self.settings.storage_mode
         self.settings.storage_mode = self.storage_var.get()
         self.settings.role = self.role_var.get()
         if not self.settings.save():
             show_error("错误",
-                "保存设置失败，请检查数据库文件夹是否可写",
+                "保存设置失败。\n\n"
+                "数据库可能尚未初始化，或数据库目录不可写。",
                 parent=self.root)
-            return
+            return False
+        self._update_db_labels()
+        if notify:
+            self._flash_saved()
         if old_mode != self.settings.storage_mode:
             if self.settings.storage_mode == "merged":
                 show_warning("提示",
@@ -2790,9 +3631,52 @@ class SettingsPage:
                     "每个整合包使用独立数据库。\n"
                     "重新打开整合包后生效。",
                     parent=self.root)
-        self._update_db_labels()
         if self.on_save_callback:
             self.on_save_callback()
+        return True
+
+    def _reset_defaults(self):
+        if not self._can_persist():
+            return
+        self._loading = True
+        try:
+            self.storage_var.set("isolated")
+            self.role_var.set("player")
+        finally:
+            self._loading = False
+        if self.save(notify=True) and hasattr(self.app, "toast"):
+            self.app.toast("已恢复默认设置", "info")
+
+    def _flash_saved(self):
+        """自动保存回显：先亮一下，再曲线淡回提示色。"""
+        try:
+            self.saved_label.configure(text="✓ 已自动保存",
+                                        text_color=C_SUCCESS)
+        except Exception:
+            return
+
+        def fade():
+            def frame(e, raw):
+                try:
+                    self.saved_label.configure(
+                        text_color=lerp_color(C_SUCCESS, C_TEXT_MUTED, e))
+                except Exception:
+                    pass
+
+            tween(self.saved_label, "saved", 460, frame,
+                  on_done=self._reset_saved_text, easing=ease_in_out_cubic)
+
+        try:
+            self.root.after(760, fade)
+        except Exception:
+            fade()
+
+    def _reset_saved_text(self):
+        try:
+            self.saved_label.configure(text=self._saved_hint(),
+                                        text_color=C_TEXT_MUTED)
+        except Exception:
+            pass
 
 
 # ==================== 主窗口 ====================
@@ -2938,7 +3822,7 @@ class PulsesSwapApp:
         main_frame.grid_columnconfigure(0, weight=0, minsize=SIDEBAR_W)
         main_frame.grid_columnconfigure(1, weight=1)
 
-        # ===== 侧边导航栏 =====
+        # ===== 侧边导航栏：只有品牌 + 导航项，不放任何提示文案 =====
         sidebar = ctk.CTkFrame(main_frame, fg_color=C_CARD_BG, corner_radius=R_CARD,
                                 border_width=BORDER_W, border_color=C_BORDER_SOFT,
                                 width=SIDEBAR_W)
@@ -2953,30 +3837,19 @@ class PulsesSwapApp:
                     font_size=FS_TINY).pack(anchor=W, padx=PAD_CARD_X,
                                             pady=(PAD_MICRO, PAD_GAP))
 
-        nav_box = ctk.CTkFrame(sidebar, fg_color="transparent")
-        nav_box.pack(fill=X, padx=PAD_XS, pady=(0, PAD_GAP))
-        self.nav_buttons = {}
-        for key, text in (("home", "🏠  主界面"),
-                          ("settings", "⚙  设置"),
-                          ("log", "📋  日志")):
-            btn = ctk.CTkButton(nav_box, text=text, anchor="w",
-                                 command=lambda k=key: self.show_page(k),
-                                 height=H_NAV, corner_radius=R_CONTROL,
-                                 fg_color="transparent",
-                                 hover_color=C_ACCENT_SOFT,
-                                 text_color=C_TEXT_MAIN,
-                                 border_color=C_ACCENT,
-                                 font=(FONT_FAMILY, FS_BODY))
-            btn.pack(fill=X, pady=(0, PAD_XS))
-            self.nav_buttons[key] = btn
-
-        tips = make_label(sidebar,
-                           text="拖入整合包根目录即可开始\n"
-                                "拖入 .fgcpack 导入预设",
-                           fg=C_TEXT_MUTED, font_size=FS_TINY)
-        tips.configure(wraplength=SIDEBAR_W - 2 * PAD_CARD_X,
-                        justify=LEFT, anchor=W)
-        tips.pack(side=BOTTOM, fill=X, padx=PAD_CARD_X, pady=PAD_CARD_Y)
+        # 导航项用 Canvas 自绘：选中滑块可以逐帧滑到目标项（见 CanvasSegmented）
+        nav_items = (("home", "🏠   主界面"),
+                     ("settings", "⚙   设置"),
+                     ("log", "📋   日志"))
+        nav_height = len(nav_items) * (H_NAV + PAD_XS) + 2 * PAD_XS
+        self.nav = CanvasSegmented(
+            sidebar, nav_items, command=self.show_page,
+            orientation="vertical", item_height=H_NAV, pad=4, gap=PAD_XS,
+            radius=R_CONTROL, bg_color=C_CARD_BG, pill_color=C_ACCENT_SOFT,
+            hover_color=C_ACCENT_SOFT, text_color=C_TEXT_MAIN,
+            active_text_color=C_ACCENT, font_size=FS_BODY, bold_active=True,
+            text_anchor="w", text_pad=14, duration_ms=340, height=nav_height)
+        self.nav.pack(fill=X, padx=PAD_XS)
 
         # ===== 右侧内容列：页面区 + 全局状态条（进度条） =====
         content_col = ctk.CTkFrame(main_frame, fg_color="transparent")
@@ -2987,6 +3860,10 @@ class PulsesSwapApp:
 
         self.page_host = ctk.CTkFrame(content_col, fg_color="transparent")
         self.page_host.grid(row=0, column=0, sticky="nsew")
+        # 页面放在 Canvas 里：Canvas 会裁剪子窗口，推入/推出的过程不会溢到侧边栏
+        self.stack = SlideStack(self.page_host, bg_color=C_WINDOW_BG,
+                                 duration_ms=340)
+        self.page_canvas = self.stack.canvas
 
         # 进度条移到全局状态条：原来在右栏里，show_progress/hide_progress 的
         # pack/pack_forget 语义不变，只是父容器换成了这里
@@ -3010,10 +3887,12 @@ class PulsesSwapApp:
         self.pages["home"] = self._build_home_page()
         self.pages["log"] = self._build_log_page()
         self.settings_page = SettingsPage(
-            self.page_host, self,
+            self.stack.canvas, self,
             on_save_callback=self._on_settings_saved,
             on_db_action=self._on_db_action)
         self.pages["settings"] = self.settings_page.frame
+        for key in ("home", "settings", "log"):
+            self.stack.add(key, self.pages[key])
 
         # ===== 新手引导注册 =====
         self.guide = GuideManager(self.root)
@@ -3027,36 +3906,69 @@ class PulsesSwapApp:
             "step3_apply", [self.apply_btn],
             desc="Step 4 · 点击「⚡ 一键替换」启用预设")
 
-        self.show_page("home")
+        self.show_page("home", animate=False)
+        self._play_entrance()
+
+    # ==================== 入场动画 ====================
+    def _play_entrance(self):
+        """启动入场：当前页从右侧轻轻滑入，侧边栏滑块同步淡入。"""
+        item = self.stack.items.get(self.active_page)
+        if item is not None:
+            def frame(e, raw):
+                try:
+                    self.stack.canvas.coords(item, lerp(56.0, 0.0, e), 0)
+                except Exception:
+                    pass
+
+            frame(0.0, 0.0)
+            tween(self.stack.canvas, "entrance", 460, frame,
+                  easing=ease_out_quint)
+        self._update_nav_state(self.active_page, animate=True)
 
     # ==================== 页面切换 ====================
-    def show_page(self, name):
-        """切换右侧页面（侧边栏导航）。不重排页面内容，只 pack/pack_forget。"""
-        page = self.pages.get(name)
-        if page is None:
+    PAGE_ORDER = ("home", "settings", "log")
+
+    def show_page(self, name, animate=True):
+        """切换右侧页面：整页在 Canvas 里推入/推出，侧边栏滑块同步滑动。"""
+        if name not in self.pages or name == self.active_page:
             return
-        for key, widget in self.pages.items():
+        cancel_tween(self.stack.canvas, "entrance")
+        previous = self.active_page
+        direction = 1
+        if previous is not None:
             try:
-                if key == name:
-                    widget.pack(fill=BOTH, expand=True)
-                else:
-                    widget.pack_forget()
-            except Exception:
-                pass
+                if (self.PAGE_ORDER.index(name)
+                        < self.PAGE_ORDER.index(previous)):
+                    direction = -1
+            except ValueError:
+                direction = 1
         self.active_page = name
-        self._update_nav_state()
+        self._update_nav_state(name, animate=animate)
+        self.stack.show(name, animate=animate, direction=direction)
         if name == "settings" and self.settings_page is not None:
             self.settings_page.reload()
 
-    def _update_nav_state(self):
-        for key, btn in getattr(self, 'nav_buttons', {}).items():
-            active = (key == self.active_page)
+    def _update_nav_state(self, name=None, animate=True):
+        target = name or self.active_page
+        nav = getattr(self, "nav", None)
+        if nav is None or not target:
+            return
+        if nav.current() == target:
+            return
+        nav.select(target, animate=animate)
+
+    def toast(self, text, kind="success", duration_ms=1700):
+        """右上角浮出提示（曲线滑入 + 自动淡出），同一时刻只留一条。"""
+        previous = getattr(self, "_toast", None)
+        if previous is not None:
             try:
-                btn.configure(fg_color=C_ACCENT_SOFT if active else "transparent",
-                               text_color=C_ACCENT if active else C_TEXT_MAIN,
-                               border_width=BORDER_W if active else 0)
+                previous.close()
             except Exception:
                 pass
+        try:
+            self._toast = Toast(self, text, kind=kind, duration_ms=duration_ms)
+        except Exception:
+            self._toast = None
 
     def open_log_page(self):
         self.show_page("log")
@@ -3064,7 +3976,7 @@ class PulsesSwapApp:
 
     # ==================== 主界面（Step 1/2/3 + 枪包列表） ====================
     def _build_home_page(self):
-        page = ctk.CTkFrame(self.page_host, fg_color="transparent")
+        page = ctk.CTkFrame(self.stack.canvas, fg_color=C_WINDOW_BG)
         page.grid_rowconfigure(0, weight=1)
         page.grid_columnconfigure(0, weight=0, minsize=LEFT_COL_W)
         page.grid_columnconfigure(1, weight=1)
@@ -3088,6 +4000,7 @@ class PulsesSwapApp:
         pack_group = ctk.CTkFrame(left_panel, fg_color=C_CARD_BG, corner_radius=R_CARD,
                                     border_width=BORDER_W, border_color=C_BORDER_SOFT)
         pack_group.grid(row=0, column=0, sticky="nsew", pady=(0, PAD_GAP))
+        attach_hover_glow(pack_group)
         make_label(pack_group, text="Step 1 · 整合包", fg=C_ACCENT,
                     font_size=FS_SUBHEAD, bold=True).pack(
                         anchor=W, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
@@ -3125,6 +4038,10 @@ class PulsesSwapApp:
                                            command=self.open_pack_folder,
                                            width=32, state="disabled")
         self.open_pack_btn.pack(side=LEFT, padx=(0, PAD_XS))
+        self.close_pack_btn = make_button(pack_btn_row, "✕ 关闭",
+                                            command=self.close_pack,
+                                            width=64)
+        self.close_pack_btn.pack(side=LEFT, padx=(0, PAD_XS))
         self.recent_toggle_btn = make_button(pack_btn_row, "▼ 最近",
                                                command=self.toggle_recent,
                                                width=70)
@@ -3139,8 +4056,12 @@ class PulsesSwapApp:
                 except Exception:
                     pass
 
-        # 最近打开（折叠）
-        self.recent_frame = ctk.CTkFrame(pack_content, fg_color=C_PANEL_ALT_BG,
+        # 最近打开（折叠）：外层 wrap 固定高度，展开/收起用高度补间驱动
+        self.recent_wrap = ctk.CTkFrame(pack_content, fg_color="transparent",
+                                         height=1)
+        self.recent_wrap.pack(fill=X)
+        self.recent_wrap.pack_propagate(False)
+        self.recent_frame = ctk.CTkFrame(self.recent_wrap, fg_color=C_PANEL_ALT_BG,
                                           corner_radius=R_CONTROL, border_width=BORDER_W,
                                           border_color=C_BORDER_SOFT)
         self.recent_listbox = Listbox(self.recent_frame, height=5,
@@ -3164,6 +4085,7 @@ class PulsesSwapApp:
         preset_group = ctk.CTkFrame(left_panel, fg_color=C_CARD_BG, corner_radius=R_CARD,
                                      border_width=BORDER_W, border_color=C_BORDER_SOFT)
         preset_group.grid(row=1, column=0, sticky="nsew", pady=(0, PAD_GAP))
+        attach_hover_glow(preset_group)
         make_label(preset_group, text="Step 2 · 预设管理", fg=C_ACCENT,
                     font_size=FS_SUBHEAD, bold=True).pack(
                         anchor=W, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
@@ -3175,6 +4097,7 @@ class PulsesSwapApp:
                                          corner_radius=R_CONTROL, border_width=BORDER_W,
                                          border_color=C_BORDER_SOFT)
         preset_list_wrap.pack(fill=BOTH, expand=True, pady=(0, PAD_GAP))
+        attach_hover_glow(preset_list_wrap)
         self.preset_listbox = Listbox(preset_list_wrap, height=6,
                                        bg=C_CARD_BG, fg=C_TEXT_MAIN,
                                        selectbackground=C_ACCENT_SOFT,
@@ -3191,6 +4114,7 @@ class PulsesSwapApp:
                                        border_color=C_BORDER_SOFT, height=H_DROP_AREA)
         self.drop_area.pack(fill=X, pady=(0, PAD_GAP))
         self.drop_area.pack_propagate(False)
+        attach_hover_glow(self.drop_area)
         self.drop_label = ctk.CTkLabel(
             self.drop_area,
             text="Step 2 · 导入预设包 / 更新包\n"
@@ -3225,6 +4149,10 @@ class PulsesSwapApp:
                                                command=self.refresh_presets,
                                                state="disabled", width=40)
         self.refresh_preset_btn.pack(side=LEFT, padx=PAD_XS)
+        self.open_db_btn = make_button(preset_btn_frame, "📁",
+                                        command=self.open_preset_manager,
+                                        state="disabled", width=40)
+        self.open_db_btn.pack(side=LEFT, padx=PAD_XS)
         self.loading_label = make_label(preset_btn_frame, text="", fg=C_ACCENT,
                                         font_size=FS_TINY)
         self.loading_label.pack(side=LEFT, padx=PAD_TIGHT)
@@ -3233,6 +4161,7 @@ class PulsesSwapApp:
         info_group = ctk.CTkFrame(left_panel, fg_color=C_CARD_BG, corner_radius=R_CARD,
                                    border_width=BORDER_W, border_color=C_BORDER_SOFT)
         info_group.grid(row=2, column=0, sticky="ew")
+        attach_hover_glow(info_group)
         make_label(info_group, text="Step 3 · 预设详情", fg=C_ACCENT,
                     font_size=FS_SUBHEAD, bold=True).pack(
                         anchor=W, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
@@ -3267,6 +4196,7 @@ class PulsesSwapApp:
         gunpack_group = ctk.CTkFrame(right_panel, fg_color=C_CARD_BG, corner_radius=R_CARD,
                                       border_width=BORDER_W, border_color=C_BORDER_SOFT)
         gunpack_group.grid(row=0, column=0, sticky="nsew", pady=(0, PAD_GAP))
+        attach_hover_glow(gunpack_group)
         make_label(gunpack_group, text="枪包列表", fg=C_ACCENT,
                     font_size=FS_SUBHEAD, bold=True).pack(
                         anchor=W, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
@@ -3290,10 +4220,15 @@ class PulsesSwapApp:
                                           state="disabled", width=100)
         self.open_tacz_btn.pack(side=RIGHT, padx=(0, PAD_XS))
 
+        self.refresh_all_btn = make_button(toolbar_frame, "⟳ 全部刷新",
+                                            command=self.refresh_all, width=90)
+        self.refresh_all_btn.pack(side=RIGHT, padx=(0, PAD_XS))
+
         gunpack_list_wrap = ctk.CTkFrame(gunpack_content, fg_color=C_CARD_BG,
                                           corner_radius=R_CONTROL, border_width=BORDER_W,
                                           border_color=C_BORDER_SOFT)
         gunpack_list_wrap.pack(fill=BOTH, expand=True)
+        attach_hover_glow(gunpack_list_wrap)
         self.gunpack_listbox = Listbox(gunpack_list_wrap, height=10,
                                         bg=C_CARD_BG, fg=C_TEXT_MAIN,
                                         selectbackground=C_ACCENT_SOFT,
@@ -3311,10 +4246,11 @@ class PulsesSwapApp:
 
     # ==================== 日志页 ====================
     def _build_log_page(self):
-        page = ctk.CTkFrame(self.page_host, fg_color="transparent")
+        page = ctk.CTkFrame(self.stack.canvas, fg_color=C_WINDOW_BG)
         log_group = ctk.CTkFrame(page, fg_color=C_CARD_BG, corner_radius=R_CARD,
                                   border_width=BORDER_W, border_color=C_BORDER_SOFT)
         log_group.pack(fill=BOTH, expand=True)
+        attach_hover_glow(log_group)
         make_label(log_group, text="运行日志", fg=C_ACCENT,
                     font_size=FS_SUBHEAD, bold=True).pack(
                         anchor=W, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
@@ -3338,49 +4274,34 @@ class PulsesSwapApp:
         self.log_manager = LogManager(self.log_text, self.root)
         return page
 
+    # ==================== 顶栏菜单（已移除） ====================
     def setup_menu(self):
-        # 菜单保留为「进入侧边栏页面」的快捷方式；设置/日志的主入口在侧边栏。
-        menubar = Menu(self.root, bg=C_PANEL_BG, fg=C_TEXT_MAIN,
-                        activebackground=C_ACCENT_SOFT, activeforeground=C_ACCENT,
-                        font=(FONT_FAMILY, FS_SMALL), tearoff=0)
-        self.root.config(menu=menubar)
+        """原生菜单栏已去掉：它会在窗口顶部多出一条系统级横条，与设计稿不符。
 
-        file_menu = Menu(menubar, tearoff=0, bg=C_PANEL_BG, fg=C_TEXT_MAIN,
-                          activebackground=C_ACCENT_SOFT, activeforeground=C_ACCENT,
-                          font=(FONT_FAMILY, FS_SMALL))
-        menubar.add_cascade(label="文件", menu=file_menu)
-        file_menu.add_command(label="打开整合包", command=self.select_pack)
-        file_menu.add_command(label="打开整合包路径", command=self.open_pack_folder)
-        file_menu.add_separator()
-        file_menu.add_command(label="关闭整合包", command=self.close_pack)
-        file_menu.add_separator()
-        file_menu.add_command(label="退出", command=self.root.quit)
+        原菜单项全部迁到界面内：
+          打开整合包 / 打开路径 / 关闭整合包 -> Step 1 的「选择 / 📂 / ✕ 关闭」
+          程序设置 / 日志显示设置           -> 侧边栏「设置 / 日志」
+          预设管理（打开数据库目录）        -> Step 2 的「📁」
+          刷新所有                          -> 枪包列表工具条的「⟳ 全部刷新」
+          使用教程 / 关于 / 强制更新校验数据 -> 设置页「关于 / 数据库」选项卡
+          退出                              -> 窗口关闭按钮 + 设置页「⏻ 退出程序」
+        """
+        try:
+            self.root.config(menu="")
+        except Exception:
+            pass
 
-        settings_menu = Menu(menubar, tearoff=0, bg=C_PANEL_BG, fg=C_TEXT_MAIN,
-                              activebackground=C_ACCENT_SOFT, activeforeground=C_ACCENT,
-                              font=(FONT_FAMILY, FS_SMALL))
-        menubar.add_cascade(label="设置", menu=settings_menu)
-        settings_menu.add_command(label="程序设置", command=self.open_settings)
-        settings_menu.add_separator()
-        settings_menu.add_command(label="日志显示设置", command=self.open_log_page)
-
-        func_menu = Menu(menubar, tearoff=0, bg=C_PANEL_BG, fg=C_TEXT_MAIN,
-                          activebackground=C_ACCENT_SOFT, activeforeground=C_ACCENT,
-                          font=(FONT_FAMILY, FS_SMALL))
-        menubar.add_cascade(label="功能", menu=func_menu)
-        func_menu.add_command(label="预设管理", command=self.open_preset_manager)
-        func_menu.add_separator()
-        func_menu.add_command(label="刷新所有", command=self.refresh_all)
-
-        more_menu = Menu(menubar, tearoff=0, bg=C_PANEL_BG, fg=C_TEXT_MAIN,
-                          activebackground=C_ACCENT_SOFT, activeforeground=C_ACCENT,
-                          font=(FONT_FAMILY, FS_SMALL))
-        menubar.add_cascade(label="更多", menu=more_menu)
-        more_menu.add_command(label="使用教程", command=self.show_tutorial)
-        more_menu.add_separator()
-        more_menu.add_command(label="⚠ 强制更新校验数据", command=self.force_update_validation)
-        more_menu.add_separator()
-        more_menu.add_command(label="关于", command=self.show_about)
+    def request_exit(self):
+        """界面内的退出入口（与窗口关闭按钮同一套语义）。"""
+        if self.is_applying:
+            if not ask_yes_no("操作进行中",
+                    "正在操作中，确定要退出吗？\n\n程序将在任务完成后自动退出。"):
+                return
+        self._stop_watcher()
+        try:
+            self.root.quit()
+        except Exception:
+            pass
 
     # ==================== 新手引导更新 ====================
     def _update_guide(self):
@@ -3477,12 +4398,11 @@ class PulsesSwapApp:
         self.show_page("settings")
 
     def _on_settings_saved(self):
+        """自动保存回调：只写日志 + 右上角浮一条提示，不再弹模态框打断操作。"""
         self.log_manager.log(
             f"设置已保存: 存储模式={self.settings.storage_mode}, 身份={self.settings.role}",
             'SUCCESS')
-        if self.current_pack_path:
-            show_info("提示",
-                "设置已保存。\n\n如需让存储模式变更生效，请关闭并重新打开整合包。")
+        self.toast("设置已自动保存", "success")
 
     def _on_db_action(self, action: str):
         # 数据库动作（切换/合并/适配）都属于主流程，先回到主界面再执行
@@ -3891,16 +4811,53 @@ class PulsesSwapApp:
             self.log_manager.log(f"检查变更时出错: {e}", 'WARNING')
 
     # ==================== 最近打开 ====================
+    RECENT_H = 118   # 展开后的固定高度（列表 5 行 + 内边距）
+
     def toggle_recent(self):
         if self.recent_visible:
-            self.recent_frame.pack_forget()
-            self.recent_toggle_btn.configure(text="▼ 最近")
             self.recent_visible = False
+            self.recent_toggle_btn.configure(text="▼ 最近")
+            self._animate_recent(1, hide_after=True)
         else:
-            self.recent_frame.pack(fill=X, pady=(6, 0))
-            self.recent_toggle_btn.configure(text="▲ 最近")
             self.recent_visible = True
             self.update_recent_list()
+            self.recent_toggle_btn.configure(text="▲ 最近")
+            self.recent_frame.pack(fill=BOTH, expand=True)
+            self._animate_recent(self.RECENT_H)
+
+    def _animate_recent(self, target, hide_after=False):
+        """折叠面板的高度补间：0 -> 118 展开，118 -> 0 收起。"""
+        start = float(getattr(self, "_recent_height", 1.0))
+        if start == target:
+            try:
+                self.recent_wrap.configure(height=max(1, int(target)))
+            except Exception:
+                pass
+            if hide_after:
+                self.recent_frame.pack_forget()
+            return
+
+        def frame(e, raw):
+            self._recent_height = lerp(start, float(target), e)
+            try:
+                self.recent_wrap.configure(height=max(1, int(self._recent_height)))
+            except Exception:
+                pass
+
+        def done():
+            self._recent_height = float(target)
+            try:
+                self.recent_wrap.configure(height=max(1, int(target)))
+            except Exception:
+                pass
+            if hide_after:
+                try:
+                    self.recent_frame.pack_forget()
+                except Exception:
+                    pass
+
+        frame(0.0, 0.0)
+        tween(self.recent_wrap, "height", 280, frame, done, easing=ease_out_cubic)
 
     def update_recent_list(self):
         if not hasattr(self, 'recent_listbox'):
@@ -4048,7 +5005,7 @@ class PulsesSwapApp:
         self._start_watcher()
 
         self.loading_presets = True
-        self.loading_label.configure(text="⏳ 加载中...")
+        self._start_loading_dots("⏳ 加载中")
         self._disable_buttons(True)
         self.preset_listbox.delete(0, END)
         self.preset_listbox.insert(END, "正在加载预设列表，请稍候...")
@@ -4065,7 +5022,7 @@ class PulsesSwapApp:
 
     def _on_presets_loaded(self):
         self.loading_presets = False
-        self.loading_label.configure(text="")
+        self._stop_loading_dots()
         self._disable_buttons(False)
         self._update_preset_list()
         if self.preset_manager.current_preset:
@@ -4098,8 +5055,42 @@ class PulsesSwapApp:
             self.save_version_btn.configure(state=state)
             self.apply_btn.configure(state=state)
             self.select_pack_btn.configure(state=state)
+            self.open_db_btn.configure(state=state)
         except Exception:
             pass
+
+    # ==================== 加载指示动画 ====================
+    def _start_loading_dots(self, prefix="⏳ 刷新中"):
+        """加载文字脉冲：小圆点逐帧增长，替代静态的「...」。"""
+        def frame(e, raw):
+            dots = "." * min(3, int(raw * 4))
+            try:
+                self.loading_label.configure(text=f"{prefix}{dots}")
+            except Exception:
+                pass
+
+        frame(0.0, 0.0)
+        tween(self.loading_label, "dots", 720, frame,
+              on_done=lambda: self._start_loading_dots(prefix),
+              easing=ease_linear)
+
+    def _stop_loading_dots(self):
+        cancel_tween(self.loading_label, "dots")
+        try:
+            self.loading_label.configure(text="")
+        except Exception:
+            pass
+
+    def _animate_label_color(self, label, start, target, duration=280):
+        """文字颜色过渡：状态/标题更新时不做生硬的瞬间换色。"""
+        def frame(e, raw):
+            try:
+                label.configure(text_color=lerp_color(start, target, e))
+            except Exception:
+                pass
+
+        frame(0.0, 0.0)
+        tween(label, "color", duration, frame, easing=ease_out_cubic)
 
     def _create_default_preset(self):
         if not self.preset_manager:
@@ -4212,7 +5203,7 @@ class PulsesSwapApp:
         if not self.preset_manager or self.loading_presets:
             return
         self.loading_presets = True
-        self.loading_label.configure(text="⏳ 刷新中...")
+        self._start_loading_dots("⏳ 刷新中")
         self._disable_buttons(True)
         threading.Thread(target=self._refresh_presets_thread, daemon=True).start()
 
@@ -4226,7 +5217,7 @@ class PulsesSwapApp:
 
     def _on_refresh_presets_done(self):
         self.loading_presets = False
-        self.loading_label.configure(text="")
+        self._stop_loading_dots()
         self._disable_buttons(False)
         self._update_preset_list()
         self.log_manager.log("预设列表刷新完成", 'INFO')
@@ -4244,12 +5235,14 @@ class PulsesSwapApp:
         if not info:
             return
         self.preset_name_label.configure(text=f"预设: {name}")
+        self._animate_label_color(self.preset_name_label, C_TEXT_MUTED, C_ACCENT)
         version = info.get('version', 'v1.0.0')
         self.preset_version_label.configure(text=f"版本号: {version}")
         status = "已应用 ✓" if info.get('applied', False) else "未应用"
         self.preset_status_label.configure(text=f"状态: {status}")
-        self.preset_status_label.configure(
-            text_color=C_SUCCESS if info.get('applied') else C_WARNING)
+        self._animate_label_color(
+            self.preset_status_label, C_TEXT_MUTED,
+            C_SUCCESS if info.get('applied') else C_WARNING)
         self.version_entry.delete(0, END)
         self.version_entry.insert(0, version)
         if info.get('applied', False):
@@ -4791,14 +5784,31 @@ class PulsesSwapApp:
     def show_progress(self, current, total, message=""):
         if total > 0:
             pct = current / total
-            self.root.after(0, lambda: self.progress_bar.set(pct))
+            self.root.after(0, lambda: self._animate_progress(pct))
             self.root.after(0, lambda: self.progress_label.configure(
                 text=f"{message} ({current}/{total})"))
         self.root.after(0, lambda: self.root.update_idletasks())
 
+    def _animate_progress(self, target):
+        """进度条曲线推进，避免长任务里一格一格地跳。"""
+        start = float(getattr(self, "_progress_value", 0.0))
+        if abs(target - start) < 0.0005:
+            return
+
+        def frame(e, raw):
+            self._progress_value = lerp(start, target, e)
+            try:
+                self.progress_bar.set(self._progress_value)
+            except Exception:
+                pass
+
+        frame(0.0, 0.0)
+        tween(self.progress_bar, "value", 260, frame, easing=ease_out_cubic)
+
     def hide_progress(self):
         self.root.after(0, lambda: self.progress_bar.pack_forget())
         self.root.after(0, lambda: self.progress_label.pack_forget())
+        self.root.after(0, lambda: setattr(self, "_progress_value", 0.0))
         self.root.after(0, lambda: self.root.update_idletasks())
 
     def set_busy_state(self, busy, operation=""):
@@ -4814,6 +5824,8 @@ class PulsesSwapApp:
             self.open_pack_btn.configure(state="disabled")
             self.open_tacz_btn.configure(state="disabled")
             self.save_version_btn.configure(state="disabled")
+            self.open_db_btn.configure(state="disabled")
+            self.close_pack_btn.configure(state="disabled")
             self.preset_listbox.config(state=DISABLED)
         else:
             self.is_applying = False
@@ -4824,6 +5836,8 @@ class PulsesSwapApp:
             self.refresh_gunpack_btn.configure(state="normal")
             self.select_pack_btn.configure(state="normal")
             self.save_version_btn.configure(state="normal")
+            self.open_db_btn.configure(state="normal")
+            self.close_pack_btn.configure(state="normal")
             if self.current_pack_path:
                 self.open_pack_btn.configure(state="normal")
                 self.open_tacz_btn.configure(state="normal")
@@ -5207,14 +6221,8 @@ def main():
         pass
 
     def on_closing():
-        if app.is_applying:
-            if ask_yes_no("操作进行中",
-                    "正在操作中，确定要退出吗？\n\n程序将在任务完成后自动退出。"):
-                app._stop_watcher()
-                root.quit()
-        else:
-            app._stop_watcher()
-            root.quit()
+        # 退出语义与界面内的「⏻ 退出程序」完全一致（见 request_exit）
+        app.request_exit()
 
     root.protocol("WM_DELETE_WINDOW", on_closing)
     root.mainloop()
