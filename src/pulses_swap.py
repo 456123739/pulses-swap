@@ -1,9 +1,26 @@
 """
 Pulses Swap - 快速枪包切换器
 作者: NimShade
-版本: 2.4.1
+版本: 2.4.2
 描述: Minecraft Tacz 模组枪包快速切换工具
 UI风格: Pulses 水墨淡色主题（customtkinter 圆角版本）
+
+v2.4.2 更新（按反馈集中修四类问题）:
+  - Win11 窗口变半透明：DWMWA_SYSTEMBACKDROP_TYPE 原来设的是 0(AUTO)，
+    窗口失焦（有弹窗在前面）时系统就自己上 Mica/Acrylic，壁纸透进来。
+    改成 1(DWMSBT_NONE)，并额外关掉未公开的 DWMWA_MICA_EFFECT(1029) 兜底
+  - 字又小又糊：启动时先声明进程 DPI 感知（CTk 自己做太晚，窗口已按未感知
+    建好，仍被系统拉伸 → 糊）；字号整体 +1~2pt；自绘 Canvas / grid minsize /
+    Listbox 字号按 CTk 的缩放系数同步放大，避免高分屏下与 CTk 控件错位
+  - 报错很多：root.after() 从 worker 线程调用会抛
+    RuntimeError("main thread is not in main loop")，加载预设的线程当场死掉、
+    UI 永远卡在「加载中」。改成线程安全队列投递（ui_call + 主线程轮询），
+    29 处调用点统一替换
+  - 「本次启动不再提醒」勾了没用：原来只在点「确定/导出」时读勾选框，
+    用 ESC 或窗口 ✕ 关掉就白勾了。改成不管怎么关都会读
+  - 数据库定位对话框改成独立小窗口（640x520），不再铺满主窗口
+  - 新增端到端流程测试（假整合包 → 加载 → 建预设 → 刷新 → 替换 → 导出 →
+    关闭 → 重开 → 设置自动保存 → 日志），全程零 Traceback
 
 v2.4.1 更新:
   - 新增 Windows 绿色版（免安装）：Release 里多一个
@@ -76,11 +93,13 @@ except Exception:         # pragma: no cover - 仅影响 Windows 回收站功能
 import hashlib
 import json
 import os
+import queue
 import shutil
 import sys
 import tempfile
 import threading
 import time
+import traceback
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -110,7 +129,7 @@ except ImportError:
     FileSystemEventHandler = object
 
 # ==================== 常量定义 ====================
-VERSION = "2.4.1"
+VERSION = "2.4.2"
 AUTHOR = "NimShade"
 PROJECT_NAME = "Pulses Swap"
 
@@ -346,12 +365,12 @@ FONT_FAMILY      = FONT_FAMILY_CN
 FONT_FAMILY_MONO = "Consolas"
 
 # 字号阶梯（整体上移 1~2pt，拉开层级、避免拥挤）
-FS_TINY    = 10   # 提示 / 说明小字（原 9）
-FS_SMALL   = 11   # 次要信息、单行标签、单选项（原 10）
-FS_BODY    = 12   # 正文与控件默认字号（原 10/11）
-FS_SUBHEAD = 13   # 卡片小节标题（原 11 粗体）
-FS_TITLE   = 15   # 对话框主标题（原 14 粗体）
-FS_DISPLAY = 19   # 展示型标题（原 18）
+FS_TINY    = 11   # 提示 / 说明小字（原 10，用户反馈太小 → +1）
+FS_SMALL   = 12   # 次要信息、单行标签、单选项（原 11）
+FS_BODY    = 13   # 正文与控件默认字号（原 12）
+FS_SUBHEAD = 15   # 卡片小节标题（原 13 粗体）
+FS_TITLE   = 17   # 对话框主标题（原 15 粗体）
+FS_DISPLAY = 21   # 展示型标题（原 19）
 
 # ==================== 尺寸 / 间距令牌 ====================
 H_CONTROL   = 32   # 按钮 / 输入框 / 显示框高度（原 28）
@@ -422,6 +441,105 @@ def apply_font_fallbacks():
 ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
 ctk.set_widget_scaling(1.0)
+
+
+# ==================== 线程 → 主线程投递 ====================
+# Tkinter 的 after() 从 worker 线程调用并不可靠：主线程不在 mainloop 里时
+# 会直接抛 RuntimeError("main thread is not in main loop")，worker 线程当场死掉
+# —— 表现就是「预设列表永远停在加载中」+ 日志里一堆报错。
+# 这里统一走队列：worker 只管入队，主线程每 25ms 取一次。
+_UI_QUEUE: "queue.Queue" = queue.Queue()
+_UI_PUMP_RUNNING = False
+
+
+def ui_call(root, func=None, *args) -> None:
+    """线程安全地把调用切回主线程执行。"""
+    if func is None:
+        return
+    if threading.current_thread() is threading.main_thread():
+        try:
+            root.after(0, func, *args)
+            return
+        except Exception:
+            pass          # 退化成队列，绝不抛给调用方
+    _UI_QUEUE.put((func, args))
+
+
+def start_ui_pump(root, interval_ms: int = 25) -> None:
+    """主线程轮询队列（只需启动一次）。"""
+    global _UI_PUMP_RUNNING
+    if _UI_PUMP_RUNNING:
+        return
+    _UI_PUMP_RUNNING = True
+
+    def _pump():
+        while True:
+            try:
+                func, args = _UI_QUEUE.get_nowait()
+            except queue.Empty:
+                break
+            try:
+                func(*args)
+            except Exception:
+                safe_print("UI 任务执行失败:", traceback.format_exc())
+        try:
+            root.after(interval_ms, _pump)
+        except Exception:
+            pass
+
+    try:
+        root.after(interval_ms, _pump)
+    except Exception:
+        pass
+
+
+# ==================== DPI / 缩放 ====================
+# Windows 上必须做两件事，缺一个都会出问题：
+#   · 进程声明 DPI 感知 —— 否则系统会把窗口位图整体拉伸，字就是糊的；
+#   · 自绘的 tk.Canvas 用原始像素，得乘上和 CTk 相同的缩放系数，
+#     否则系统 125%/150% 下会和 CTk 控件错位（CTk 控件自己会缩放）。
+UI_SCALE = 1.0
+
+
+def enable_dpi_awareness() -> float:
+    """声明 DPI 感知并返回系统缩放系数（1.0 / 1.25 / 1.5 …）。
+
+    必须在任何窗口创建之前调用 —— CTk 自己也会声明，但它在第一个控件
+    创建时才做，那时窗口已经按未感知状态建好了，仍会被拉伸。
+    """
+    if not IS_WINDOWS:
+        return 1.0
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)      # PER_MONITOR_AWARE
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            return 1.0
+    try:
+        hdc = ctypes.windll.user32.GetDC(0)
+        try:
+            dpi = ctypes.windll.gdi32.GetDeviceCaps(hdc, 88)   # LOGPIXELSX
+        finally:
+            ctypes.windll.user32.ReleaseDC(0, hdc)
+        return max(1.0, min(3.0, float(dpi) / 96.0))
+    except Exception:
+        return 1.0
+
+
+def sync_ui_scale(root_widget) -> float:
+    """root 建好后同步一次：CTk 的控件缩放 × 自绘控件用的像素换算。"""
+    global UI_SCALE
+    try:
+        UI_SCALE = float(ctk.ScalingTracker.get_widget_scaling(root_widget))
+    except Exception:
+        UI_SCALE = 1.0
+    return UI_SCALE
+
+
+def px(value):
+    """设计稿像素 → 当前缩放下的像素（只给 tk.Canvas / grid minsize 用）。"""
+    return int(round(float(value) * UI_SCALE))
 
 
 # ==================== 辅助函数 ====================
@@ -844,8 +962,15 @@ class CanvasSegmented(Canvas):
                  active_text_color=C_ACCENT, font_size=FS_BODY,
                  bold_active=False, text_anchor="w", text_pad=14,
                  duration_ms=240, hover_ms=110, width=1, height=1):
+        # 自绘控件是原始像素：按 UI_SCALE 放大，否则系统 125%/150% 下会和
+        # CTk 控件错位（CTk 自己会缩放，Canvas 不会）
+        item_height = px(item_height)
+        pad, gap, radius = px(pad), px(gap), px(radius)
+        text_pad = px(text_pad)
+        font_size = max(1, int(round(font_size * UI_SCALE)))
         super().__init__(parent, bg=bg_color, highlightthickness=0, bd=0,
-                         width=width, height=height)
+                         width=px(width) if width > 1 else width,
+                         height=px(height) if height > 1 else height)
         self._items = [(key, str(text)) for key, text in items]
         self._keys = [key for key, _ in self._items]
         self._command = command
@@ -1392,7 +1517,7 @@ def _run_modal(build_and_wait):
             done.set()
 
     try:
-        host.root.after(0, _call)
+        ui_call(host.root, _call)
     except Exception:
         return None
     done.wait()
@@ -2035,12 +2160,11 @@ class DatabaseLocatorDialog:
         self.legacy_to_migrate: Path | None = None
 
     def show(self) -> Path | None:
-        # 改为主窗口内覆盖层，不再新开窗口。启动流程里 setup_ui() 先于
-        # _init_database_flow() 执行，所以这里主窗口骨架一定已经建好；
-        # 万一宿主未注册，make_card 会退化成 Toplevel，保证提示不会静默丢失。
+        # 需求：这是「选文件夹」的界面，做成独立小窗口（640x520），
+        # 而不是铺满主窗口的覆盖层 —— 覆盖层在主窗口最大化时看着像占满全屏。
         dlg_w = DLG_LOCATOR[0]
-        card = make_card(get_overlay_host(), self.parent, width=dlg_w,
-                          escape_value=None, title="初始化 Pulses Swap")
+        card = ToplevelCard(self.parent, width=dlg_w, height=DLG_LOCATOR[1],
+                             escape_value=None, title="选择数据库位置")
         frame = card.body
 
         make_label(frame, text="欢迎使用 Pulses Swap",
@@ -2305,14 +2429,14 @@ class LogManager:
         if threading.current_thread() is threading.main_thread():
             self._update_display()
         else:
-            self.root.after(0, self._update_display)
+            ui_call(self.root, self._update_display)
 
     def set_show_full(self, show_full: bool):
         self.show_full = show_full
         if threading.current_thread() is threading.main_thread():
             self._update_display()
         else:
-            self.root.after(0, self._update_display)
+            ui_call(self.root, self._update_display)
 
     def _visible_entries(self):
         """当前该显示哪些行：完整模式全部，否则只留最近一条非细节日志。"""
@@ -3530,7 +3654,7 @@ class SettingsPage:
             hover_color=C_ACCENT_SOFT, text_color=C_TEXT_MAIN,
             active_text_color=C_ACCENT, font_size=FS_BODY, bold_active=True,
             text_anchor="w", text_pad=16, duration_ms=240,
-            height=2 * (H_NAV + PAD_XS) + 12)
+            height=px(2 * (H_NAV + PAD_XS) + 12))
         self.mode_seg.pack(fill=X, padx=PAD_TIGHT, pady=PAD_TIGHT)
 
         make_label(tab, text="用户身份", fg=C_ACCENT,
@@ -3548,7 +3672,7 @@ class SettingsPage:
             hover_color=C_ACCENT_SOFT, text_color=C_TEXT_MAIN,
             active_text_color=C_ACCENT, font_size=FS_BODY, bold_active=True,
             text_anchor="w", text_pad=16, duration_ms=380,
-            height=2 * (H_NAV + PAD_XS) + 12)
+            height=px(2 * (H_NAV + PAD_XS) + 12))
         self.role_seg.pack(fill=X, padx=PAD_TIGHT, pady=PAD_TIGHT)
 
     def _on_mode_selected(self, key):
@@ -3840,6 +3964,8 @@ class PulsesSwapApp:
 
         self.guide: GuideManager | None = None
 
+        # worker 线程 → 主线程的投递队列，越早启动越好
+        start_ui_pump(self.root)
         self.setup_ui()
         self.setup_menu()
 
@@ -3853,18 +3979,7 @@ class PulsesSwapApp:
             hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id())
             if not hwnd:
                 hwnd = self.root.winfo_id()
-            v0 = ctypes.c_int(0)
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                hwnd, 38, ctypes.byref(v0), ctypes.sizeof(v0))
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                hwnd, 20, ctypes.byref(v0), ctypes.sizeof(v0))
-            # 33 = DWMWA_WINDOW_CORNER_PREFERENCE：按设计令牌给窗口圆角
-            v1 = ctypes.c_int(DWM_CORNER_PREF)
-            try:
-                ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                    hwnd, 33, ctypes.byref(v1), ctypes.sizeof(v1))
-            except Exception:
-                pass
+            _apply_opaque_window(hwnd)
         except Exception:
             pass
 
@@ -3939,7 +4054,7 @@ class PulsesSwapApp:
         set_overlay_host(self)
 
         main_frame.grid_rowconfigure(0, weight=1)
-        main_frame.grid_columnconfigure(0, weight=0, minsize=SIDEBAR_W)
+        main_frame.grid_columnconfigure(0, weight=0, minsize=px(SIDEBAR_W))
         main_frame.grid_columnconfigure(1, weight=1)
 
         # ===== 侧边导航栏：只有品牌 + 导航项，不放任何提示文案 =====
@@ -3963,7 +4078,7 @@ class PulsesSwapApp:
         nav_items = (("home", "主界面"),
                      ("settings", "设置"),
                      ("log", "日志"))
-        nav_height = len(nav_items) * (H_NAV + PAD_XS) + 2 * PAD_XS
+        nav_height = px(len(nav_items) * (H_NAV + PAD_XS) + 2 * PAD_XS)
         self.nav = CanvasSegmented(
             sidebar, nav_items, command=self.show_page,
             orientation="vertical", item_height=H_NAV, pad=4, gap=PAD_XS,
@@ -4134,7 +4249,7 @@ class PulsesSwapApp:
     def _build_home_page(self):
         page = ctk.CTkFrame(self.stack.canvas, fg_color=C_WINDOW_BG)
         page.grid_rowconfigure(0, weight=1)
-        page.grid_columnconfigure(0, weight=0, minsize=LEFT_COL_W)
+        page.grid_columnconfigure(0, weight=0, minsize=px(LEFT_COL_W))
         page.grid_columnconfigure(1, weight=1)
 
         left_panel = ctk.CTkFrame(page, fg_color="transparent")
@@ -4142,9 +4257,9 @@ class PulsesSwapApp:
         # 纵向预算：Step1/Step3 固定高度，剩余空间全部给 Step2 的预设列表，
         # 这样窗口变小/DPI 放大时先压缩列表，Step3 卡片不会被裁（见 H_STEP*_MIN）
         left_panel.grid_columnconfigure(0, weight=1)
-        left_panel.grid_rowconfigure(0, weight=0, minsize=H_STEP1_MIN)
-        left_panel.grid_rowconfigure(1, weight=1, minsize=H_STEP2_MIN)
-        left_panel.grid_rowconfigure(2, weight=0, minsize=H_STEP3_MIN)
+        left_panel.grid_rowconfigure(0, weight=0, minsize=px(H_STEP1_MIN))
+        left_panel.grid_rowconfigure(1, weight=1, minsize=px(H_STEP2_MIN))
+        left_panel.grid_rowconfigure(2, weight=0, minsize=px(H_STEP3_MIN))
 
         right_panel = ctk.CTkFrame(page, fg_color="transparent")
         right_panel.grid(row=0, column=1, sticky="nsew")
@@ -4225,7 +4340,8 @@ class PulsesSwapApp:
                                        selectbackground=C_ACCENT_SOFT,
                                        selectforeground=C_ACCENT,
                                        relief='flat', highlightthickness=0,
-                                       font=(FONT_FAMILY, FS_SMALL))
+                                       font=(FONT_FAMILY,
+                                             max(1, int(FS_SMALL * UI_SCALE))))
         self.recent_listbox.pack(fill=BOTH, expand=True, padx=PAD_TIGHT, pady=PAD_TIGHT)
         self.recent_listbox.bind('<Double-Button-1>', self.on_recent_double_click)
 
@@ -4259,7 +4375,8 @@ class PulsesSwapApp:
                                        selectbackground=C_ACCENT_SOFT,
                                        selectforeground=C_ACCENT,
                                        relief='flat', highlightthickness=0,
-                                       font=(FONT_FAMILY, FS_BODY))
+                                       font=(FONT_FAMILY,
+                                             max(1, int(FS_BODY * UI_SCALE))))
         self.preset_listbox.pack(fill=BOTH, expand=True, padx=PAD_XS, pady=PAD_XS)
         self.preset_listbox.bind('<<ListboxSelect>>', self.on_preset_selected)
         self.preset_listbox.bind('<Button-3>', self.show_preset_context_menu)
@@ -4392,7 +4509,8 @@ class PulsesSwapApp:
                                         selectbackground=C_ACCENT_SOFT,
                                         selectforeground=C_ACCENT,
                                         relief='flat', highlightthickness=0,
-                                        font=(FONT_FAMILY, FS_BODY))
+                                        font=(FONT_FAMILY,
+                                              max(1, int(FS_BODY * UI_SCALE))))
         self.gunpack_listbox.pack(fill=BOTH, expand=True, padx=PAD_XS, pady=PAD_XS)
 
         self.apply_btn = make_button(right_panel, "Step 4 · 一键替换",
@@ -4735,12 +4853,12 @@ class PulsesSwapApp:
         def progress_cb(c, t, m):
             if t > 0:
                 pct = c / t
-                self.root.after(0, lambda p=pct: self.progress_bar.set(p))
-                self.root.after(0, lambda m=m, c=c, t=t: self.progress_label.configure(
+                ui_call(self.root, lambda p=pct: self.progress_bar.set(p))
+                ui_call(self.root, lambda m=m, c=c, t=t: self.progress_label.configure(
                     text=f"{m} ({c}/{t})"))
             # 只处理重绘空闲任务：原来用 update() 会连带处理用户事件，
             # 拖拽窗口大小时每个进度回调都会重入一次完整事件循环，明显卡顿
-            self.root.after(0, lambda: self.root.update_idletasks())
+            ui_call(self.root, lambda: self.root.update_idletasks())
 
         def worker():
             try:
@@ -4749,10 +4867,10 @@ class PulsesSwapApp:
                     conflict_mode='rename',
                     progress_callback=progress_cb,
                     after_migrate=after_mode)
-                self.root.after(0, self._on_migrate_finished, stats, after_mode)
+                ui_call(self.root, self._on_migrate_finished, stats, after_mode)
             except Exception as e:
                 self.log_manager.log(f"适配旧库出错: {e}", 'ERROR')
-                self.root.after(0, self._on_migrate_finished,
+                ui_call(self.root, self._on_migrate_finished,
                                 {'migrated': 0, 'renamed': 0, 'skipped': 0,
                                  'errors': [str(e)], 'disposed': 'none'},
                                 after_mode)
@@ -4937,13 +5055,9 @@ class PulsesSwapApp:
         btn_frame.pack(fill=X, side=BOTTOM, pady=(PAD_GAP, 0))
 
         def on_ok():
-            if dont_remind_var.get():
-                self.dont_remind_this_session = True
             card.close('ok')
 
         def on_export():
-            if dont_remind_var.get():
-                self.dont_remind_this_session = True
             card.close('export')
 
         if self.settings.role == "developer":
@@ -4954,7 +5068,16 @@ class PulsesSwapApp:
         ok_btn = make_button(btn_frame, "确定", command=on_ok)
         ok_btn.pack(side=RIGHT)
         card.register_focusable(ok_btn)
-        return card.wait()
+        result = card.wait()
+        # 关键：不管用户是点「确定」、按 ESC、还是点窗口的 ✕ 关掉，
+        # 只要勾了「本次启动不再提醒」就得生效 —— 之前只在 on_ok 里读，
+        # 用 ESC/✕ 关掉就白勾了。
+        try:
+            if dont_remind_var.get():
+                self.dont_remind_this_session = True
+        except Exception:
+            pass
+        return result
 
     def _check_applied_changes(self, preset_name):
         try:
@@ -5203,7 +5326,7 @@ class PulsesSwapApp:
         except Exception as e:
             self.log_manager.log(f"加载预设失败: {e}", 'ERROR')
         finally:
-            self.root.after(0, self._on_presets_loaded)
+            ui_call(self.root, self._on_presets_loaded)
 
     def _on_presets_loaded(self):
         self.loading_presets = False
@@ -5351,7 +5474,7 @@ class PulsesSwapApp:
 
     def _on_tacz_changed(self):
         try:
-            self.root.after(0, self._do_tacz_refresh)
+            ui_call(self.root, self._do_tacz_refresh)
         except Exception:
             pass
 
@@ -5416,7 +5539,7 @@ class PulsesSwapApp:
         except Exception as e:
             self.log_manager.log(f"刷新预设失败: {e}", 'ERROR')
         finally:
-            self.root.after(0, self._on_refresh_presets_done)
+            ui_call(self.root, self._on_refresh_presets_done)
 
     def _on_refresh_presets_done(self):
         self.loading_presets = False
@@ -5577,11 +5700,11 @@ class PulsesSwapApp:
 
                 src_removed = self.preset_manager._safe_remove(src_path)
 
-                self.root.after(0, self._on_migrate_preset_finished,
+                ui_call(self.root, self._on_migrate_preset_finished,
                                 True, preset_name, target_db, src_removed)
             except Exception as e:
                 self.log_manager.log(f"迁移预设失败: {e}", 'ERROR')
-                self.root.after(0, self._on_migrate_preset_finished,
+                ui_call(self.root, self._on_migrate_preset_finished,
                                 False, preset_name, target_db, False)
 
         threading.Thread(target=worker, daemon=True).start()
@@ -5810,10 +5933,10 @@ class PulsesSwapApp:
                 self.show_progress(c, t, m)
             try:
                 ok = self.preset_manager.export_preset(name, export_path, cb)
-                self.root.after(0, self._on_export_finished, ok, export_path)
+                ui_call(self.root, self._on_export_finished, ok, export_path)
             except Exception as e:
                 self.log_manager.log(f"导出错误: {e}", 'ERROR')
-                self.root.after(0, self._on_export_finished, False, export_path)
+                ui_call(self.root, self._on_export_finished, False, export_path)
         threading.Thread(target=worker, daemon=True).start()
 
     def export_incremental(self):
@@ -5865,10 +5988,10 @@ class PulsesSwapApp:
                 self.show_progress(c, t, m)
             try:
                 ok = self.preset_manager.export_incremental(name, export_path, cb)
-                self.root.after(0, self._on_export_inc_finished, ok, export_path)
+                ui_call(self.root, self._on_export_inc_finished, ok, export_path)
             except Exception as e:
                 self.log_manager.log(f"导出增量包错误: {e}", 'ERROR')
-                self.root.after(0, self._on_export_inc_finished, False, export_path)
+                ui_call(self.root, self._on_export_inc_finished, False, export_path)
         threading.Thread(target=worker, daemon=True).start()
 
     def _on_export_finished(self, success, export_path):
@@ -5905,10 +6028,10 @@ class PulsesSwapApp:
                 self.show_progress(c, t, m)
             try:
                 ok = self.preset_manager.import_preset(import_path, cb)
-                self.root.after(0, self._on_import_finished, ok, import_path)
+                ui_call(self.root, self._on_import_finished, ok, import_path)
             except Exception as e:
                 self.log_manager.log(f"导入错误: {e}", 'ERROR')
-                self.root.after(0, self._on_import_finished, False, import_path)
+                ui_call(self.root, self._on_import_finished, False, import_path)
         threading.Thread(target=worker, daemon=True).start()
 
     def do_import_incremental(self, import_path: Path):
@@ -5921,10 +6044,10 @@ class PulsesSwapApp:
         def worker():
             try:
                 ok = self.preset_manager.import_incremental(import_path)
-                self.root.after(0, self._on_import_inc_finished, ok, import_path)
+                ui_call(self.root, self._on_import_inc_finished, ok, import_path)
             except Exception as e:
                 self.log_manager.log(f"导入增量包错误: {e}", 'ERROR')
-                self.root.after(0, self._on_import_inc_finished, False, import_path)
+                ui_call(self.root, self._on_import_inc_finished, False, import_path)
         threading.Thread(target=worker, daemon=True).start()
 
     def _on_import_finished(self, success, import_path: Path):
@@ -5988,10 +6111,10 @@ class PulsesSwapApp:
     def show_progress(self, current, total, message=""):
         if total > 0:
             pct = current / total
-            self.root.after(0, lambda: self._animate_progress(pct))
-            self.root.after(0, lambda: self.progress_label.configure(
+            ui_call(self.root, lambda: self._animate_progress(pct))
+            ui_call(self.root, lambda: self.progress_label.configure(
                 text=f"{message} ({current}/{total})"))
-        self.root.after(0, lambda: self.root.update_idletasks())
+        ui_call(self.root, lambda: self.root.update_idletasks())
 
     def _animate_progress(self, target):
         """进度条曲线推进，避免长任务里一格一格地跳。"""
@@ -6010,10 +6133,10 @@ class PulsesSwapApp:
         tween(self.progress_bar, "value", 170, frame, easing=ease_out_cubic)
 
     def hide_progress(self):
-        self.root.after(0, lambda: self.progress_bar.pack_forget())
-        self.root.after(0, lambda: self.progress_label.pack_forget())
-        self.root.after(0, lambda: setattr(self, "_progress_value", 0.0))
-        self.root.after(0, lambda: self.root.update_idletasks())
+        ui_call(self.root, lambda: self.progress_bar.pack_forget())
+        ui_call(self.root, lambda: self.progress_label.pack_forget())
+        ui_call(self.root, lambda: setattr(self, "_progress_value", 0.0))
+        ui_call(self.root, lambda: self.root.update_idletasks())
 
     def set_busy_state(self, busy, operation=""):
         if busy:
@@ -6189,10 +6312,10 @@ class PulsesSwapApp:
         def worker():
             try:
                 result = self.preset_manager.apply_preset(name, cb)
-                self.root.after(0, self._on_apply_finished, result)
+                ui_call(self.root, self._on_apply_finished, result)
             except Exception as e:
                 self.log_manager.log(f"错误: {e}", 'ERROR')
-                self.root.after(0, self._on_apply_finished, False)
+                ui_call(self.root, self._on_apply_finished, False)
         threading.Thread(target=worker, daemon=True).start()
 
     def _on_apply_finished(self, success):
@@ -6329,6 +6452,43 @@ def apply_window_icon(window) -> None:
 APP_USER_MODEL_ID = "Pulses0Studio.PulsesSwap"
 
 
+def _apply_opaque_window(hwnd) -> None:
+    """把 Win11 窗口设成完全不透明（禁用 Mica / Acrylic 背景材质）。
+
+    关键在 DWMWA_SYSTEMBACKDROP_TYPE(38)：值 0 是「自动」，系统会自己挑
+    Mica/Acrylic —— 那就是壁纸透进来的原因；必须显式设成 1(DWMSBT_NONE)。
+    """
+    if not IS_WINDOWS:
+        return
+    try:
+        none_backdrop = ctypes.c_int(1)      # DWMSBT_NONE
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd, 38, ctypes.byref(none_backdrop), ctypes.sizeof(none_backdrop))
+    except Exception:
+        pass
+    try:
+        # Win11 早期版本用未公开的 DWMWA_MICA_EFFECT(1029)，关掉它兜底
+        mica_off = ctypes.c_int(0)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd, 1029, ctypes.byref(mica_off), ctypes.sizeof(mica_off))
+    except Exception:
+        pass
+    try:
+        light_titlebar = ctypes.c_int(0)     # 浅色标题栏（与主题一致）
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd, 20, ctypes.byref(light_titlebar),
+            ctypes.sizeof(light_titlebar))
+    except Exception:
+        pass
+    try:
+        # 33 = DWMWA_WINDOW_CORNER_PREFERENCE：按设计令牌给窗口圆角
+        corner = ctypes.c_int(DWM_CORNER_PREF)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd, 33, ctypes.byref(corner), ctypes.sizeof(corner))
+    except Exception:
+        pass
+
+
 def _set_app_user_model_id() -> None:
     """设置进程 AppUserModelID。必须在任何 Tk 窗口创建之前调用，否则不生效。"""
     if not IS_WINDOWS:
@@ -6344,6 +6504,8 @@ def _set_app_user_model_id() -> None:
 def main():
     # 第一件事：任务栏图标归属必须在任何窗口存在之前定好
     _set_app_user_model_id()
+    # 第二件：DPI 感知也要在窗口创建之前声明，否则 Windows 会拉伸位图（字糊）
+    detected_scale = enable_dpi_awareness()
     if HAS_DND:
         try:
             root = TkinterDnD.Tk()
@@ -6358,6 +6520,9 @@ def main():
 
     # 字体回退链：root 就绪后解析一次，供所有控件工厂使用
     apply_font_fallbacks()
+    # 自绘控件（Canvas / grid minsize）要按同一系数放大，别和 CTk 控件错位
+    scale = sync_ui_scale(root)
+    safe_print(f"DPI 检测: {detected_scale:.2f} · UI 缩放: {scale:.2f}")
 
     # ==================== Win11 透明修复（第一道） ====================
     try:
@@ -6387,18 +6552,7 @@ def main():
             hwnd = ctypes.windll.user32.GetParent(hwnd_root.winfo_id())
             if not hwnd:
                 hwnd = hwnd_root.winfo_id()
-            v0 = ctypes.c_int(0)
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                hwnd, 38, ctypes.byref(v0), ctypes.sizeof(v0))
-            ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                hwnd, 20, ctypes.byref(v0), ctypes.sizeof(v0))
-            # 33 = DWMWA_WINDOW_CORNER_PREFERENCE：按设计令牌给窗口圆角
-            v1 = ctypes.c_int(DWM_CORNER_PREF)
-            try:
-                ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                    hwnd, 33, ctypes.byref(v1), ctypes.sizeof(v1))
-            except Exception:
-                pass
+            _apply_opaque_window(hwnd)
         except Exception:
             pass
 
