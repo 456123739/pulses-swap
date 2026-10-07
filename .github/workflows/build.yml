@@ -40,7 +40,13 @@ jobs:
         id: ver
         shell: bash
         run: |
-          V=$(python -c "import re,pathlib;print(re.search(r'VERSION\s*=\s*\"([^\"]+)\"',pathlib.Path('src/pulses_swap.py').read_text(encoding='utf-8')).group(1))")
+          # 打 tag 构建时以 tag 为准（v2.1.1 → 2.1.1），否则读源码里的 VERSION。
+          # 否则会出现"tag 是 v2.1.1、安装包却叫 Setup-2.1"的错位，下载的人会困惑。
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            V="${GITHUB_REF#refs/tags/v}"
+          else
+            V=$(python -c "import re,pathlib;print(re.search(r'VERSION\s*=\s*\"([^\"]+)\"',pathlib.Path('src/pulses_swap.py').read_text(encoding='utf-8')).group(1))")
+          fi
           echo "version=$V" >> $GITHUB_OUTPUT
           echo "版本号: $V"
 
