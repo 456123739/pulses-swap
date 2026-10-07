@@ -22,25 +22,26 @@ import sys
 import urllib.request
 from pathlib import Path
 
-# 图标源：都走 jsdelivr 上的官方包（Lucide / Feather，均 ISC，同一设计血统）
-# 选型记录（放大 8 倍 + 真实 17px 都看过）：
-#   lucide/settings  → 花瓣状、feather/settings 没中心孔 → 都像花
-#   lucide/cog       → 轮辐，又变太阳
-#   tabler/settings  → 外面套个方框，17px 下太碎
-#   heroicons/cog-6-tooth → 直齿 + 中心孔，放大缩小都是标准齿轮 ✓
-SOURCES = {
-    "home": ("lucide-static@latest/icons/house.svg", "house"),
-    "gear": ("heroicons@2.1.5/24/outline/cog-6-tooth.svg", "hero_cog"),
-    "log":  ("lucide-static@latest/icons/scroll-text.svg", "scroll-text"),
+# 图标源：仓库内 packaging/icons/*.svg（用户指定），可再按需从 CDN 取。
+#   filled=True  → 填充型图标（实心轮廓）：按 even-odd 把外轮廓和内部的孔
+#                  合并成一个 polygon，Tk 填充时会自动挖洞（已实测）
+#   filled=False → 描边型图标（Lucide/Feather 那种线稿）
+ICONS = {
+    "home": {"file": "home.svg", "filled": True},
+    "gear": {"file": "gear.svg", "filled": True},
+    "log":  {"file": "log.svg",  "filled": True},
 }
+ICON_DIR = Path(__file__).resolve().parent / "icons"
+
 CDN = "https://cdn.jsdelivr.net/npm/{path}"
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "src" / "pulses_swap.py"
 
-VIEWBOX = 24.0          # Lucide 都是 24x24
+DEFAULT_VIEWBOX = 24.0  # 没写 viewBox 时的兜底（Lucide 是 24x24）
 SAMPLES_PER_CURVE = 8   # 曲线/圆弧展平密度（之后还会做抽稀）
-SIMPLIFY_EPS = 0.028    # 抽稀容差（归一化坐标，≈17px 下的 0.24px）
+SIMPLIFY_EPS = 0.028        # 描边型抽稀容差（归一化坐标，≈17px 下的 0.24px）
+SIMPLIFY_EPS_FILLED = 0.045  # 填充型可以更狠：实心形状看不出这点偏差
 
 
 def fetch(path: str) -> str:
@@ -79,7 +80,7 @@ def _rdp(pts, eps):
     return left[:-1] + right
 
 
-def flatten_path(d: str, samples: int = SAMPLES_PER_CURVE):
+def flatten_path(d: str, samples: int = SAMPLES_PER_CURVE, eps: float = None):
     """把一条 path 展平成若干条折线（每条是一串 (x, y)）。"""
     from svg.path import parse_path
 
@@ -107,25 +108,111 @@ def flatten_path(d: str, samples: int = SAMPLES_PER_CURVE):
     for pts in polylines:
         pts = _dedupe(pts)
         if len(pts) >= 2:
-            cleaned.append(_rdp(pts, SIMPLIFY_EPS))
+            cleaned.append(_rdp(pts, SIMPLIFY_EPS if eps is None else eps))
     return cleaned
 
 
-def svg_to_prims(svg: str):
-    """返回 Tk 图元描述：("line", x1,y1,x2,y2...) / ("oval", ...)（坐标已归一化）"""
+def _signed_area(poly):
+    total = 0.0
+    for i in range(len(poly)):
+        x1, y1 = poly[i]
+        x2, y2 = poly[(i + 1) % len(poly)]
+        total += x1 * y2 - x2 * y1
+    return total / 2.0
+
+
+def _point_in_poly(pt, poly):
+    x, y = pt
+    inside = False
+    n = len(poly)
+    for i in range(n):
+        x1, y1 = poly[i]
+        x2, y2 = poly[(i + 1) % n]
+        if (y1 > y) != (y2 > y):
+            if x < (x2 - x1) * (y - y1) / (y2 - y1) + x1:
+                inside = not inside
+    return inside
+
+
+def group_subpaths(subpaths):
+    """把「外轮廓 + 内部的孔」合并成一个 polygon（Tk 用 even-odd 填充，会自动挖洞）。
+
+    subpaths: [ [(x, y), ...], ... ]
+    返回: [[外轮廓点..., 孔1点..., 孔2点...], ...]
+    """
+    items = []
+    for pts in subpaths:
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        items.append({"pts": pts, "area": abs(_signed_area(pts)),
+                      "bbox": (min(xs), min(ys), max(xs), max(ys))})
+    items.sort(key=lambda it: -it["area"])
+
+    groups = []
+    for item in items:
+        if item.get("used"):
+            continue
+        group = list(item["pts"])
+        item["used"] = True
+        outer = item
+        for other in items:
+            if other.get("used") or other is outer:
+                continue
+            x1, y1, x2, y2 = other["bbox"]
+            ox1, oy1, ox2, oy2 = outer["bbox"]
+            if not (x1 >= ox1 and y1 >= oy1 and x2 <= ox2 and y2 <= oy2):
+                continue
+            if _point_in_poly(other["pts"][0], outer["pts"]):
+                group.extend(other["pts"])
+                other["used"] = True
+        groups.append(group)
+    return groups
+
+
+def _viewbox(svg: str):
+    """从 viewBox 里取宽高 —— 不同图标集差很多（Lucide 24、iconfont 1024），
+    写死会让坐标整体放大几十倍。"""
+    m = re.search(r'viewBox="\s*([-\d.]+)[ ,]+([-\d.]+)[ ,]+([-\d.]+)[ ,]+([-\d.]+)', svg)
+    if m:
+        w, h = float(m.group(3)), float(m.group(4))
+        if w > 0 and h > 0:
+            return w, h
+    for attr in ("width", "height"):
+        m = re.search(rf'{attr}="([\d.]+)"', svg)
+        if m and float(m.group(1)) > 0:
+            v = float(m.group(1))
+            return v, v
+    return DEFAULT_VIEWBOX, DEFAULT_VIEWBOX
+
+
+def svg_to_prims(svg: str, filled: bool = False):
+    """返回 Tk 图元描述：("line"/"solid", x1,y1,...) / ("oval", ...)（坐标已归一化）"""
     prims = []
-    half = VIEWBOX / 2.0
+    vb_w, vb_h = _viewbox(svg)
+    half_x, half_y = vb_w / 2.0, vb_h / 2.0
+
+    def norm_x(v):
+        return round((v - half_x) / half_x, 4)
+
+    def norm_y(v):
+        return round((v - half_y) / half_y, 4)
 
     def norm(v):
-        return round((v - half) / half, 4)
+        return norm_x(v)
 
     for d in re.findall(r'<path[^>]*\sd="([^"]+)"', svg):
-        for pts in flatten_path(d):
+        subpaths = flatten_path(
+            d, eps=SIMPLIFY_EPS_FILLED if filled else None)
+        if filled:
+            groups = group_subpaths(subpaths)
+        else:
+            groups = subpaths
+        for pts in groups:
             flat = []
             for x, y in pts:
-                flat.extend((norm(x), norm(y)))
-            if len(flat) >= 4:
-                prims.append(("line",) + tuple(flat))
+                flat.extend((norm_x(x), norm_y(y)))
+            if len(flat) >= 6:
+                prims.append(("solid" if filled else "line",) + tuple(flat))
 
     for attrs in re.findall(r"<circle[^>]*/>", svg):
         cx = float(re.search(r'cx="([-\d.]+)"', attrs).group(1))
@@ -165,17 +252,18 @@ def main() -> int:
     args = ap.parse_args()
 
     table = {}
-    for local, (path, cache_name) in SOURCES.items():
-        try:
-            svg = (Path("/tmp/icons") / f"{cache_name}.svg").read_text(
-                encoding="utf-8") if args.offline else fetch(path)
-        except Exception as exc:  # noqa: BLE001
-            print(f"取 {path} 失败: {exc}", file=sys.stderr)
+    for local, cfg in ICONS.items():
+        path = ICON_DIR / cfg["file"]
+        if not path.is_file():
+            print(f"缺少图标文件: {path}", file=sys.stderr)
             return 1
-        prims = svg_to_prims(svg)
+        prims = svg_to_prims(path.read_text(encoding="utf-8"),
+                             filled=cfg.get("filled", False))
         table[local] = prims
         pts = sum(len(p) - 1 for p in prims)
-        print(f"  {local:6s} <- {path:52s} {len(prims):2d} 图元 / {pts} 点")
+        kind = "填充" if cfg.get("filled") else "描边"
+        print(f"  {local:6s} <- icons/{cfg['file']:10s} [{kind}] "
+              f"{len(prims):2d} 图元 / {pts} 点")
 
     block = render_block(table)
     if args.dry_run:
