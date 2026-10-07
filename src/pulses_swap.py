@@ -1,9 +1,19 @@
 """
 Pulses Swap - 快速枪包切换器
 作者: NimShade
-版本: 2.3.1
+版本: 2.3.2
 描述: Minecraft Tacz 模组枪包快速切换工具
 UI风格: Pulses 水墨淡色主题（customtkinter 圆角版本）
+
+v2.3.2 更新:
+  - 修：设置页选项卡「上一个」取的是已更新过的当前值，方向永远算成同一个
+    → 表现是「不管点哪边都往左滑」；改为自己记录上一个选项卡
+  - 切换方向统一为「点哪边内容就往哪边走」：点左面/上面的选项往左/上滑，
+    点右面/下面的往右/下滑（侧边栏竖排 → 页面竖着滑）
+  - 去掉全部 emoji：导航图标改成自绘矢量图元（房子/齿轮/三横线），
+    不再依赖系统 emoji 字库；按钮文案去掉 📂📦📁📤🔄📋📖📄⏻⚠⏳❌✅⚡ 等字符
+  - 侧边栏底部加状态卡（当前整合包 / 状态 / 当前预设），不再空一大片
+  - 按钮给固定宽度，左列不再被按钮行撑宽（回到设计稿的 340px）
 
 v2.3.1 更新:
   - 修：侧边栏 sticky="nsw" 不横向拉伸 → 一直只有 124px 宽（显得又窄又挤），
@@ -51,6 +61,7 @@ except Exception:         # pragma: no cover - 仅影响 Windows 回收站功能
     ctypes.wintypes = None
 import hashlib
 import json
+import math
 import os
 import shutil
 import sys
@@ -86,7 +97,7 @@ except ImportError:
     FileSystemEventHandler = object
 
 # ==================== 常量定义 ====================
-VERSION = "2.3.1"
+VERSION = "2.3.2"
 AUTHOR = "NimShade"
 PROJECT_NAME = "Pulses Swap"
 
@@ -813,7 +824,7 @@ class CanvasSegmented(Canvas):
                  bold_active=False, text_anchor="w", text_pad=14,
                  duration_ms=320, hover_ms=160, width=1, height=1,
                  icon_pad=13, icon_half=9, icon_gap=8, icon_anim_ms=420,
-                 icon_angle=45.0, icon_hop=6, icon_wobble=16):
+                 icon_angle=45.0, icon_hop=6, icon_wobble=16, icon_size=17):
         super().__init__(parent, bg=bg_color, highlightthickness=0, bd=0,
                          width=width, height=height)
         self._items = [self._normalize_item(item) for item in items]
@@ -845,12 +856,14 @@ class CanvasSegmented(Canvas):
         self._icon_angle = float(icon_angle)
         self._icon_hop = float(icon_hop)
         self._icon_wobble = float(icon_wobble)
+        self._icon_size = float(icon_size)
 
         self._active = None
         self._rects = []
         self._text_ids = []
         self._text_colors = {}
-        self._icon_ids = []
+        self._icon_ids = []          # 每项：图元 id 列表（矢量图标会有多条）
+        self._icon_prims = []        # 每项：图元描述；None 表示文字图标
         self._icon_colors = {}
         self._icon_angles = [0.0] * len(self._items)
         self._icon_origins = [(0.0, 0.0)] * len(self._items)
@@ -872,12 +885,20 @@ class CanvasSegmented(Canvas):
             *self._rect_points((-6, -6, -3, -3)), smooth=True, splinesteps=24,
             fill=bg_color, outline="")
         for index, (_, icon, text, _anim) in enumerate(self._items):
-            if icon:
+            if icon.startswith("@"):
+                # 矢量图标：不用 emoji 字库，颜色/角度都能动
+                ids, prims = draw_vector_icon(
+                    self, icon[1:], -40, -40, self._icon_size, text_color)
+                self._icon_ids.append(ids or None)
+                self._icon_prims.append(prims)
+            elif icon:
                 self._icon_ids.append(
-                    self.create_text(0, 0, text=icon, fill=text_color,
-                                      anchor="center", font=self._icon_font))
+                    [self.create_text(0, 0, text=icon, fill=text_color,
+                                       anchor="center", font=self._icon_font)])
+                self._icon_prims.append(None)
             else:
                 self._icon_ids.append(None)
+                self._icon_prims.append(None)
             self._icon_colors[index] = text_color
             self._text_ids.append(
                 self.create_text(0, 0, text=text, fill=text_color,
@@ -933,12 +954,11 @@ class CanvasSegmented(Canvas):
         for index, text_id in enumerate(self._text_ids):
             x1, y1, x2, y2 = rects[index]
             center_y = (y1 + y2) / 2.0
-            icon_id = self._icon_ids[index]
-            if icon_id is not None:
-                # 图标单独占位（anchor=center，方便绕自身中心做旋转）
+            if self._icon_ids[index] is not None:
+                # 图标单独占位，绕自身中心旋转
                 icon_x = x1 + self._icon_pad + self._icon_half
                 self._icon_origins[index] = (icon_x, center_y)
-                self.coords(icon_id, icon_x, center_y)
+                self._place_icon(index, icon_x, center_y)
                 label_x = icon_x + self._icon_half + self._icon_gap
             else:
                 label_x = x1 + self._text_pad
@@ -1110,14 +1130,47 @@ class CanvasSegmented(Canvas):
                   easing=ease_out_cubic)
 
     # ---------- 图标动画 ----------
+    def _place_icon(self, index, x, y):
+        """把某个图标摆到 (x, y)：矢量图标按当前角度重算坐标，文字图标直接挪。"""
+        ids = self._icon_ids[index]
+        if not ids:
+            return
+        prims = self._icon_prims[index]
+        if prims:
+            redraw_vector_icon(self, ids, prims, x, y, self._icon_size,
+                               self._icon_angles[index])
+        else:
+            try:
+                self.coords(ids[0], x, y)
+            except Exception:
+                pass
+
+    def _set_icon_color(self, index, color):
+        ids = self._icon_ids[index]
+        if not ids:
+            return
+        prims = self._icon_prims[index]
+        if prims:
+            paint_vector_icon(self, ids, prims, color)
+        else:
+            try:
+                self.itemconfigure(ids[0], fill=color)
+            except Exception:
+                pass
+
     def _set_icon_angle(self, index, degrees):
         self._icon_angles[index] = float(degrees)
-        icon_id = self._icon_ids[index]
-        if icon_id is None:
+        if not self._icon_ids[index]:
+            return
+        if self._icon_prims[index]:
+            # 矢量图标：自己算旋转后的坐标（不依赖 Tk 的 text -angle）
+            origin = self._icon_origins[index]
+            self._place_icon(index, origin[0], origin[1])
             return
         try:
             # Tk 8.6+ 的 canvas text 才支持 -angle；不支持时静默退化为不旋转
-            self.itemconfigure(icon_id, angle=self._icon_angles[index])
+            self.itemconfigure(self._icon_ids[index][0],
+                               angle=self._icon_angles[index])
         except Exception:
             pass
 
@@ -1132,26 +1185,19 @@ class CanvasSegmented(Canvas):
             self._play_icon(index, is_active, animate)
 
     def _animate_icon_color(self, index, is_active, animate=True):
-        icon_id = self._icon_ids[index]
-        if icon_id is None:
+        if not self._icon_ids[index]:
             return
         target = self._active_text_color if is_active else self._text_color
         start = self._icon_colors.get(index, self._text_color)
         if not animate or start == target:
             self._icon_colors[index] = target
-            try:
-                self.itemconfigure(icon_id, fill=target)
-            except Exception:
-                pass
+            self._set_icon_color(index, target)
             return
 
         def frame(e, raw):
             color = lerp_color(start, target, e)
             self._icon_colors[index] = color
-            try:
-                self.itemconfigure(icon_id, fill=color)
-            except Exception:
-                pass
+            self._set_icon_color(index, color)
 
         tween(self, "iconcolor{}".format(index), 240, frame,
               easing=ease_out_cubic)
@@ -1161,9 +1207,8 @@ class CanvasSegmented(Canvas):
         hop / wobble 是选中时一次性播放的小动效，切走时无需复位。"""
         if index < 0 or index >= len(self._icon_ids):
             return
-        icon_id = self._icon_ids[index]
         anim = self._items[index][3]
-        if icon_id is None or anim not in self.ICON_ANIMS:
+        if not self._icon_ids[index] or anim not in self.ICON_ANIMS:
             return
         key = "icon{}".format(index)
 
@@ -1191,11 +1236,8 @@ class CanvasSegmented(Canvas):
             def frame(e, raw):
                 # 三角形包络：起跳 -> 顶点 -> 落回，末帧一定回到原位
                 tri = raw * 2.0 if raw <= 0.5 else (1.0 - raw) * 2.0
-                try:
-                    self.coords(icon_id, origin[0],
-                                origin[1] - self._icon_hop * tri)
-                except Exception:
-                    pass
+                self._place_icon(index, origin[0],
+                                 origin[1] - self._icon_hop * tri)
 
             frame(0.0, 0.0)
             tween(self, key, 340, frame, easing=ease_linear)
@@ -1383,6 +1425,87 @@ class Toast:
         cancel_all_tweens(self.frame)
         try:
             self.frame.destroy()
+        except Exception:
+            pass
+
+
+# ==================== 矢量图标 ====================
+# 不用 emoji 字体：emoji 走系统的 emoji 字库（Windows 上是 Segoe UI Emoji），
+#   · 颜色不跟 text_color 走，选中态染色基本失效；
+#   · 不少字形是彩色位图，旋转/缩放都不干净；
+#   · 没装 emoji 字库的机器上直接掉成方框。
+# 这里改成用 Canvas 图元自己画：颜色能逐帧混、角度能逐帧转、任何平台一致。
+# 每个图标用 -1..1 的归一化坐标描述，绘制/旋转都只做一次坐标变换。
+_ICON_PRIMS = {
+    "home": (("line", -0.92, 0.08, 0.0, -0.92),
+             ("line", 0.0, -0.92, 0.92, 0.08),
+             ("line", -0.58, -0.16, -0.58, 0.92),
+             ("line", 0.58, -0.16, 0.58, 0.92),
+             ("line", -0.58, 0.92, 0.58, 0.92)),
+    "gear": (("oval", -0.50, -0.50, 0.50, 0.50),
+             ("line", 0.62, 0.0, 1.0, 0.0),
+             ("line", 0.44, 0.44, 0.71, 0.71),
+             ("line", 0.0, 0.62, 0.0, 1.0),
+             ("line", -0.44, 0.44, -0.71, 0.71),
+             ("line", -0.62, 0.0, -1.0, 0.0),
+             ("line", -0.44, -0.44, -0.71, -0.71),
+             ("line", 0.0, -0.62, 0.0, -1.0),
+             ("line", 0.44, -0.44, 0.71, -0.71)),
+    "log": (("line", -0.85, -0.66, 0.85, -0.66),
+            ("line", -0.85, 0.0, 0.85, 0.0),
+            ("line", -0.85, 0.66, 0.30, 0.66)),
+}
+
+
+def _icon_points(pts, cx, cy, size, angle):
+    """把归一化坐标按 size/角度映射到画布坐标。"""
+    rad = math.radians(angle or 0.0)
+    cos_a, sin_a = math.cos(rad), math.sin(rad)
+    half = size / 2.0
+    out = []
+    for i in range(0, len(pts), 2):
+        x, y = pts[i] * half, pts[i + 1] * half
+        out.append(cx + x * cos_a - y * sin_a)
+        out.append(cy + x * sin_a + y * cos_a)
+    return out
+
+
+def draw_vector_icon(canvas, name, cx, cy, size, color, angle=0.0, width=1.7):
+    """在 canvas 上画一个矢量图标，返回 (图元 id 列表, 图元描述)。"""
+    prims = _ICON_PRIMS.get(name)
+    if not prims:
+        return [], None
+    ids = []
+    for prim in prims:
+        pts = _icon_points(prim[1:], cx, cy, size, angle)
+        try:
+            if prim[0] == "oval":
+                ids.append(canvas.create_oval(*pts, outline=color, width=width))
+            else:
+                ids.append(canvas.create_line(*pts, fill=color, width=width,
+                                              capstyle="round"))
+        except Exception:
+            pass
+    return ids, prims
+
+
+def redraw_vector_icon(canvas, ids, prims, cx, cy, size, angle=0.0):
+    """只改坐标，不重建图元：逐帧动画时不会闪。"""
+    for item, prim in zip(ids, prims):
+        try:
+            canvas.coords(item, *_icon_points(prim[1:], cx, cy, size, angle))
+        except Exception:
+            pass
+
+
+def paint_vector_icon(canvas, ids, prims, color):
+    """矢量图标的染色：线用 fill，圆用 outline。"""
+    for index, item in enumerate(ids):
+        try:
+            if prims and prims[index][0] == "oval":
+                canvas.itemconfigure(item, outline=color)
+            else:
+                canvas.itemconfigure(item, fill=color)
         except Exception:
             pass
 
@@ -2161,9 +2284,9 @@ class DatabaseLocatorDialog:
         desc = make_label(frame,
             text="首次启动需要指定数据库位置。\n"
                  "数据库用于保存预设、校验数据和程序设置。\n\n"
-                 "• 新用户 → 点「✨ 新建数据库」或「使用默认位置」\n"
-                 "• 已有 Pulses Swap 数据库 → 点「📂 定位已有数据库」\n"
-                 "• 有旧版 FGC_database → 点「📦 适配旧版数据库」",
+                 "• 新用户 → 点「新建数据库」或「使用默认位置」\n"
+                 "• 已有 Pulses Swap 数据库 → 点「定位已有数据库」\n"
+                 "• 有旧版 FGC_database → 点「适配旧版数据库」",
             fg=C_TEXT_SECONDARY, font_size=FS_BODY)
         desc.configure(wraplength=dlg_w - 2 * PAD_DIALOG - 6, justify=LEFT, anchor=W)
         desc.pack(anchor=W, fill=X, pady=(0, PAD_DIALOG))
@@ -2293,11 +2416,11 @@ class DatabaseLocatorDialog:
             if _init_or_report(DEFAULT_DB_DIR, "创建默认数据库失败"):
                 _choose(DEFAULT_DB_DIR)
 
-        b_exist = make_button(btn_frame, "📂 定位已有数据库", command=on_existing)
+        b_exist = make_button(btn_frame, "定位已有数据库", command=on_existing)
         b_exist.pack(side=LEFT, padx=(0, PAD_TIGHT))
-        b_legacy = make_button(btn_frame, "📦 适配旧版数据库", command=on_legacy)
+        b_legacy = make_button(btn_frame, "适配旧版数据库", command=on_legacy)
         b_legacy.pack(side=LEFT, padx=PAD_TIGHT)
-        b_new = make_button(btn_frame, "✨ 新建数据库", command=on_new, accent=True)
+        b_new = make_button(btn_frame, "新建数据库", command=on_new, accent=True)
         b_new.pack(side=LEFT, padx=PAD_TIGHT)
         b_default = make_button(btn_frame, "使用默认位置", command=on_default)
         b_default.pack(side=LEFT, padx=PAD_TIGHT)
@@ -2363,7 +2486,7 @@ class LogManager:
 
     显示分两档：
       · 单行模式（默认）：只显示「最近一条非细节日志」，避免回显类噪声刷屏；
-      · 完整日志（日志页「📋 显示完整日志」）：显示全部，含细节/进度条目。
+      · 完整日志（日志页「显示完整日志」）：显示全部，含细节/进度条目。
     细节条目仍然会被记录，只是单行模式下不占用显示位。
     """
 
@@ -3433,17 +3556,17 @@ class PresetManager:
                         modified.append(name)
 
                 if missing or modified:
-                    self.log.log("❌ 增量更新校验失败：本地枪包与增量包要求的原始状态不匹配", 'ERROR')
+                    self.log.log("增量更新校验失败：本地枪包与增量包要求的原始状态不匹配", 'ERROR')
                     if missing:
                         self.log.log(f"  缺失 {len(missing)} 个枪包（需向管理员请求）:", 'ERROR')
                         for n in missing[:10]:
-                            self.log.log(f"    ✖ {n}", 'ERROR')
+                            self.log.log(f"    × {n}", 'ERROR')
                         if len(missing) > 10:
                             self.log.log(f"    ... 还有 {len(missing)-10} 个", 'ERROR')
                     if modified:
                         self.log.log(f"  内容已被修改 {len(modified)} 个枪包:", 'ERROR')
                         for n in modified[:10]:
-                            self.log.log(f"    ⚡ {n}", 'ERROR')
+                            self.log.log(f"    ~ {n}", 'ERROR')
                         if len(modified) > 10:
                             self.log.log(f"    ... 还有 {len(modified)-10} 个", 'ERROR')
 
@@ -3451,14 +3574,14 @@ class PresetManager:
                     if missing:
                         lines.append(f"缺失的枪包（{len(missing)} 个，需向管理员请求）：")
                         for n in missing[:10]:
-                            lines.append(f"  ✖ {n}")
+                            lines.append(f"  × {n}")
                         if len(missing) > 10:
                             lines.append(f"  ... 还有 {len(missing)-10} 个")
                         lines.append("")
                     if modified:
                         lines.append(f"内容已被修改的枪包（{len(modified)} 个）：")
                         for n in modified[:10]:
-                            lines.append(f"  ⚡ {n}")
+                            lines.append(f"  ~ {n}")
                         if len(modified) > 10:
                             lines.append(f"  ... 还有 {len(modified)-10} 个")
                         lines.append("")
@@ -3468,7 +3591,7 @@ class PresetManager:
                     show_error("增量更新校验失败", "\n".join(lines))
                     return False
                 else:
-                    self.log.log("✅ 本地枪包与原始状态匹配", 'SUCCESS', verbose=True)
+                    self.log.log("本地枪包与原始状态匹配", 'SUCCESS', verbose=True)
             else:
                 self.log.log("提示：此增量包未包含原始校验数据，跳过兼容性校验", 'WARNING')
 
@@ -3613,14 +3736,18 @@ class SettingsPage:
     def show_tab(self, key, animate=True):
         if key not in self.tabs:
             return
+        # 注意：不能用 tab_bar.current() 当「上一个」——点击进来时
+        # CanvasSegmented 已经先把选中态切到新项了，那样永远算不出方向，
+        # 表现就是「不管点哪边都往同一个方向滑」。这里自己记上一个选项卡。
+        previous = getattr(self, "_active_tab", None) or self.stack.current
         direction = 1
-        previous = self.tab_bar.current()
         if previous is not None and previous != key:
             old_index = self.tab_bar.index_of(previous)
             new_index = self.tab_bar.index_of(key)
-            # 同 show_page：点右面的选项卡内容往右走，点左面的往左走
+            # 点左面的选项卡内容往左走，点右面的往右走
             if old_index >= 0 and new_index >= 0 and new_index > old_index:
                 direction = -1
+        self._active_tab = key
         self.tab_bar.select(key, animate=animate, notify=False)
         self.stack.show(key, animate=animate, direction=direction, axis="x")
 
@@ -3705,7 +3832,7 @@ class SettingsPage:
         btn_row2.pack(fill=X, padx=PAD_CARD_X, pady=(0, PAD_TIGHT))
         make_button(btn_row2, "打开数据库文件夹", command=self.on_open_db).pack(
             side=LEFT, padx=(0, PAD_TIGHT))
-        make_button(btn_row2, "⚠ 强制更新校验数据",
+        make_button(btn_row2, "强制更新校验数据",
                      command=self.app.force_update_validation).pack(
             side=LEFT, padx=PAD_TIGHT)
         make_label(db_mgr_card, text="", font_size=FS_TINY).pack(
@@ -3735,13 +3862,13 @@ class SettingsPage:
 
         btn_row = ctk.CTkFrame(tab, fg_color="transparent")
         btn_row.pack(fill=X)
-        make_button(btn_row, "📖 使用教程",
+        make_button(btn_row, "使用教程",
                      command=self.app.show_tutorial).pack(
                         side=LEFT, padx=(0, PAD_TIGHT))
-        make_button(btn_row, "📄 功能列表",
+        make_button(btn_row, "功能列表",
                      command=self.app.show_about_detail).pack(
                         side=LEFT, padx=PAD_TIGHT)
-        make_button(btn_row, "⏻ 退出程序",
+        make_button(btn_row, "退出程序",
                      command=self.app.request_exit).pack(
                         side=LEFT, padx=PAD_TIGHT)
 
@@ -4070,9 +4197,9 @@ class PulsesSwapApp:
 
         # 导航项用 Canvas 自绘：选中滑块可以逐帧滑到目标项，图标各自带动效
         # （主界面=轻跳、设置=齿轮转 45°、日志=轻摆，见 CanvasSegmented）
-        nav_items = (("home", "🏠", "主界面", "hop"),
-                     ("settings", "⚙", "设置", "rotate"),
-                     ("log", "📋", "日志", "wobble"))
+        nav_items = (("home", "@home", "主界面", "hop"),
+                     ("settings", "@gear", "设置", "rotate"),
+                     ("log", "@log", "日志", "wobble"))
         nav_height = len(nav_items) * (H_NAV + PAD_XS) + 2 * PAD_XS
         self.nav = CanvasSegmented(
             sidebar, nav_items, command=self.show_page,
@@ -4083,6 +4210,31 @@ class PulsesSwapApp:
             text_anchor="w", text_pad=14, icon_pad=11, icon_half=9,
             icon_gap=8, icon_angle=45.0, duration_ms=380, height=nav_height)
         self.nav.pack(fill=X, padx=PAD_XS)
+
+        # ===== 侧边栏底部状态卡 =====
+        # 侧边栏有 800+px 高，只有品牌 + 三个导航项会显得空；
+        # 底部钉一张状态卡（整合包 / 状态 / 当前预设），既补留白又是真信息。
+        status_card = ctk.CTkFrame(sidebar, fg_color=C_PANEL_ALT_BG,
+                                    corner_radius=R_CONTROL,
+                                    border_width=BORDER_W,
+                                    border_color=C_BORDER_SOFT)
+        status_card.pack(side=BOTTOM, fill=X, padx=PAD_XS,
+                          pady=(PAD_GAP, PAD_CARD_Y))
+        attach_hover_glow(status_card)
+        make_label(status_card, text="当前整合包", fg=C_TEXT_MUTED,
+                    font_size=FS_TINY).pack(anchor=W, padx=PAD_CARD_X,
+                                             pady=(PAD_CARD_Y, PAD_MICRO))
+        self.sb_pack_label = make_label(status_card, text="未选择",
+                                         fg=C_TEXT_MAIN, font_size=FS_SMALL,
+                                         bold=True)
+        self.sb_pack_label.pack(anchor=W, padx=PAD_CARD_X)
+        self.sb_status_label = make_label(status_card, text="状态: 未加载",
+                                           fg=C_ERROR, font_size=FS_TINY)
+        self.sb_status_label.pack(anchor=W, padx=PAD_CARD_X, pady=(PAD_TIGHT, 0))
+        self.sb_preset_label = make_label(status_card, text="当前预设: 无",
+                                           fg=C_ACCENT, font_size=FS_TINY)
+        self.sb_preset_label.pack(anchor=W, padx=PAD_CARD_X,
+                                   pady=(PAD_MICRO, PAD_CARD_Y))
 
         # ===== 右侧内容列：页面区 + 全局状态条（进度条） =====
         content_col = ctk.CTkFrame(main_frame, fg_color="transparent")
@@ -4140,7 +4292,7 @@ class PulsesSwapApp:
             desc="Step 2 · 点击「+ 创建」新建预设，放入枪包")
         self.guide.register(
             "step3_apply", [self.apply_btn],
-            desc="Step 4 · 点击「⚡ 一键替换」启用预设")
+            desc="Step 4 · 点击「一键替换」启用预设")
 
         self.show_page("home", animate=False)
         self._play_entrance()
@@ -4276,13 +4428,13 @@ class PulsesSwapApp:
                                              command=self.select_pack,
                                              width=60, accent=True)
         self.select_pack_btn.pack(side=LEFT, padx=(0, PAD_XS))
-        self.open_pack_btn = make_button(pack_btn_row, "📂",
+        self.open_pack_btn = make_button(pack_btn_row, "目录",
                                            command=self.open_pack_folder,
-                                           width=32, state="disabled")
+                                           width=52, state="disabled")
         self.open_pack_btn.pack(side=LEFT, padx=(0, PAD_XS))
-        self.close_pack_btn = make_button(pack_btn_row, "✕ 关闭",
+        self.close_pack_btn = make_button(pack_btn_row, "关闭",
                                             command=self.close_pack,
-                                            width=64)
+                                            width=56)
         self.close_pack_btn.pack(side=LEFT, padx=(0, PAD_XS))
         self.recent_toggle_btn = make_button(pack_btn_row, "▼ 最近",
                                                command=self.toggle_recent,
@@ -4377,23 +4529,25 @@ class PulsesSwapApp:
 
         preset_btn_frame = ctk.CTkFrame(preset_content, fg_color="transparent")
         preset_btn_frame.pack(fill=X)
-        self.create_preset_btn = make_button(preset_btn_frame, "+ 创建",
-                                              command=self.create_preset, state="disabled")
+        self.create_preset_btn = make_button(preset_btn_frame, "＋ 创建",
+                                              command=self.create_preset,
+                                              state="disabled", width=68)
         self.create_preset_btn.pack(side=LEFT, padx=(0, PAD_XS))
-        self.export_preset_btn = make_button(preset_btn_frame, "📤 导出",
-                                              command=self.export_preset, state="disabled")
+        self.export_preset_btn = make_button(preset_btn_frame, "导出",
+                                              command=self.export_preset,
+                                              state="disabled", width=56)
         self.export_preset_btn.pack(side=LEFT, padx=PAD_XS)
-        self.export_incremental_btn = make_button(preset_btn_frame, "🔄 更新",
+        self.export_incremental_btn = make_button(preset_btn_frame, "更新",
                                                    command=self.export_incremental,
-                                                   state="disabled")
+                                                   state="disabled", width=56)
         self.export_incremental_btn.pack(side=LEFT, padx=PAD_XS)
-        self.refresh_preset_btn = make_button(preset_btn_frame, "⟳",
+        self.refresh_preset_btn = make_button(preset_btn_frame, "刷新",
                                                command=self.refresh_presets,
-                                               state="disabled", width=40)
+                                               state="disabled", width=52)
         self.refresh_preset_btn.pack(side=LEFT, padx=PAD_XS)
-        self.open_db_btn = make_button(preset_btn_frame, "📁",
+        self.open_db_btn = make_button(preset_btn_frame, "数据库",
                                         command=self.open_preset_manager,
-                                        state="disabled", width=40)
+                                        state="disabled", width=64)
         self.open_db_btn.pack(side=LEFT, padx=PAD_XS)
         self.loading_label = make_label(preset_btn_frame, text="", fg=C_ACCENT,
                                         font_size=FS_TINY)
@@ -4452,18 +4606,18 @@ class PulsesSwapApp:
                                                fg=C_TEXT_MAIN, font_size=FS_SMALL)
         self.gunpack_count_label.pack(side=LEFT)
 
-        self.refresh_gunpack_btn = make_button(toolbar_frame, "⟳ 刷新",
+        self.refresh_gunpack_btn = make_button(toolbar_frame, "刷新",
                                                 command=self.refresh_gunpacks,
-                                                state="disabled", width=70)
+                                                state="disabled", width=56)
         self.refresh_gunpack_btn.pack(side=RIGHT)
 
-        self.open_tacz_btn = make_button(toolbar_frame, "📂 打开TACZ",
+        self.open_tacz_btn = make_button(toolbar_frame, "打开TACZ",
                                           command=self.open_tacz_folder,
-                                          state="disabled", width=100)
+                                          state="disabled", width=84)
         self.open_tacz_btn.pack(side=RIGHT, padx=(0, PAD_XS))
 
-        self.refresh_all_btn = make_button(toolbar_frame, "⟳ 全部刷新",
-                                            command=self.refresh_all, width=90)
+        self.refresh_all_btn = make_button(toolbar_frame, "全部刷新",
+                                            command=self.refresh_all, width=76)
         self.refresh_all_btn.pack(side=RIGHT, padx=(0, PAD_XS))
 
         gunpack_list_wrap = ctk.CTkFrame(gunpack_content, fg_color=C_CARD_BG,
@@ -4479,7 +4633,7 @@ class PulsesSwapApp:
                                         font=(FONT_FAMILY, FS_BODY))
         self.gunpack_listbox.pack(fill=BOTH, expand=True, padx=PAD_XS, pady=PAD_XS)
 
-        self.apply_btn = make_button(right_panel, "Step 4 · ⚡ 一键替换",
+        self.apply_btn = make_button(right_panel, "Step 4 · 一键替换",
                                       command=self.apply_preset,
                                       state="disabled", accent=True)
         self.apply_btn.grid(row=1, column=0, sticky="ew")
@@ -4524,7 +4678,7 @@ class PulsesSwapApp:
                          pady=(0, PAD_CARD_Y))
         log_toolbar = ctk.CTkFrame(log_content, fg_color="transparent")
         log_toolbar.pack(fill=X, pady=(0, PAD_TIGHT))
-        self.log_toggle_btn = make_button(log_toolbar, "📋 显示完整日志",
+        self.log_toggle_btn = make_button(log_toolbar, "显示完整日志",
                                            command=self.toggle_log_mode)
         self.log_toggle_btn.pack(side=LEFT)
         self.log_clear_btn = make_button(log_toolbar, "清空", command=self.clear_log)
@@ -4544,12 +4698,12 @@ class PulsesSwapApp:
         """原生菜单栏已去掉：它会在窗口顶部多出一条系统级横条，与设计稿不符。
 
         原菜单项全部迁到界面内：
-          打开整合包 / 打开路径 / 关闭整合包 -> Step 1 的「选择 / 📂 / ✕ 关闭」
+          打开整合包 / 打开路径 / 关闭整合包 -> Step 1 的「选择 / 目录 / 关闭」
           程序设置 / 日志显示设置           -> 侧边栏「设置 / 日志」
-          预设管理（打开数据库目录）        -> Step 2 的「📁」
+          预设管理（打开数据库目录）        -> Step 2 的「数据库」
           刷新所有                          -> 枪包列表工具条的「⟳ 全部刷新」
           使用教程 / 关于 / 强制更新校验数据 -> 设置页「关于 / 数据库」选项卡
-          退出                              -> 窗口关闭按钮 + 设置页「⏻ 退出程序」
+          退出                              -> 窗口关闭按钮 + 设置页「退出程序」
         """
         try:
             self.root.config(menu="")
@@ -4982,8 +5136,8 @@ class PulsesSwapApp:
         if not self.current_selected_preset:
             show_warning("提示", "请先选择一个预设")
             return
-        if not ask_yes_no("⚠ 危险操作警告",
-            "⚠ 强制更新校验数据是危险操作！\n\n"
+        if not ask_yes_no("危险操作警告",
+            "强制更新校验数据是危险操作！\n\n"
             "确定要继续吗？", icon='warning'):
             return
         name = self.current_selected_preset
@@ -4993,7 +5147,7 @@ class PulsesSwapApp:
         from_tacz = info.get('applied', False)
         if self.preset_manager.update_preset_index(name, from_tacz=from_tacz):
             self.refresh_gunpacks(use_cache=False)
-            self.log_manager.log(f"⚠ 已强制更新预设 '{name}' 的校验数据", 'WARNING')
+            self.log_manager.log(f"已强制更新预设 '{name}' 的校验数据", 'WARNING')
             show_info("完成", f"预设 '{name}' 的校验数据已强制更新。")
         else:
             show_error("错误", "强制更新失败，请查看日志")
@@ -5254,6 +5408,7 @@ class PulsesSwapApp:
 
         self.pack_path_label.configure(text=str(pack_path), text_color=C_SUCCESS)
         self.pack_status_label.configure(text="状态: 已加载 ✓", text_color=C_SUCCESS)
+        self._update_sidebar_status()
         self.pack_name_label.configure(text="当前预设: 无", text_color=C_ACCENT)
         self.open_pack_btn.configure(state="normal")
         self.open_tacz_btn.configure(state="normal")
@@ -5273,7 +5428,7 @@ class PulsesSwapApp:
         self._start_watcher()
 
         self.loading_presets = True
-        self._start_loading_dots("⏳ 加载中")
+        self._start_loading_dots("加载中")
         self._disable_buttons(True)
         self.preset_listbox.delete(0, END)
         self.preset_listbox.insert(END, "正在加载预设列表，请稍候...")
@@ -5334,7 +5489,7 @@ class PulsesSwapApp:
             pass
 
     # ==================== 加载指示动画 ====================
-    def _start_loading_dots(self, prefix="⏳ 刷新中"):
+    def _start_loading_dots(self, prefix="刷新中"):
         """加载文字脉冲：小圆点逐帧增长，替代静态的「...」。"""
         def frame(e, raw):
             dots = "." * min(3, int(raw * 4))
@@ -5412,6 +5567,7 @@ class PulsesSwapApp:
         self.open_tacz_btn.configure(state="disabled")
         self._disable_buttons(True)
         self.log_manager.log("已关闭整合包", 'INFO', verbose=True)
+        self._update_sidebar_status()
         self._update_guide()
 
     # ==================== TACZ 监控 ====================
@@ -5454,6 +5610,22 @@ class PulsesSwapApp:
         self.refresh_gunpacks(use_cache=False)
 
     # ==================== 预设管理 ====================
+    def _update_sidebar_status(self):
+        """侧边栏底部状态卡：镜像 Step1/Step2 的状态，避免侧边栏下半部空着。"""
+        try:
+            self.sb_pack_label.configure(
+                text=(self.current_pack_path.name if self.current_pack_path
+                      else "未选择"))
+        except Exception:
+            pass
+        for src, dst in ((self.pack_status_label, self.sb_status_label),
+                         (self.pack_name_label, self.sb_preset_label)):
+            try:
+                dst.configure(text=src.cget("text"),
+                              text_color=src.cget("text_color"))
+            except Exception:
+                pass
+
     def _update_preset_list(self):
         if not self.preset_manager:
             return
@@ -5472,12 +5644,13 @@ class PulsesSwapApp:
                 if self.preset_listbox.get(i) == self.current_selected_preset:
                     self.preset_listbox.selection_set(i)
                     break
+        self._update_sidebar_status()
 
     def refresh_presets(self):
         if not self.preset_manager or self.loading_presets:
             return
         self.loading_presets = True
-        self._start_loading_dots("⏳ 刷新中")
+        self._start_loading_dots("刷新中")
         self._disable_buttons(True)
         threading.Thread(target=self._refresh_presets_thread, daemon=True).start()
 
@@ -5523,11 +5696,12 @@ class PulsesSwapApp:
             self.apply_btn.configure(state="disabled", text="已应用 ✓")
             self.export_incremental_btn.configure(state="normal")
         else:
-            self.apply_btn.configure(state="normal", text="Step 4 · ⚡ 一键替换")
+            self.apply_btn.configure(state="normal", text="Step 4 · 一键替换")
             self.export_incremental_btn.configure(state="disabled")
         self.export_preset_btn.configure(state="normal")
         self.refresh_gunpacks(use_cache=False)
         self.log_manager.log(f"选择预设: {name}", 'INFO', verbose=True)
+        self._update_sidebar_status()
         self._update_guide()
 
     def show_preset_context_menu(self, event):
@@ -5789,7 +5963,7 @@ class PulsesSwapApp:
                     self.preset_version_label.configure(text="版本号: 无")
                     self.preset_status_label.configure(text="状态: 未应用")
                     self.version_entry.delete(0, END)
-                    self.apply_btn.configure(state="disabled", text="Step 4 · ⚡ 一键替换")
+                    self.apply_btn.configure(state="disabled", text="Step 4 · 一键替换")
                     self.export_preset_btn.configure(state="disabled")
                     self.export_incremental_btn.configure(state="disabled")
                     self.gunpack_listbox.delete(0, END)
@@ -5956,7 +6130,7 @@ class PulsesSwapApp:
         if success:
             show_info("导出成功",
                 f"增量更新包已导出到:\n{export_path}\n\n"
-                f"✅ 校验数据已自动同步为最新")
+                f"校验数据已自动同步为最新")
         else:
             show_error("导出失败", "增量包导出失败，请查看日志")
         self._update_preset_list()
@@ -6088,7 +6262,7 @@ class PulsesSwapApp:
     def set_busy_state(self, busy, operation=""):
         if busy:
             self.is_applying = True
-            self.apply_btn.configure(state="disabled", text=f"⏳ {operation}中...")
+            self.apply_btn.configure(state="disabled", text=f"{operation}中...")
             self.export_preset_btn.configure(state="disabled")
             self.export_incremental_btn.configure(state="disabled")
             self.create_preset_btn.configure(state="disabled")
@@ -6103,7 +6277,7 @@ class PulsesSwapApp:
             self.preset_listbox.config(state=DISABLED)
         else:
             self.is_applying = False
-            self.apply_btn.configure(state="normal", text="Step 4 · ⚡ 一键替换")
+            self.apply_btn.configure(state="normal", text="Step 4 · 一键替换")
             self.export_preset_btn.configure(state="normal")
             self.create_preset_btn.configure(state="normal")
             self.refresh_preset_btn.configure(state="normal")
@@ -6181,30 +6355,22 @@ class PulsesSwapApp:
         total = len(missing) + len(extra) + len(modified) + len(normal)
 
         for name in missing:
-            info_d = indexed.get(name, {})
-            icon = "📦" if info_d.get('type', 'zip') == 'zip' else "📁"
-            self.gunpack_listbox.insert(END, f"✖ {icon} {name}")
+            self.gunpack_listbox.insert(END, f"× {name}")
             i = self.gunpack_listbox.size() - 1
             self.gunpack_listbox.itemconfig(i, fg=C_STATUS_MISSING, bg=C_STATUS_MISSING_BG)
 
         for name in extra:
-            info_d = current.get(name, {})
-            icon = "📦" if info_d.get('type', 'zip') == 'zip' else "📁"
-            self.gunpack_listbox.insert(END, f"⊙ {icon} {name}")
+            self.gunpack_listbox.insert(END, f"⊙ {name}")
             i = self.gunpack_listbox.size() - 1
             self.gunpack_listbox.itemconfig(i, fg=C_STATUS_EXTRA, bg=C_STATUS_EXTRA_BG)
 
         for name in modified:
-            info_d = current.get(name, {})
-            icon = "📦" if info_d.get('type', 'zip') == 'zip' else "📁"
-            self.gunpack_listbox.insert(END, f"⚡ {icon} {name}")
+            self.gunpack_listbox.insert(END, f"~ {name}")
             i = self.gunpack_listbox.size() - 1
             self.gunpack_listbox.itemconfig(i, fg=C_STATUS_MODIFIED, bg=C_STATUS_MODIFIED_BG)
 
         for name in normal:
-            info_d = current.get(name, {})
-            icon = "📦" if info_d.get('type', 'zip') == 'zip' else "📁"
-            self.gunpack_listbox.insert(END, f"✓ {icon} {name}")
+            self.gunpack_listbox.insert(END, f"✓ {name}")
             i = self.gunpack_listbox.size() - 1
             self.gunpack_listbox.itemconfig(i, fg=C_STATUS_NORMAL, bg=C_STATUS_NORMAL_BG)
 
@@ -6223,13 +6389,13 @@ class PulsesSwapApp:
                 lines.append(f"  ✓ 正常: {len(normal)} 个 ({pv})")
             if missing:
                 pv = ', '.join(missing[:5]) + (" ..." if len(missing) > 5 else "")
-                lines.append(f"  ✖ 缺失: {len(missing)} 个 ({pv})")
+                lines.append(f"  × 缺失: {len(missing)} 个 ({pv})")
             if extra:
                 pv = ', '.join(extra[:5]) + (" ..." if len(extra) > 5 else "")
                 lines.append(f"  ⊙ 多余: {len(extra)} 个 ({pv})")
             if modified:
                 pv = ', '.join(modified[:5]) + (" ..." if len(modified) > 5 else "")
-                lines.append(f"  ⚡ 变更: {len(modified)} 个 ({pv})")
+                lines.append(f"  ~ 变更: {len(modified)} 个 ({pv})")
             self.log_manager.log("\n".join(lines), 'WARNING')
         else:
             self.log_manager.log(f"预设 '{preset_name}' 所有枪包校验通过 ✓ (共 {total} 个)", 'SUCCESS')
@@ -6297,7 +6463,7 @@ class PulsesSwapApp:
             self.show_full_log = not self.show_full_log
             self.log_manager.set_show_full(self.show_full_log)
             self.log_toggle_btn.configure(
-                text="📋 显示单条日志" if self.show_full_log else "📋 显示完整日志")
+                text="显示单条日志" if self.show_full_log else "显示完整日志")
 
     def clear_log(self):
         if self.log_manager:
@@ -6343,7 +6509,7 @@ class PulsesSwapApp:
             "【旧版数据库适配】\n"
             "设置 → 数据库管理 → 适配旧版数据库\n\n"
             "【打开TACZ】\n"
-            "枪包列表右上角「📂 打开TACZ」按钮")
+            "枪包列表右上角「打开TACZ」按钮")
 
     def show_about(self):
         # 「关于」已并入设置页的选项卡，不再弹独立信息框
@@ -6495,7 +6661,7 @@ def main():
         pass
 
     def on_closing():
-        # 退出语义与界面内的「⏻ 退出程序」完全一致（见 request_exit）
+        # 退出语义与界面内的「退出程序」完全一致（见 request_exit）
         app.request_exit()
 
     root.protocol("WM_DELETE_WINDOW", on_closing)
