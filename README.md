@@ -1,6 +1,6 @@
 # Pulses Swap
 
-Tacz 枪包一键切换工具 · v2.3.3
+Tacz 枪包一键切换工具 · v2.3.4
 
 面向 Minecraft Tacz 模组玩家的枪包管理工具：拖入整合包 → 选预设 → 一键替换，
 支持增量同步、二次校验、多预设管理与版本号管理。
@@ -40,6 +40,8 @@ pyinstaller packaging/pulses_swap.spec --noconfirm --clean
 ```
 src/pulses_swap.py        主程序（单文件）
 packaging/
+  make_icons.py           图标烘制：从 CDN 取官方 SVG（Lucide/Heroicons）→
+                          展平成 Tk 图元坐标写回源码（运行时不联网、零依赖）
   pulses_swap.spec        PyInstaller 配置
   installer.iss           Inno Setup 安装器脚本
 .github/workflows/build.yml

@@ -1,9 +1,20 @@
 """
 Pulses Swap - 快速枪包切换器
 作者: NimShade
-版本: 2.3.3
+版本: 2.3.4
 描述: Minecraft Tacz 模组枪包快速切换工具
 UI风格: Pulses 水墨淡色主题（customtkinter 圆角版本）
+
+v2.3.4 更新:
+  - 图标换成网上的官方图标集（构建期从 CDN 取 SVG 烘成坐标，运行时不联网）：
+      主界面 = Lucide house，设置 = Heroicons cog-6-tooth（真正的直齿 + 中心孔），
+      日志 = Lucide scroll-text
+    选型逐个放大 8 倍 + 真实 17px 对比过：lucide/settings 像花、feather/settings
+    没中心孔、lucide/cog 是轮辐（又变太阳）、tabler/settings 带方框太碎
+  - 动画整体提速：页面/选项卡 420→260ms、滑块 380→240ms、图标动效 420→300ms、
+    按钮 hover 150→110ms、卡片光晕 200→130ms、进度条 260→170ms……
+    曲线也由 ease_in_out_cubic 换成起步更快的 ease_out_cubic
+  - 新增 packaging/make_icons.py：图标烘制脚本（可重跑，--offline 用本地缓存）
 
 v2.3.3 更新:
   - 修：设置图标画成了「圆 + 8 根放射线」，看着是太阳 —— 改成真正的齿形轮廓
@@ -103,7 +114,7 @@ except ImportError:
     FileSystemEventHandler = object
 
 # ==================== 常量定义 ====================
-VERSION = "2.3.3"
+VERSION = "2.3.4"
 AUTHOR = "NimShade"
 PROJECT_NAME = "Pulses Swap"
 
@@ -663,7 +674,7 @@ def tween(widget, key, duration_ms, on_frame, on_done=None,
         _TWEENS[token] = job
 
 
-def attach_hover_glow(widget, base_color=None, hover_color=None, duration_ms=200):
+def attach_hover_glow(widget, base_color=None, hover_color=None, duration_ms=130):
     """卡片/拖入框的 hover 描边过渡：进入混向强调色，离开混回原色。
 
     卡片里通常还嵌着按钮/标签，鼠标从卡片移到子控件上时 Tk 会给卡片发
@@ -765,7 +776,7 @@ class AnimatedButton(ctk.CTkButton):
         except Exception:
             pass
 
-    def _to(self, target, duration=150):
+    def _to(self, target, duration=110):
         if target == self._current:
             return
         start = self._current
@@ -794,13 +805,13 @@ class AnimatedButton(ctk.CTkButton):
     def _on_press(self, _event=None):
         self._reassert()
         if self._enabled():
-            self._to(self._press_color, 90)
+            self._to(self._press_color, 70)
 
     def _on_release(self, _event=None):
         self._reassert()
         if not self._enabled():
             return
-        self._to(self._hover_target if self._hovering else self._base_color, 180)
+        self._to(self._hover_target if self._hovering else self._base_color, 120)
 
 
 class CanvasSegmented(Canvas):
@@ -828,8 +839,8 @@ class CanvasSegmented(Canvas):
                  hover_color=C_ACCENT_SOFT, text_color=C_TEXT_MAIN,
                  active_text_color=C_ACCENT, font_size=FS_BODY,
                  bold_active=False, text_anchor="w", text_pad=14,
-                 duration_ms=320, hover_ms=160, width=1, height=1,
-                 icon_pad=13, icon_half=9, icon_gap=8, icon_anim_ms=420,
+                 duration_ms=240, hover_ms=110, width=1, height=1,
+                 icon_pad=13, icon_half=9, icon_gap=8, icon_anim_ms=300,
                  icon_angle=45.0, icon_hop=6, icon_wobble=16, icon_size=17):
         super().__init__(parent, bg=bg_color, highlightthickness=0, bd=0,
                          width=width, height=height)
@@ -1102,7 +1113,7 @@ class CanvasSegmented(Canvas):
 
         frame(0.0, 0.0)      # 立即落到起点，滑块不等待第一帧
         tween(self, "pill", self._duration_ms, frame, done,
-              easing=ease_in_out_cubic)
+              easing=ease_out_cubic)
 
     def _animate_texts(self, previous_key, active_index, animate=True):
         for index, text_id in enumerate(self._text_ids):
@@ -1132,7 +1143,7 @@ class CanvasSegmented(Canvas):
                     pass
 
             frame(0.0, 0.0)
-            tween(self, "text{}".format(index), 240, frame,
+            tween(self, "text{}".format(index), 160, frame,
                   easing=ease_out_cubic)
 
     # ---------- 图标动画 ----------
@@ -1205,7 +1216,7 @@ class CanvasSegmented(Canvas):
             self._icon_colors[index] = color
             self._set_icon_color(index, color)
 
-        tween(self, "iconcolor{}".format(index), 240, frame,
+        tween(self, "iconcolor{}".format(index), 160, frame,
               easing=ease_out_cubic)
 
     def _play_icon(self, index, activate, animate=True):
@@ -1246,7 +1257,7 @@ class CanvasSegmented(Canvas):
                                  origin[1] - self._icon_hop * tri)
 
             frame(0.0, 0.0)
-            tween(self, key, 340, frame, easing=ease_linear)
+            tween(self, key, 260, frame, easing=ease_linear)
             return
 
         def frame(e, raw):
@@ -1254,7 +1265,7 @@ class CanvasSegmented(Canvas):
             self._set_icon_angle(index, -self._icon_wobble * tri)
 
         frame(0.0, 0.0)
-        tween(self, key, 400, frame, easing=ease_linear)
+        tween(self, key, 300, frame, easing=ease_linear)
 
 
 class SlideStack:
@@ -1264,8 +1275,8 @@ class SlideStack:
     这也是这里不直接用 place() 搬页面的原因（Tk 普通容器不裁剪子控件）。
     """
 
-    def __init__(self, parent, bg_color=C_WINDOW_BG, duration_ms=420,
-                 easing=ease_in_out_cubic):
+    def __init__(self, parent, bg_color=C_WINDOW_BG, duration_ms=260,
+                 easing=ease_out_cubic):
         self.canvas = Canvas(parent, bg=bg_color, highlightthickness=0, bd=0)
         self.canvas.pack(fill=BOTH, expand=True)
         self.bg_color = bg_color
@@ -1409,7 +1420,7 @@ class Toast:
                 pass
 
         frame(0.0, 0.0)
-        tween(self.frame, "toast_in", 280, frame, done, easing=ease_out_back)
+        tween(self.frame, "toast_in", 200, frame, done, easing=ease_out_back)
 
     def _play_out(self):
         def frame(e, raw):
@@ -1424,7 +1435,7 @@ class Toast:
             except Exception:
                 pass
 
-        tween(self.frame, "toast_out", 260, frame, self.close,
+        tween(self.frame, "toast_out", 190, frame, self.close,
               easing=ease_in_out_cubic)
 
     def close(self):
@@ -1459,17 +1470,20 @@ def _gear_profile(teeth=8, r_out=1.0, r_in=0.70):
 
 
 _ICON_PRIMS = {
-    "home": (("line", -0.92, 0.08, 0.0, -0.92),
-             ("line", 0.0, -0.92, 0.92, 0.08),
-             ("line", -0.58, -0.16, -0.58, 0.92),
-             ("line", 0.58, -0.16, 0.58, 0.92),
-             ("line", -0.58, 0.92, 0.58, 0.92)),
-    # 齿形轮廓（描边不填充）+ 中心孔
-    "gear": (("poly",) + _gear_profile(),
-             ("oval", -0.30, -0.30, 0.30, 0.30)),
-    "log": (("line", -0.85, -0.66, 0.85, -0.66),
-            ("line", -0.85, 0.0, 0.85, 0.0),
-            ("line", -0.85, 0.66, 0.30, 0.66)),
+    "home": (
+        ("line", 0.25, 0.75, 0.2484, 0.0671, 0.2437, 0.0514, 0.2256, 0.0244, 0.1986, 0.0063, 0.1667, 0.0, -0.1667, 0.0, -0.1986, 0.0063, -0.213, 0.014, -0.236, 0.037, -0.2437, 0.0514, -0.25, 0.0833, -0.25, 0.75),
+        ("line", -0.75, -0.1667, -0.7412, -0.22, -0.726, -0.2528, -0.7041, -0.2816, -0.1076, -0.794, -0.0837, -0.8108, -0.0573, -0.8232, -0.0291, -0.8308, 0.0, -0.8334, 0.0291, -0.8308, 0.0573, -0.8232, 0.0837, -0.8108, 0.1076, -0.794, 0.6909, -0.294, 0.7158, -0.2678, 0.7345, -0.2369, 0.7461, -0.2026, 0.75, -0.1667, 0.75, 0.5833, 0.7468, 0.6158, 0.7373, 0.6471, 0.7219, 0.6759, 0.7012, 0.7012, 0.6759, 0.7219, 0.6471, 0.7373, 0.6158, 0.7468, 0.5833, 0.75, -0.5833, 0.75, -0.6158, 0.7468, -0.6471, 0.7373, -0.6759, 0.7219, -0.7012, 0.7012, -0.7219, 0.6759, -0.7373, 0.6471, -0.7468, 0.6158, -0.75, 0.5833, -0.75, -0.1667),
+    ),
+    "gear": (
+        ("line", -0.2005, -0.6717, -0.1963, -0.688, -0.18, -0.7163, -0.1554, -0.7371, -0.1248, -0.7485, 0.1081, -0.75, 0.1408, -0.7441, 0.1687, -0.7278, 0.1894, -0.703, 0.2006, -0.6717, 0.221, -0.5535, 0.2304, -0.5323, 0.2528, -0.5058, 0.3008, -0.4762, 0.3229, -0.4685, 0.3458, -0.4656, 0.38, -0.4715, 0.4973, -0.5139, 0.5301, -0.5142, 0.5609, -0.5031, 0.5745, -0.4938, 0.5956, -0.4687, 0.7036, -0.2814, 0.7147, -0.2506, 0.7146, -0.2178, 0.7032, -0.1871, 0.6819, -0.1622, 0.5898, -0.0852, 0.5761, -0.0666, 0.5644, -0.034, 0.5628, 0.0224, 0.5671, 0.0453, 0.5761, 0.0666, 0.5983, 0.0932, 0.694, 0.174, 0.7104, 0.2023, 0.7162, 0.2339, 0.7107, 0.266, 0.7037, 0.2813, 0.5955, 0.4686, 0.5861, 0.4821, 0.5609, 0.5031, 0.546, 0.51, 0.5136, 0.5155, 0.4814, 0.5095, 0.38, 0.4715, 0.3573, 0.4661, 0.3343, 0.4664, 0.3116, 0.4718, 0.272, 0.4925, 0.2443, 0.5139, 0.2251, 0.5426, 0.2183, 0.5649, 0.2006, 0.6717, 0.1894, 0.703, 0.1801, 0.7163, 0.1555, 0.7371, 0.1249, 0.7485, -0.1081, 0.75, -0.1249, 0.7485, -0.1555, 0.7371, -0.1801, 0.7163, -0.1963, 0.688, -0.2183, 0.5649, -0.2303, 0.5323, -0.2442, 0.5139, -0.262, 0.4987, -0.3116, 0.4718, -0.3457, 0.4656, -0.3687, 0.4681, -0.4973, 0.5139, -0.53, 0.5142, -0.5609, 0.5031, -0.586, 0.4821, -0.5955, 0.4687, -0.7036, 0.2814, -0.7147, 0.2506, -0.7146, 0.2178, -0.7032, 0.1871, -0.6819, 0.1622, -0.5982, 0.0932, -0.5823, 0.0763, -0.5671, 0.0454, -0.5624, 0.0107, -0.5643, -0.034, -0.571, -0.0563, -0.5823, -0.0763, -0.5982, -0.0933, -0.6819, -0.1622, -0.7032, -0.1871, -0.7102, -0.2019, -0.7161, -0.2342, -0.7147, -0.2505, -0.7036, -0.2813, -0.5955, -0.4686, -0.5861, -0.4821, -0.5609, -0.5031, -0.53, -0.5142, -0.4972, -0.5139, -0.38, -0.4715, -0.3457, -0.4656, -0.3228, -0.4685, -0.3007, -0.4762, -0.2527, -0.5059, -0.2303, -0.5323, -0.221, -0.5535, -0.2005, -0.6717),
+        ("line", 0.25, 0.0, 0.231, 0.0957, 0.1768, 0.1768, 0.0957, 0.231, 0.0, 0.25, -0.0957, 0.231, -0.1768, 0.1768, -0.231, 0.0957, -0.25, 0.0, -0.231, -0.0957, -0.1768, -0.1768, -0.0957, -0.231, 0.0, -0.25, 0.0957, -0.231, 0.1768, -0.1768, 0.231, -0.0957, 0.25, 0.0),
+    ),
+    "log": (
+        ("line", 0.25, 0.0, -0.1667, 0.0),
+        ("line", 0.25, -0.3333, -0.1667, -0.3333),
+        ("line", 0.5833, 0.4167, 0.5833, -0.5833, 0.5801, -0.6158, 0.5706, -0.6471, 0.5552, -0.6759, 0.5345, -0.7012, 0.5093, -0.7219, 0.4804, -0.7373, 0.4492, -0.7468, 0.4167, -0.75, -0.6667, -0.75),
+        ("line", -0.3333, 0.75, 0.6667, 0.75, 0.6992, 0.7468, 0.7304, 0.7373, 0.7593, 0.7219, 0.7845, 0.7012, 0.8052, 0.6759, 0.8206, 0.6471, 0.8301, 0.6158, 0.8333, 0.5833, 0.8317, 0.4837, 0.827, 0.4681, 0.8089, 0.4411, 0.7819, 0.423, 0.75, 0.4167, -0.0996, 0.4183, -0.1296, 0.4307, -0.1423, 0.4411, -0.1603, 0.4681, -0.1667, 0.5, -0.1667, 0.5833, -0.1794, 0.6471, -0.2155, 0.7012, -0.2696, 0.7373, -0.3333, 0.75, -0.3971, 0.7373, -0.4512, 0.7012, -0.4873, 0.6471, -0.5, 0.5833, -0.5, -0.5833, -0.5127, -0.6471, -0.5488, -0.7012, -0.6029, -0.7373, -0.6667, -0.75, -0.7304, -0.7373, -0.7845, -0.7012, -0.8206, -0.6471, -0.8333, -0.5833, -0.8333, -0.4167, -0.8317, -0.4004, -0.8193, -0.3704, -0.7963, -0.3474, -0.7663, -0.3349, -0.5, -0.3333),
+    ),
 }
 
 
@@ -1839,7 +1853,7 @@ class OverlayCard(_OverlayCardBase):
                 pass
 
         frame(0.0, 0.0)
-        tween(self.card, "entrance", 260, frame, easing=ease_out_cubic)
+        tween(self.card, "entrance", 190, frame, easing=ease_out_cubic)
 
     def _key_widgets(self):
         return [self.mask, self.card, self.body]
@@ -2692,7 +2706,7 @@ class GuideManager:
                 pass
 
         frame(0.0, 0.0)
-        tween(widget, "guide", 1400, frame, on_done=lambda: self._pulse(
+        tween(widget, "guide", 1100, frame, on_done=lambda: self._pulse(
             widget, color), easing=ease_linear)
 
     def _restore_all(self):
@@ -3723,11 +3737,11 @@ class SettingsPage:
             bg_color=C_CARD_BG, pill_color=C_ACCENT, hover_color=C_ACCENT_SOFT,
             text_color=C_TEXT_SECONDARY, active_text_color=C_TEXT_INVERSE,
             font_size=FS_SMALL, bold_active=True, text_anchor="center",
-            duration_ms=380)
+            duration_ms=240)
         self.tab_bar.pack(fill=BOTH, expand=True, padx=PAD_XS, pady=PAD_XS)
 
         # ===== 选项卡内容：Canvas 承载，切换时整块推入/推出 =====
-        self.stack = SlideStack(self.frame, bg_color=C_WINDOW_BG, duration_ms=420)
+        self.stack = SlideStack(self.frame, bg_color=C_WINDOW_BG, duration_ms=260)
         self.stack.canvas.pack_configure(pady=(PAD_GAP, 0))
 
         self.storage_var = StringVar(value=self.settings.storage_mode)
@@ -3804,7 +3818,7 @@ class SettingsPage:
             bg_color=C_CARD_BG, pill_color=C_ACCENT_SOFT,
             hover_color=C_ACCENT_SOFT, text_color=C_TEXT_MAIN,
             active_text_color=C_ACCENT, font_size=FS_BODY, bold_active=True,
-            text_anchor="w", text_pad=16, duration_ms=380,
+            text_anchor="w", text_pad=16, duration_ms=240,
             height=2 * (H_NAV + PAD_XS) + 12)
         self.mode_seg.pack(fill=X, padx=PAD_TIGHT, pady=PAD_TIGHT)
 
@@ -4048,7 +4062,7 @@ class SettingsPage:
                 except Exception:
                     pass
 
-            tween(self.saved_label, "saved", 460, frame,
+            tween(self.saved_label, "saved", 320, frame,
                   on_done=self._reset_saved_text, easing=ease_in_out_cubic)
 
         try:
@@ -4243,7 +4257,7 @@ class PulsesSwapApp:
             hover_color=C_ACCENT_SOFT, text_color=C_TEXT_MAIN,
             active_text_color=C_ACCENT, font_size=FS_BODY, bold_active=True,
             text_anchor="w", text_pad=14, icon_pad=11, icon_half=9,
-            icon_gap=8, icon_angle=45.0, duration_ms=380, height=nav_height)
+            icon_gap=8, icon_angle=45.0, duration_ms=240, height=nav_height)
         self.nav.pack(fill=X, padx=PAD_XS)
 
         # ===== 侧边栏底部状态卡 =====
@@ -4282,7 +4296,7 @@ class PulsesSwapApp:
         self.page_host.grid(row=0, column=0, sticky="nsew")
         # 页面放在 Canvas 里：Canvas 会裁剪子窗口，推入/推出的过程不会溢到侧边栏
         self.stack = SlideStack(self.page_host, bg_color=C_WINDOW_BG,
-                                 duration_ms=420)
+                                 duration_ms=260)
         self.page_canvas = self.stack.canvas
 
         # 进度条移到全局状态条：原来在右栏里，show_progress/hide_progress 的
@@ -5314,7 +5328,7 @@ class PulsesSwapApp:
                     pass
 
         frame(0.0, 0.0)
-        tween(self.recent_wrap, "height", 280, frame, done, easing=ease_out_cubic)
+        tween(self.recent_wrap, "height", 190, frame, done, easing=ease_out_cubic)
 
     def update_recent_list(self):
         if not hasattr(self, 'recent_listbox'):
@@ -5534,7 +5548,7 @@ class PulsesSwapApp:
                 pass
 
         frame(0.0, 0.0)
-        tween(self.loading_label, "dots", 720, frame,
+        tween(self.loading_label, "dots", 560, frame,
               on_done=lambda: self._start_loading_dots(prefix),
               easing=ease_linear)
 
@@ -5545,7 +5559,7 @@ class PulsesSwapApp:
         except Exception:
             pass
 
-    def _animate_label_color(self, label, start, target, duration=280):
+    def _animate_label_color(self, label, start, target, duration=190):
         """文字颜色过渡：状态/标题更新时不做生硬的瞬间换色。"""
         def frame(e, raw):
             try:
@@ -6286,7 +6300,7 @@ class PulsesSwapApp:
                 pass
 
         frame(0.0, 0.0)
-        tween(self.progress_bar, "value", 260, frame, easing=ease_out_cubic)
+        tween(self.progress_bar, "value", 170, frame, easing=ease_out_cubic)
 
     def hide_progress(self):
         self.root.after(0, lambda: self.progress_bar.pack_forget())
