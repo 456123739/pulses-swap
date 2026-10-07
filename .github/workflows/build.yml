@@ -82,13 +82,26 @@ jobs:
       - name: PyInstaller 打包
         run: pyinstaller packaging/pulses_swap.spec --noconfirm --clean
 
-      - name: 冒烟测试（无显示器，用 xvfb）
+      - name: 冒烟测试（源码 import）
         run: |
           xvfb-run -a python -c "
           import sys; sys.path.insert(0,'src')
           import pulses_swap as m
           print('import ok, VERSION =', m.VERSION)
           "
+
+      - name: 冒烟测试（真正跑打包后的可执行文件）
+        run: |
+          set +e
+          timeout 12 xvfb-run -a ./dist/PulsesSwap/PulsesSwap
+          code=$?
+          # 124 = 被 timeout 掐掉，说明窗口起来了并一直活着，这正是我们要的
+          if [ $code -eq 124 ]; then
+            echo "OK: 打包产物启动成功并持续运行"
+          else
+            echo "FAIL: 打包产物提前退出，exit code = $code"
+            exit 1
+          fi
 
       - name: 打包为 tar.gz
         run: |
