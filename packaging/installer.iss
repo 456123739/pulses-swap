@@ -26,6 +26,9 @@ OutputBaseFilename=PulsesSwap-Setup-{#MyAppVersion}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+; 安装器自身与"添加/删除程序"里显示的图标
+SetupIconFile=icon.ico
+UninstallDisplayIcon={app}\{#MyAppExeName}
 ArchitecturesInstallIn64BitMode=x64compatible
 ArchitecturesAllowed=x64compatible
 ; 用户数据放在程序目录（应用自己的 database 机制），卸载时保留
