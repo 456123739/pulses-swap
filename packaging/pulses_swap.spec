@@ -18,6 +18,14 @@ ENTRY = ROOT / "src" / "pulses_swap.py"
 
 # tkinterdnd2 带 tkdnd 二进制，必须显式收进来，否则拖拽功能在打包后失效
 datas = collect_data_files("tkinterdnd2")
+
+# 窗口图标：运行时由 pulses_swap.resource_path() 从 sys._MEIPASS 读取。
+# 不加进 datas 的话，打包后 icon.ico / icon.png 不存在，窗口会退回 Tk 默认羽毛图标。
+for _icon_name in ("icon.ico", "icon.png"):
+    _icon_path = ROOT / "packaging" / _icon_name
+    if _icon_path.exists():
+        datas.append((str(_icon_path), "."))
+
 hiddenimports = collect_submodules("tkinterdnd2") + ["watchdog.observers", "PIL._tkinter_finder"]
 
 a = Analysis(
