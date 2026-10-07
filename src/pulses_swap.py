@@ -508,7 +508,8 @@ def make_display_box(parent, text="", width=None, height=H_CONTROL):
     return frame, label
 
 
-def make_label(parent, text="", fg=None, bg=None, font_size=FS_BODY, bold=False):
+def make_label(parent, text="", fg=None, bg=None, font_size=FS_BODY, bold=False,
+               justify=None):
     if fg is None:
         fg = C_TEXT_MAIN
     weight = "bold" if bold else "normal"
@@ -516,6 +517,10 @@ def make_label(parent, text="", fg=None, bg=None, font_size=FS_BODY, bold=False)
                   font=(FONT_FAMILY, font_size, weight),
                   anchor="w")
     kwargs['fg_color'] = bg if bg is not None else "transparent"
+    # justify 只在显式传入时下发，避免影响其余单行标签的外观。
+    # （原来多行提示写的是 justify=LEFT，但本工厂没有该参数 -> 一进设置页就 TypeError）
+    if justify is not None:
+        kwargs['justify'] = justify
     return ctk.CTkLabel(parent, **kwargs)
 
 
@@ -532,6 +537,7 @@ def make_label(parent, text="", fg=None, bg=None, font_size=FS_BODY, bold=False)
 
 _OVERLAY_HOST = None      # 由 PulsesSwapApp.setup_ui() 注册的宿主（见 set_overlay_host）
 _OVERLAY_WIDTH = {"info": 460, "warning": 480, "error": 560, "question": 480}
+_OVERLAY_STACK = []       # 当前打开的覆盖层（后开的在最上层），用于多层弹窗时的 ESC 判定
 _DEFAULT_BUTTONS = {
     "info":     [("确定", True, True)],
     "warning":  [("确定", True, True)],
@@ -623,7 +629,13 @@ class _OverlayCardBase:
             pass
 
     # ---------- 键盘模态 ----------
+    def _is_top(self):
+        """是否是当前最上层的卡片（多层覆盖时只有最上层响应 ESC）。"""
+        return True
+
     def _on_escape(self, event=None):
+        if not self._is_top():
+            return "break"
         self.close(self.escape_value)
         return "break"
 
@@ -734,11 +746,20 @@ class OverlayCard(_OverlayCardBase):
             self.mask.focus_set()
         except Exception:
             pass
+        _OVERLAY_STACK.append(self)
 
     def _key_widgets(self):
         return [self.mask, self.card, self.body]
 
+    def _is_top(self):
+        return bool(_OVERLAY_STACK) and _OVERLAY_STACK[-1] is self
+
     def _teardown(self):
+        try:
+            if _OVERLAY_STACK and _OVERLAY_STACK[-1] is self:
+                _OVERLAY_STACK.pop()
+        except Exception:
+            pass
         try:
             if self._esc_funcid is not None:
                 self.root.unbind("<Escape>", self._esc_funcid)
@@ -754,6 +775,10 @@ class OverlayCard(_OverlayCardBase):
 
     def wait(self):
         self.root.wait_variable(self._var)
+        if not self._closed:
+            # 防御：wait 已返回但卡片没走 close()（例如变量被外部置位），
+            # 这里补一次收尾，保证遮罩/栈不会残留
+            self.close(self.result)
         return self.result
 
 
@@ -771,6 +796,12 @@ class ToplevelCard(_OverlayCardBase):
         self.window.title(title)
         self.window.geometry(f"{width}x{height}")
         self.window.configure(fg_color=C_WINDOW_BG)
+        # 子窗口图标与主窗口保持一致（apply_window_icon 定义在文件末尾，
+        # 运行时才解析，这里调用没有先后顺序问题）
+        try:
+            apply_window_icon(self.window)
+        except Exception:
+            pass
         self.body = ctk.CTkFrame(self.window, fg_color="transparent")
         self.body.pack(fill=BOTH, expand=True, padx=PAD_DIALOG, pady=PAD_DIALOG)
         try:
@@ -1335,6 +1366,8 @@ class DatabaseLocatorDialog:
         b_new.pack(side=LEFT, padx=PAD_TIGHT)
         b_default = make_button(btn_frame, "使用默认位置", command=on_default)
         b_default.pack(side=LEFT, padx=PAD_TIGHT)
+        for _btn in (b_exist, b_legacy, b_new, b_default):
+            card.register_focusable(_btn)
 
         btn_refs = {
             'exist': b_exist, 'legacy': b_legacy,
@@ -2496,65 +2529,72 @@ class PresetManager:
 
 
 # ==================== 设置对话框 ====================
-class SettingsDialog:
-    def __init__(self, parent, settings: AppSettings, on_save_callback=None,
+class SettingsPage:
+    """
+    设置页面（取代原 SettingsDialog 弹窗）：挂在侧边栏「设置」页里，
+    页面内部用选项卡（常规 / 数据库 / 关于）分类，不再新开窗口。
+    原弹窗里的「保存 / 取消」语义保留为页面底部的「保存设置 / 放弃修改」。
+    """
+
+    def __init__(self, parent_frame, app, on_save_callback=None,
                  on_db_action=None):
-        self.parent = parent
-        self.settings = settings
+        self.parent_frame = parent_frame
+        self.app = app
+        self.root = app.root
+        self.settings: AppSettings = app.settings
         self.on_save_callback = on_save_callback
         self.on_db_action = on_db_action
 
-        self.dialog = ctk.CTkToplevel(parent)
-        self.dialog.title("设置")
-        dlg_w, dlg_h = DLG_SETTINGS
-        self.dialog.geometry(f"{dlg_w}x{dlg_h}")
-        self.dialog.minsize(dlg_w - 60, 620)
-        self.dialog.resizable(True, True)
-        self.dialog.transient(parent)
-        self.dialog.grab_set()
-        self.dialog.configure(fg_color=C_WINDOW_BG)
-        try:
-            self.dialog.attributes('-alpha', 1.0)
-            self.dialog.attributes('-transparentcolor', '')
-        except Exception:
-            pass
+        self.frame = ctk.CTkFrame(parent_frame, fg_color="transparent")
 
-        self.dialog.update_idletasks()
-        x = parent.winfo_x() + (parent.winfo_width() - dlg_w) // 2
-        y = parent.winfo_y() + (parent.winfo_height() - dlg_h) // 2
-        self.dialog.geometry(f"+{x}+{y}")
+        self.tabview = ctk.CTkTabview(
+            self.frame, fg_color=C_WINDOW_BG, corner_radius=R_CARD,
+            border_width=BORDER_W, border_color=C_BORDER_SOFT,
+            segmented_button_fg_color=C_PANEL_ALT_BG,
+            segmented_button_selected_color=C_ACCENT,
+            segmented_button_selected_hover_color=C_ACCENT_HOVER,
+            segmented_button_unselected_color=C_PANEL_ALT_BG,
+            segmented_button_unselected_hover_color=C_ACCENT_SOFT,
+            text_color=C_TEXT_MAIN)
+        self.tabview.pack(fill=BOTH, expand=True)
+        tab_general = self.tabview.add("常规")
+        tab_database = self.tabview.add("数据库")
+        tab_about = self.tabview.add("关于")
 
-        self.dialog.grid_rowconfigure(0, weight=1)
-        self.dialog.grid_columnconfigure(0, weight=1)
+        self.storage_var = StringVar(value=self.settings.storage_mode)
+        self.role_var = StringVar(value=self.settings.role)
 
-        content = ctk.CTkScrollableFrame(
-            self.dialog, fg_color=C_WINDOW_BG, corner_radius=0,
-            scrollbar_button_color=C_BORDER_SOFT,
-            scrollbar_button_hover_color=C_ACCENT)
-        content.grid(row=0, column=0, sticky="nsew")
+        self._build_general(tab_general)
+        self._build_database(tab_database)
+        self._build_about(tab_about)
 
-        inner = ctk.CTkFrame(content, fg_color="transparent")
-        inner.pack(fill=BOTH, expand=True, padx=PAD_DIALOG, pady=PAD_DIALOG)
+        self.btn_bar = ctk.CTkFrame(self.frame, fg_color=C_CARD_BG,
+                                     corner_radius=R_CARD, height=H_BTN_BAR,
+                                     border_width=BORDER_W,
+                                     border_color=C_BORDER_SOFT)
+        self.btn_bar.pack(fill=X, pady=(PAD_GAP, 0))
+        self.btn_bar.pack_propagate(False)
+        make_button(self.btn_bar, "保存设置", command=self.save, accent=True,
+                     width=100).pack(side=RIGHT, padx=(PAD_TIGHT, PAD_DIALOG),
+                                     pady=(H_BTN_BAR - H_CONTROL) // 2)
+        make_button(self.btn_bar, "放弃修改", command=self.reload,
+                     width=100).pack(side=RIGHT, padx=(0, PAD_TIGHT),
+                                     pady=(H_BTN_BAR - H_CONTROL) // 2)
+        make_label(self.btn_bar, text="设置保存在数据库目录的 .settings.json",
+                    fg=C_TEXT_MUTED, font_size=FS_TINY).pack(
+                        side=LEFT, padx=PAD_DIALOG)
 
-        make_label(inner, text="数据库位置", fg=C_ACCENT,
+        self.reload()
+
+    # ==================== 选项卡：常规 ====================
+    def _build_general(self, tab):
+        make_label(tab, text="数据库存储模式", fg=C_ACCENT,
                     font_size=FS_SUBHEAD, bold=True).pack(
-                        anchor=W, pady=(0, PAD_TIGHT))
-        db_card = ctk.CTkFrame(inner, fg_color=C_CARD_BG, corner_radius=R_CARD,
-                                border_width=BORDER_W, border_color=C_BORDER_SOFT)
-        db_card.pack(fill=X, pady=(0, PAD_DIALOG))
-        db_str = str(self.settings._settings_file.parent) if self.settings._settings_file else "未绑定"
-        dl = make_label(db_card, text=db_str, fg=C_TEXT_MAIN, font_size=FS_SMALL)
-        dl.configure(wraplength=dlg_w - 2 * PAD_DIALOG - 2 * PAD_CARD_X)
-        dl.pack(anchor=W, padx=PAD_CARD_X, pady=PAD_CARD_Y)
-
-        make_label(inner, text="数据库存储模式", fg=C_ACCENT,
-                    font_size=FS_SUBHEAD, bold=True).pack(
-                        anchor=W, pady=(0, PAD_TIGHT))
-        mode_card = ctk.CTkFrame(inner, fg_color=C_CARD_BG, corner_radius=R_CARD,
+                        anchor=W, pady=(PAD_TIGHT, PAD_TIGHT))
+        mode_card = ctk.CTkFrame(tab, fg_color=C_CARD_BG, corner_radius=R_CARD,
                                   border_width=BORDER_W, border_color=C_BORDER_SOFT)
         mode_card.pack(fill=X, pady=(0, PAD_DIALOG))
 
-        self.storage_var = StringVar(value=settings.storage_mode)
         ctk.CTkRadioButton(mode_card, text="隔离存储（推荐，每个整合包独立预设）",
                             variable=self.storage_var, value="isolated",
                             text_color=C_TEXT_MAIN, font=(FONT_FAMILY, FS_SMALL),
@@ -2577,14 +2617,13 @@ class SettingsDialog:
                     fg=C_TEXT_MUTED, font_size=FS_TINY, justify=LEFT).pack(
                         anchor=W, padx=PAD_INDENT, pady=(0, PAD_CARD_Y))
 
-        make_label(inner, text="用户身份", fg=C_ACCENT,
+        make_label(tab, text="用户身份", fg=C_ACCENT,
                     font_size=FS_SUBHEAD, bold=True).pack(
                         anchor=W, pady=(0, PAD_TIGHT))
-        role_card = ctk.CTkFrame(inner, fg_color=C_CARD_BG, corner_radius=R_CARD,
+        role_card = ctk.CTkFrame(tab, fg_color=C_CARD_BG, corner_radius=R_CARD,
                                   border_width=BORDER_W, border_color=C_BORDER_SOFT)
         role_card.pack(fill=X, pady=(0, PAD_DIALOG))
 
-        self.role_var = StringVar(value=settings.role)
         ctk.CTkRadioButton(role_card, text="玩家（默认）",
                             variable=self.role_var, value="player",
                             text_color=C_TEXT_MAIN, font=(FONT_FAMILY, FS_SMALL),
@@ -2606,10 +2645,23 @@ class SettingsDialog:
                     fg=C_TEXT_MUTED, font_size=FS_TINY).pack(
                         anchor=W, padx=PAD_INDENT, pady=(0, PAD_CARD_Y))
 
-        make_label(inner, text="数据库管理", fg=C_ACCENT,
+    # ==================== 选项卡：数据库 ====================
+    def _build_database(self, tab):
+        make_label(tab, text="数据库位置", fg=C_ACCENT,
+                    font_size=FS_SUBHEAD, bold=True).pack(
+                        anchor=W, pady=(PAD_TIGHT, PAD_TIGHT))
+        db_card = ctk.CTkFrame(tab, fg_color=C_CARD_BG, corner_radius=R_CARD,
+                                border_width=BORDER_W, border_color=C_BORDER_SOFT)
+        db_card.pack(fill=X, pady=(0, PAD_DIALOG))
+        self.db_path_label = make_label(db_card, text="", fg=C_TEXT_MAIN,
+                                        font_size=FS_SMALL)
+        self.db_path_label.configure(wraplength=620, justify=LEFT, anchor=W)
+        self.db_path_label.pack(anchor=W, padx=PAD_CARD_X, pady=PAD_CARD_Y)
+
+        make_label(tab, text="数据库管理", fg=C_ACCENT,
                     font_size=FS_SUBHEAD, bold=True).pack(
                         anchor=W, pady=(0, PAD_TIGHT))
-        db_mgr_card = ctk.CTkFrame(inner, fg_color=C_CARD_BG, corner_radius=R_CARD,
+        db_mgr_card = ctk.CTkFrame(tab, fg_color=C_CARD_BG, corner_radius=R_CARD,
                                     border_width=BORDER_W, border_color=C_BORDER_SOFT)
         db_mgr_card.pack(fill=X, pady=(0, PAD_DIALOG))
 
@@ -2631,33 +2683,79 @@ class SettingsDialog:
             fg=C_TEXT_MUTED, font_size=FS_TINY).pack(
                 anchor=W, padx=PAD_CARD_X, pady=(0, PAD_CARD_Y))
 
-        btn_bar = ctk.CTkFrame(self.dialog, fg_color=C_CARD_BG,
-                                corner_radius=0, height=H_BTN_BAR,
-                                border_width=BORDER_W, border_color=C_BORDER_SOFT)
-        btn_bar.grid(row=1, column=0, sticky="ew")
-        btn_bar.grid_propagate(False)
-        make_button(btn_bar, "保存", command=self.save, accent=True,
-                     width=90).pack(side=RIGHT, padx=(PAD_TIGHT, PAD_DIALOG),
-                                    pady=(H_BTN_BAR - H_CONTROL) // 2)
-        make_button(btn_bar, "取消", command=self.dialog.destroy,
-                     width=90).pack(side=RIGHT, padx=(0, PAD_TIGHT),
-                                    pady=(H_BTN_BAR - H_CONTROL) // 2)
+    # ==================== 选项卡：关于 ====================
+    def _build_about(self, tab):
+        make_label(tab, text=f"{PROJECT_NAME} v{VERSION}", fg=C_ACCENT,
+                    font_size=FS_TITLE, bold=True).pack(
+                        anchor=W, pady=(PAD_TIGHT, PAD_MICRO))
+        make_label(tab, text=f"作者: {AUTHOR} · Minecraft Tacz 模组枪包快速切换工具",
+                    fg=C_TEXT_SECONDARY, font_size=FS_SMALL).pack(
+                        anchor=W, pady=(0, PAD_DIALOG))
 
+        info_card = ctk.CTkFrame(tab, fg_color=C_CARD_BG, corner_radius=R_CARD,
+                                  border_width=BORDER_W, border_color=C_BORDER_SOFT)
+        info_card.pack(fill=X, pady=(0, PAD_DIALOG))
+        self.about_db_label = make_label(info_card, text="", fg=C_TEXT_MAIN,
+                                         font_size=FS_SMALL)
+        self.about_db_label.configure(wraplength=620, justify=LEFT, anchor=W)
+        self.about_db_label.pack(anchor=W, padx=PAD_CARD_X,
+                                  pady=(PAD_CARD_Y, PAD_TIGHT))
+        self.about_mode_label = make_label(info_card, text="", fg=C_TEXT_SECONDARY,
+                                           font_size=FS_SMALL)
+        self.about_mode_label.pack(anchor=W, padx=PAD_CARD_X, pady=(0, PAD_CARD_Y))
+
+        btn_row = ctk.CTkFrame(tab, fg_color="transparent")
+        btn_row.pack(fill=X)
+        make_button(btn_row, "📖 使用教程",
+                     command=self.app.show_tutorial).pack(
+                        side=LEFT, padx=(0, PAD_TIGHT))
+        make_button(btn_row, "📄 功能列表",
+                     command=self.app.show_about_detail).pack(
+                        side=LEFT, padx=PAD_TIGHT)
+
+    # ==================== 状态同步 ====================
+    def reload(self):
+        """把当前设置重新读进控件（进入页面 / 点「放弃修改」时调用）。"""
+        try:
+            self.storage_var.set(self.settings.storage_mode)
+            self.role_var.set(self.settings.role)
+        except Exception:
+            pass
+        self._update_db_labels()
+
+    def _update_db_labels(self):
+        db_str = (str(self.settings._settings_file.parent)
+                  if self.settings._settings_file else "未绑定")
+        mode = "合并存储" if self.settings.storage_mode == "merged" else "隔离存储"
+        role = "玩家" if self.settings.role == "player" else "开发者"
+        for widget, text in ((self.db_path_label, db_str),
+                             (self.about_db_label, f"数据库位置: {db_str}"),
+                             (self.about_mode_label,
+                              f"当前模式: {mode} · 用户身份: {role}")):
+            try:
+                widget.configure(text=text)
+            except Exception:
+                pass
+
+    def show_about_tab(self):
+        try:
+            self.tabview.set("关于")
+        except Exception:
+            pass
+
+    # ==================== 行为（语义与原 SettingsDialog 一致） ====================
     def on_switch_db(self):
         show_info("切换数据库",
             "切换数据库后需要重新打开整合包。\n\n"
-            "原数据库不会被删除，可随时切回。", parent=self.dialog)
-        self.dialog.destroy()
+            "原数据库不会被删除，可随时切回。", parent=self.root)
         if self.on_db_action:
             self.on_db_action('switch')
 
     def on_merge_db(self):
-        self.dialog.destroy()
         if self.on_db_action:
             self.on_db_action('merge')
 
     def on_migrate_legacy(self):
-        self.dialog.destroy()
         if self.on_db_action:
             self.on_db_action('migrate_legacy')
 
@@ -2676,7 +2774,7 @@ class SettingsDialog:
         if not self.settings.save():
             show_error("错误",
                 "保存设置失败，请检查数据库文件夹是否可写",
-                parent=self.dialog)
+                parent=self.root)
             return
         if old_mode != self.settings.storage_mode:
             if self.settings.storage_mode == "merged":
@@ -2685,16 +2783,16 @@ class SettingsDialog:
                     "所有整合包将共用同一套预设。\n"
                     "不同整合包的同名枪包可能互相覆盖。\n\n"
                     "重新打开整合包后生效。",
-                    parent=self.dialog)
+                    parent=self.root)
             else:
                 show_info("提示",
                     "已切换到隔离存储。\n\n"
                     "每个整合包使用独立数据库。\n"
                     "重新打开整合包后生效。",
-                    parent=self.dialog)
+                    parent=self.root)
+        self._update_db_labels()
         if self.on_save_callback:
             self.on_save_callback()
-        self.dialog.destroy()
 
 
 # ==================== 主窗口 ====================
@@ -2827,23 +2925,169 @@ class PulsesSwapApp:
 
     # ==================== UI 构建 ====================
     def setup_ui(self):
+        # ===== 骨架：左侧导航栏 + 右侧页面区（替代原来的「左栏 + 右栏」两列） =====
         main_frame = ctk.CTkFrame(self.root, fg_color="transparent")
         main_frame.pack(fill=BOTH, expand=True, padx=PAD_WINDOW, pady=PAD_WINDOW)
 
+        # 覆盖层宿主：所有窗口内弹窗都 place 在这个 frame 上（连侧边栏一起盖住，保证模态）
+        self.overlay_host = main_frame
+        self.active_page = None
+        set_overlay_host(self)
+
         main_frame.grid_rowconfigure(0, weight=1)
-        main_frame.grid_columnconfigure(0, weight=0, minsize=LEFT_COL_W)
+        main_frame.grid_columnconfigure(0, weight=0, minsize=SIDEBAR_W)
         main_frame.grid_columnconfigure(1, weight=1)
 
-        left_panel = ctk.CTkFrame(main_frame, fg_color="transparent")
-        left_panel.grid(row=0, column=0, sticky="nsew", padx=(0, PAD_TIGHT))
+        # ===== 侧边导航栏 =====
+        sidebar = ctk.CTkFrame(main_frame, fg_color=C_CARD_BG, corner_radius=R_CARD,
+                                border_width=BORDER_W, border_color=C_BORDER_SOFT,
+                                width=SIDEBAR_W)
+        sidebar.grid(row=0, column=0, sticky="nsw", padx=(0, PAD_GAP))
+        sidebar.grid_propagate(False)
+        self.sidebar = sidebar
 
-        right_panel = ctk.CTkFrame(main_frame, fg_color="transparent")
-        right_panel.grid(row=0, column=1, sticky="nsew", padx=(PAD_TIGHT, 0))
+        make_label(sidebar, text=PROJECT_NAME, fg=C_ACCENT, font_size=FS_SUBHEAD,
+                    bold=True).pack(anchor=W, padx=PAD_CARD_X,
+                                    pady=(PAD_CARD_Y, 0))
+        make_label(sidebar, text=f"v{VERSION} · {AUTHOR}", fg=C_TEXT_MUTED,
+                    font_size=FS_TINY).pack(anchor=W, padx=PAD_CARD_X,
+                                            pady=(PAD_MICRO, PAD_GAP))
+
+        nav_box = ctk.CTkFrame(sidebar, fg_color="transparent")
+        nav_box.pack(fill=X, padx=PAD_XS, pady=(0, PAD_GAP))
+        self.nav_buttons = {}
+        for key, text in (("home", "🏠  主界面"),
+                          ("settings", "⚙  设置"),
+                          ("log", "📋  日志")):
+            btn = ctk.CTkButton(nav_box, text=text, anchor="w",
+                                 command=lambda k=key: self.show_page(k),
+                                 height=H_NAV, corner_radius=R_CONTROL,
+                                 fg_color="transparent",
+                                 hover_color=C_ACCENT_SOFT,
+                                 text_color=C_TEXT_MAIN,
+                                 border_color=C_ACCENT,
+                                 font=(FONT_FAMILY, FS_BODY))
+            btn.pack(fill=X, pady=(0, PAD_XS))
+            self.nav_buttons[key] = btn
+
+        tips = make_label(sidebar,
+                           text="拖入整合包根目录即可开始\n"
+                                "拖入 .fgcpack 导入预设",
+                           fg=C_TEXT_MUTED, font_size=FS_TINY)
+        tips.configure(wraplength=SIDEBAR_W - 2 * PAD_CARD_X,
+                        justify=LEFT, anchor=W)
+        tips.pack(side=BOTTOM, fill=X, padx=PAD_CARD_X, pady=PAD_CARD_Y)
+
+        # ===== 右侧内容列：页面区 + 全局状态条（进度条） =====
+        content_col = ctk.CTkFrame(main_frame, fg_color="transparent")
+        content_col.grid(row=0, column=1, sticky="nsew")
+        content_col.grid_columnconfigure(0, weight=1)
+        content_col.grid_rowconfigure(0, weight=1)
+        content_col.grid_rowconfigure(1, weight=0)
+
+        self.page_host = ctk.CTkFrame(content_col, fg_color="transparent")
+        self.page_host.grid(row=0, column=0, sticky="nsew")
+
+        # 进度条移到全局状态条：原来在右栏里，show_progress/hide_progress 的
+        # pack/pack_forget 语义不变，只是父容器换成了这里
+        self.status_bar = ctk.CTkFrame(content_col, fg_color="transparent",
+                                        height=1)
+        self.status_bar.grid(row=1, column=0, sticky="ew")
+        self.progress_bar = ctk.CTkProgressBar(self.status_bar, height=H_PROGRESS,
+                                                 corner_radius=R_PROGRESS,
+                                                 fg_color=C_PANEL_ALT_BG,
+                                                 progress_color=C_ACCENT)
+        self.progress_bar.pack(fill=X, pady=(0, PAD_XS))
+        self.progress_bar.pack_forget()
+        self.progress_label = make_label(self.status_bar, text="",
+                                          fg=C_TEXT_SECONDARY, font_size=FS_TINY)
+        self.progress_label.pack(fill=X, pady=(0, PAD_XS))
+        self.progress_label.pack_forget()
+
+        # ===== 页面 =====
+        self.settings_page = None
+        self.pages = {}
+        self.pages["home"] = self._build_home_page()
+        self.pages["log"] = self._build_log_page()
+        self.settings_page = SettingsPage(
+            self.page_host, self,
+            on_save_callback=self._on_settings_saved,
+            on_db_action=self._on_db_action)
+        self.pages["settings"] = self.settings_page.frame
+
+        # ===== 新手引导注册 =====
+        self.guide = GuideManager(self.root)
+        self.guide.register(
+            "step1_select_pack", [self.pack_drop_area],
+            desc="Step 1 · 拖入整合包根目录，或点击「选择」定位")
+        self.guide.register(
+            "step2_create_preset", [self.create_preset_btn],
+            desc="Step 2 · 点击「+ 创建」新建预设，放入枪包")
+        self.guide.register(
+            "step3_apply", [self.apply_btn],
+            desc="Step 4 · 点击「⚡ 一键替换」启用预设")
+
+        self.show_page("home")
+
+    # ==================== 页面切换 ====================
+    def show_page(self, name):
+        """切换右侧页面（侧边栏导航）。不重排页面内容，只 pack/pack_forget。"""
+        page = self.pages.get(name)
+        if page is None:
+            return
+        for key, widget in self.pages.items():
+            try:
+                if key == name:
+                    widget.pack(fill=BOTH, expand=True)
+                else:
+                    widget.pack_forget()
+            except Exception:
+                pass
+        self.active_page = name
+        self._update_nav_state()
+        if name == "settings" and self.settings_page is not None:
+            self.settings_page.reload()
+
+    def _update_nav_state(self):
+        for key, btn in getattr(self, 'nav_buttons', {}).items():
+            active = (key == self.active_page)
+            try:
+                btn.configure(fg_color=C_ACCENT_SOFT if active else "transparent",
+                               text_color=C_ACCENT if active else C_TEXT_MAIN,
+                               border_width=BORDER_W if active else 0)
+            except Exception:
+                pass
+
+    def open_log_page(self):
+        self.show_page("log")
+        self.toggle_log_mode()
+
+    # ==================== 主界面（Step 1/2/3 + 枪包列表） ====================
+    def _build_home_page(self):
+        page = ctk.CTkFrame(self.page_host, fg_color="transparent")
+        page.grid_rowconfigure(0, weight=1)
+        page.grid_columnconfigure(0, weight=0, minsize=LEFT_COL_W)
+        page.grid_columnconfigure(1, weight=1)
+
+        left_panel = ctk.CTkFrame(page, fg_color="transparent")
+        left_panel.grid(row=0, column=0, sticky="nsew", padx=(0, PAD_GAP))
+        # 纵向预算：Step1/Step3 固定高度，剩余空间全部给 Step2 的预设列表，
+        # 这样窗口变小/DPI 放大时先压缩列表，Step3 卡片不会被裁（见 H_STEP*_MIN）
+        left_panel.grid_columnconfigure(0, weight=1)
+        left_panel.grid_rowconfigure(0, weight=0, minsize=H_STEP1_MIN)
+        left_panel.grid_rowconfigure(1, weight=1, minsize=H_STEP2_MIN)
+        left_panel.grid_rowconfigure(2, weight=0, minsize=H_STEP3_MIN)
+
+        right_panel = ctk.CTkFrame(page, fg_color="transparent")
+        right_panel.grid(row=0, column=1, sticky="nsew")
+        right_panel.grid_columnconfigure(0, weight=1)
+        right_panel.grid_rowconfigure(0, weight=1)
+        right_panel.grid_rowconfigure(1, weight=0)
 
         # ===== 整合包分组（大拖入框） =====
         pack_group = ctk.CTkFrame(left_panel, fg_color=C_CARD_BG, corner_radius=R_CARD,
                                     border_width=BORDER_W, border_color=C_BORDER_SOFT)
-        pack_group.pack(fill=X, pady=(0, PAD_GAP))
+        pack_group.grid(row=0, column=0, sticky="nsew", pady=(0, PAD_GAP))
         make_label(pack_group, text="Step 1 · 整合包", fg=C_ACCENT,
                     font_size=FS_SUBHEAD, bold=True).pack(
                         anchor=W, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
@@ -2919,7 +3163,7 @@ class PulsesSwapApp:
         # ===== 预设管理 =====
         preset_group = ctk.CTkFrame(left_panel, fg_color=C_CARD_BG, corner_radius=R_CARD,
                                      border_width=BORDER_W, border_color=C_BORDER_SOFT)
-        preset_group.pack(fill=BOTH, expand=True, pady=(0, PAD_GAP))
+        preset_group.grid(row=1, column=0, sticky="nsew", pady=(0, PAD_GAP))
         make_label(preset_group, text="Step 2 · 预设管理", fg=C_ACCENT,
                     font_size=FS_SUBHEAD, bold=True).pack(
                         anchor=W, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
@@ -2988,7 +3232,7 @@ class PulsesSwapApp:
         # ===== 预设详情 =====
         info_group = ctk.CTkFrame(left_panel, fg_color=C_CARD_BG, corner_radius=R_CARD,
                                    border_width=BORDER_W, border_color=C_BORDER_SOFT)
-        info_group.pack(fill=X)
+        info_group.grid(row=2, column=0, sticky="ew")
         make_label(info_group, text="Step 3 · 预设详情", fg=C_ACCENT,
                     font_size=FS_SUBHEAD, bold=True).pack(
                         anchor=W, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
@@ -3022,7 +3266,7 @@ class PulsesSwapApp:
         # ===== 枪包列表 =====
         gunpack_group = ctk.CTkFrame(right_panel, fg_color=C_CARD_BG, corner_radius=R_CARD,
                                       border_width=BORDER_W, border_color=C_BORDER_SOFT)
-        gunpack_group.pack(fill=BOTH, expand=True, pady=(0, PAD_GAP))
+        gunpack_group.grid(row=0, column=0, sticky="nsew", pady=(0, PAD_GAP))
         make_label(gunpack_group, text="枪包列表", fg=C_ACCENT,
                     font_size=FS_SUBHEAD, bold=True).pack(
                         anchor=W, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
@@ -3058,28 +3302,20 @@ class PulsesSwapApp:
                                         font=(FONT_FAMILY, FS_BODY))
         self.gunpack_listbox.pack(fill=BOTH, expand=True, padx=PAD_XS, pady=PAD_XS)
 
-        # 进度条
-        self.progress_bar = ctk.CTkProgressBar(right_panel, height=H_PROGRESS,
-                                                 corner_radius=R_PROGRESS,
-                                                 fg_color=C_PANEL_ALT_BG,
-                                                 progress_color=C_ACCENT)
-        self.progress_bar.pack(fill=X, pady=(0, PAD_XS))
-        self.progress_bar.pack_forget()
-        self.progress_label = make_label(right_panel, text="",
-                                          fg=C_TEXT_SECONDARY, font_size=FS_TINY)
-        self.progress_label.pack(fill=X, pady=(0, PAD_XS))
-        self.progress_label.pack_forget()
-
         self.apply_btn = make_button(right_panel, "Step 4 · ⚡ 一键替换",
                                       command=self.apply_preset,
                                       state="disabled", accent=True)
-        self.apply_btn.pack(fill=X, pady=(0, PAD_GAP))
+        self.apply_btn.grid(row=1, column=0, sticky="ew")
 
-        # ===== 日志 =====
-        log_group = ctk.CTkFrame(right_panel, fg_color=C_CARD_BG, corner_radius=R_CARD,
+        return page
+
+    # ==================== 日志页 ====================
+    def _build_log_page(self):
+        page = ctk.CTkFrame(self.page_host, fg_color="transparent")
+        log_group = ctk.CTkFrame(page, fg_color=C_CARD_BG, corner_radius=R_CARD,
                                   border_width=BORDER_W, border_color=C_BORDER_SOFT)
         log_group.pack(fill=BOTH, expand=True)
-        make_label(log_group, text="日志", fg=C_ACCENT,
+        make_label(log_group, text="运行日志", fg=C_ACCENT,
                     font_size=FS_SUBHEAD, bold=True).pack(
                         anchor=W, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
         log_content = ctk.CTkFrame(log_group, fg_color="transparent")
@@ -3100,20 +3336,10 @@ class PulsesSwapApp:
         self.log_text.pack(fill=BOTH, expand=True)
 
         self.log_manager = LogManager(self.log_text, self.root)
-
-        # ===== 新手引导注册 =====
-        self.guide = GuideManager(self.root)
-        self.guide.register(
-            "step1_select_pack", [self.pack_drop_area],
-            desc="Step 1 · 拖入整合包根目录，或点击「选择」定位")
-        self.guide.register(
-            "step2_create_preset", [self.create_preset_btn],
-            desc="Step 2 · 点击「+ 创建」新建预设，放入枪包")
-        self.guide.register(
-            "step3_apply", [self.apply_btn],
-            desc="Step 4 · 点击「⚡ 一键替换」启用预设")
+        return page
 
     def setup_menu(self):
+        # 菜单保留为「进入侧边栏页面」的快捷方式；设置/日志的主入口在侧边栏。
         menubar = Menu(self.root, bg=C_PANEL_BG, fg=C_TEXT_MAIN,
                         activebackground=C_ACCENT_SOFT, activeforeground=C_ACCENT,
                         font=(FONT_FAMILY, FS_SMALL), tearoff=0)
@@ -3136,7 +3362,7 @@ class PulsesSwapApp:
         menubar.add_cascade(label="设置", menu=settings_menu)
         settings_menu.add_command(label="程序设置", command=self.open_settings)
         settings_menu.add_separator()
-        settings_menu.add_command(label="日志显示设置", command=self.toggle_log_mode)
+        settings_menu.add_command(label="日志显示设置", command=self.open_log_page)
 
         func_menu = Menu(menubar, tearoff=0, bg=C_PANEL_BG, fg=C_TEXT_MAIN,
                           activebackground=C_ACCENT_SOFT, activeforeground=C_ACCENT,
@@ -3247,9 +3473,8 @@ class PulsesSwapApp:
         if not self.db_ready:
             show_warning("提示", "数据库未初始化，请重启程序")
             return
-        SettingsDialog(self.root, self.settings,
-                       on_save_callback=self._on_settings_saved,
-                       on_db_action=self._on_db_action)
+        # 设置已从弹窗改为侧边栏页面（页面内用选项卡分类）
+        self.show_page("settings")
 
     def _on_settings_saved(self):
         self.log_manager.log(
@@ -3260,6 +3485,8 @@ class PulsesSwapApp:
                 "设置已保存。\n\n如需让存储模式变更生效，请关闭并重新打开整合包。")
 
     def _on_db_action(self, action: str):
+        # 数据库动作（切换/合并/适配）都属于主流程，先回到主界面再执行
+        self.show_page("home")
         if action == 'switch':
             self.switch_database()
         elif action == 'merge':
@@ -3407,7 +3634,9 @@ class PulsesSwapApp:
                 self.root.after(0, lambda p=pct: self.progress_bar.set(p))
                 self.root.after(0, lambda m=m, c=c, t=t: self.progress_label.configure(
                     text=f"{m} ({c}/{t})"))
-            self.root.after(0, lambda: self.root.update())
+            # 只处理重绘空闲任务：原来用 update() 会连带处理用户事件，
+            # 拖拽窗口大小时每个进度回调都会重入一次完整事件循环，明显卡顿
+            self.root.after(0, lambda: self.root.update_idletasks())
 
         def worker():
             try:
@@ -3467,25 +3696,10 @@ class PulsesSwapApp:
         self._update_guide()
 
     def _ask_after_migrate(self) -> str | None:
-        dlg_w, dlg_h = DLG_CHOICE
-        dialog = ctk.CTkToplevel(self.root)
-        dialog.title("迁移后处理")
-        dialog.geometry(f"{dlg_w}x{dlg_h}")
-        dialog.transient(self.root)
-        dialog.grab_set()
-        dialog.configure(fg_color=C_WINDOW_BG)
-        try:
-            dialog.attributes('-alpha', 1.0)
-            dialog.attributes('-transparentcolor', '')
-        except Exception:
-            pass
-        dialog.update_idletasks()
-        x = self.root.winfo_x() + (self.root.winfo_width() - dlg_w) // 2
-        y = self.root.winfo_y() + (self.root.winfo_height() - dlg_h) // 2
-        dialog.geometry(f"+{x}+{y}")
-
-        frame = ctk.CTkFrame(dialog, fg_color="transparent")
-        frame.pack(fill=BOTH, expand=True, padx=PAD_DIALOG, pady=PAD_DIALOG)
+        dlg_w = DLG_CHOICE[0]
+        card = make_card(get_overlay_host(), self.root, width=dlg_w,
+                          escape_value=None, title="迁移后处理")
+        frame = card.body
 
         make_label(frame, text="迁移完成后，如何处理旧版数据库？",
                     fg=C_TEXT_MAIN, font_size=FS_SUBHEAD, bold=True).pack(
@@ -3505,52 +3719,39 @@ class PulsesSwapApp:
             ("保留原库（不标记）", "keep",
              "  不做任何处理，下次启动仍会提示适配"),
         ]:
-            ctk.CTkRadioButton(frame, text=text, variable=mode_var, value=val,
-                                text_color=C_TEXT_MAIN, font=(FONT_FAMILY, FS_SMALL),
-                                fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
-                                border_color=C_BORDER).pack(anchor=W,
-                                                            pady=(PAD_MICRO, 0))
+            radio = ctk.CTkRadioButton(frame, text=text, variable=mode_var, value=val,
+                                        text_color=C_TEXT_MAIN,
+                                        font=(FONT_FAMILY, FS_SMALL),
+                                        fg_color=C_ACCENT,
+                                        hover_color=C_ACCENT_HOVER,
+                                        border_color=C_BORDER)
+            radio.pack(anchor=W, pady=(PAD_MICRO, 0))
+            card.register_focusable(radio)
             make_label(frame, text=tip, fg=C_TEXT_MUTED, font_size=FS_TINY).pack(
                 anchor=W, padx=PAD_INDENT, pady=(0, PAD_XS))
 
-        result = {'mode': None}
-
         def on_ok():
-            result['mode'] = mode_var.get()
-            self.last_after_migrate_mode = result['mode']
-            dialog.destroy()
+            self.last_after_migrate_mode = mode_var.get()
+            card.close(mode_var.get())
 
         def on_cancel():
-            dialog.destroy()
+            card.close(None)
 
         btn_frame = ctk.CTkFrame(frame, fg_color="transparent")
         btn_frame.pack(fill=X, side=BOTTOM, pady=(PAD_GAP, 0))
-        make_button(btn_frame, "确定", command=on_ok, accent=True).pack(
-            side=RIGHT, padx=PAD_XS)
-        make_button(btn_frame, "取消", command=on_cancel).pack(side=RIGHT)
-        self.root.wait_window(dialog)
-        return result['mode']
+        ok_btn = make_button(btn_frame, "确定", command=on_ok, accent=True)
+        ok_btn.pack(side=RIGHT, padx=PAD_XS)
+        cancel_btn = make_button(btn_frame, "取消", command=on_cancel)
+        cancel_btn.pack(side=RIGHT)
+        card.register_focusable(ok_btn)
+        card.register_focusable(cancel_btn)
+        return card.wait()
 
     def _ask_conflict_mode(self, message: str) -> str | None:
-        dlg_w, dlg_h = DLG_CHOICE
-        dialog = ctk.CTkToplevel(self.root)
-        dialog.title("冲突处理")
-        dialog.geometry(f"{dlg_w}x{dlg_h}")
-        dialog.transient(self.root)
-        dialog.grab_set()
-        dialog.configure(fg_color=C_WINDOW_BG)
-        try:
-            dialog.attributes('-alpha', 1.0)
-            dialog.attributes('-transparentcolor', '')
-        except Exception:
-            pass
-        dialog.update_idletasks()
-        x = self.root.winfo_x() + (self.root.winfo_width() - dlg_w) // 2
-        y = self.root.winfo_y() + (self.root.winfo_height() - dlg_h) // 2
-        dialog.geometry(f"+{x}+{y}")
-
-        frame = ctk.CTkFrame(dialog, fg_color="transparent")
-        frame.pack(fill=BOTH, expand=True, padx=PAD_DIALOG, pady=PAD_DIALOG)
+        dlg_w = DLG_CHOICE[0]
+        card = make_card(get_overlay_host(), self.root, width=dlg_w,
+                          escape_value=None, title="冲突处理")
+        frame = card.body
         lbl = make_label(frame, text=message, fg=C_TEXT_MAIN, font_size=FS_BODY)
         lbl.configure(wraplength=dlg_w - 2 * PAD_DIALOG, justify=LEFT, anchor=W)
         lbl.pack(anchor=W, fill=X, pady=(0, PAD_GAP))
@@ -3561,27 +3762,30 @@ class PulsesSwapApp:
             ("跳过冲突预设（保留现有）", "skip"),
             ("覆盖冲突预设（危险，会删除现有）", "overwrite"),
         ]:
-            ctk.CTkRadioButton(frame, text=text, variable=mode_var, value=val,
-                                text_color=C_TEXT_MAIN, font=(FONT_FAMILY, FS_SMALL),
-                                fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
-                                border_color=C_BORDER).pack(anchor=W, pady=PAD_MICRO)
-
-        result = {'mode': None}
+            radio = ctk.CTkRadioButton(frame, text=text, variable=mode_var, value=val,
+                                        text_color=C_TEXT_MAIN,
+                                        font=(FONT_FAMILY, FS_SMALL),
+                                        fg_color=C_ACCENT,
+                                        hover_color=C_ACCENT_HOVER,
+                                        border_color=C_BORDER)
+            radio.pack(anchor=W, pady=PAD_MICRO)
+            card.register_focusable(radio)
 
         def on_ok():
-            result['mode'] = mode_var.get()
-            dialog.destroy()
+            card.close(mode_var.get())
 
         def on_cancel():
-            dialog.destroy()
+            card.close(None)
 
         btn_frame = ctk.CTkFrame(frame, fg_color="transparent")
-        btn_frame.pack(fill=X, side=BOTTOM, pady=(10, 0))
-        make_button(btn_frame, "确定", command=on_ok, accent=True).pack(
-            side=RIGHT, padx=5)
-        make_button(btn_frame, "取消", command=on_cancel).pack(side=RIGHT)
-        self.root.wait_window(dialog)
-        return result['mode']
+        btn_frame.pack(fill=X, side=BOTTOM, pady=(PAD_GAP, 0))
+        ok_btn = make_button(btn_frame, "确定", command=on_ok, accent=True)
+        ok_btn.pack(side=RIGHT, padx=PAD_XS)
+        cancel_btn = make_button(btn_frame, "取消", command=on_cancel)
+        cancel_btn.pack(side=RIGHT)
+        card.register_focusable(ok_btn)
+        card.register_focusable(cancel_btn)
+        return card.wait()
 
     def force_update_validation(self):
         if not self.preset_manager:
@@ -3608,59 +3812,45 @@ class PulsesSwapApp:
 
     # ==================== 身份提示 ====================
     def _show_role_dialog(self, title, message) -> str:
-        dlg_w, dlg_h = DLG_CHOICE
-        dialog = ctk.CTkToplevel(self.root)
-        dialog.title(title)
-        dialog.geometry(f"{dlg_w}x{dlg_h}")
-        dialog.transient(self.root)
-        dialog.grab_set()
-        dialog.configure(fg_color=C_WINDOW_BG)
-        try:
-            dialog.attributes('-alpha', 1.0)
-            dialog.attributes('-transparentcolor', '')
-        except Exception:
-            pass
-        dialog.update_idletasks()
-        x = self.root.winfo_x() + (self.root.winfo_width() - dlg_w) // 2
-        y = self.root.winfo_y() + (self.root.winfo_height() - dlg_h) // 2
-        dialog.geometry(f"+{x}+{y}")
-
-        frame = ctk.CTkFrame(dialog, fg_color="transparent")
-        frame.pack(fill=BOTH, expand=True, padx=PAD_DIALOG, pady=PAD_DIALOG)
+        dlg_w = DLG_CHOICE[0]
+        card = make_card(get_overlay_host(), self.root, width=dlg_w,
+                          escape_value='ok', title=title)
+        frame = card.body
         msg_label = make_label(frame, text=message, fg=C_TEXT_MAIN, font_size=FS_BODY)
         msg_label.configure(wraplength=dlg_w - 2 * PAD_DIALOG, justify=LEFT, anchor=W)
         msg_label.pack(anchor=W, fill=X, pady=(0, PAD_GAP))
 
         dont_remind_var = BooleanVar(value=False)
-        ctk.CTkCheckBox(frame, text="本次启动不再提醒",
-                        variable=dont_remind_var,
-                        text_color=C_TEXT_MAIN, font=(FONT_FAMILY, FS_SMALL),
-                        fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
-                        border_color=C_BORDER).pack(anchor=W,
-                                                    pady=(PAD_XS, PAD_GAP))
+        check = ctk.CTkCheckBox(frame, text="本次启动不再提醒",
+                                variable=dont_remind_var,
+                                text_color=C_TEXT_MAIN, font=(FONT_FAMILY, FS_SMALL),
+                                fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
+                                border_color=C_BORDER)
+        check.pack(anchor=W, pady=(PAD_XS, PAD_GAP))
+        card.register_focusable(check)
 
         btn_frame = ctk.CTkFrame(frame, fg_color="transparent")
         btn_frame.pack(fill=X, side=BOTTOM, pady=(PAD_GAP, 0))
-        result = {'action': 'ok'}
 
         def on_ok():
             if dont_remind_var.get():
                 self.dont_remind_this_session = True
-            result['action'] = 'ok'
-            dialog.destroy()
+            card.close('ok')
 
         def on_export():
             if dont_remind_var.get():
                 self.dont_remind_this_session = True
-            result['action'] = 'export'
-            dialog.destroy()
+            card.close('export')
 
         if self.settings.role == "developer":
-            make_button(btn_frame, "导出增量更新", command=on_export,
-                         accent=True).pack(side=RIGHT, padx=PAD_XS)
-        make_button(btn_frame, "确定", command=on_ok).pack(side=RIGHT)
-        self.root.wait_window(dialog)
-        return result['action']
+            export_btn = make_button(btn_frame, "导出增量更新", command=on_export,
+                                      accent=True)
+            export_btn.pack(side=RIGHT, padx=PAD_XS)
+            card.register_focusable(export_btn)
+        ok_btn = make_button(btn_frame, "确定", command=on_ok)
+        ok_btn.pack(side=RIGHT)
+        card.register_focusable(ok_btn)
+        return card.wait()
 
     def _check_applied_changes(self, preset_name):
         try:
@@ -4200,67 +4390,57 @@ class PulsesSwapApp:
         threading.Thread(target=worker, daemon=True).start()
 
     def _ask_migrate_target(self) -> str | None:
-        dlg_w, dlg_h = DLG_SMALL
-        dialog = ctk.CTkToplevel(self.root)
-        dialog.title("迁移预设")
-        dialog.geometry(f"{dlg_w}x{dlg_h}")
-        dialog.transient(self.root)
-        dialog.grab_set()
-        dialog.configure(fg_color=C_WINDOW_BG)
-        try:
-            dialog.attributes('-alpha', 1.0)
-            dialog.attributes('-transparentcolor', '')
-        except Exception:
-            pass
-        dialog.update_idletasks()
-        x = self.root.winfo_x() + (self.root.winfo_width() - dlg_w) // 2
-        y = self.root.winfo_y() + (self.root.winfo_height() - dlg_h) // 2
-        dialog.geometry(f"+{x}+{y}")
-
-        frame = ctk.CTkFrame(dialog, fg_color="transparent")
-        frame.pack(fill=BOTH, expand=True, padx=PAD_DIALOG, pady=PAD_DIALOG)
+        dlg_w = DLG_SMALL[0]
+        card = make_card(get_overlay_host(), self.root, width=dlg_w,
+                          escape_value=None, title="迁移预设")
+        frame = card.body
 
         make_label(frame, text="迁移预设到：",
                     fg=C_TEXT_MAIN, font_size=FS_SUBHEAD, bold=True).pack(
                         anchor=W, pady=(0, PAD_GAP))
 
         mode_var = StringVar(value="pack")
-        ctk.CTkRadioButton(frame, text="另一个整合包（使用其数据库）",
-                            variable=mode_var, value="pack",
-                            text_color=C_TEXT_MAIN, font=(FONT_FAMILY, FS_SMALL),
-                            fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
-                            border_color=C_BORDER).pack(anchor=W,
-                                                        pady=(PAD_MICRO, 0))
+        radio_pack = ctk.CTkRadioButton(frame, text="另一个整合包（使用其数据库）",
+                                         variable=mode_var, value="pack",
+                                         text_color=C_TEXT_MAIN,
+                                         font=(FONT_FAMILY, FS_SMALL),
+                                         fg_color=C_ACCENT,
+                                         hover_color=C_ACCENT_HOVER,
+                                         border_color=C_BORDER)
+        radio_pack.pack(anchor=W, pady=(PAD_MICRO, 0))
+        card.register_focusable(radio_pack)
         make_label(frame, text="  选择整合包根目录，预设会迁移到该整合包的数据库",
                     fg=C_TEXT_MUTED, font_size=FS_TINY).pack(
                         anchor=W, padx=PAD_INDENT, pady=(0, PAD_TIGHT))
 
-        ctk.CTkRadioButton(frame, text="另一个数据库（直接选择数据库文件夹）",
-                            variable=mode_var, value="db",
-                            text_color=C_TEXT_MAIN, font=(FONT_FAMILY, FS_SMALL),
-                            fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
-                            border_color=C_BORDER).pack(anchor=W,
-                                                        pady=(PAD_MICRO, 0))
+        radio_db = ctk.CTkRadioButton(frame, text="另一个数据库（直接选择数据库文件夹）",
+                                       variable=mode_var, value="db",
+                                       text_color=C_TEXT_MAIN,
+                                       font=(FONT_FAMILY, FS_SMALL),
+                                       fg_color=C_ACCENT,
+                                       hover_color=C_ACCENT_HOVER,
+                                       border_color=C_BORDER)
+        radio_db.pack(anchor=W, pady=(PAD_MICRO, 0))
+        card.register_focusable(radio_db)
         make_label(frame, text="  选择已存在的数据库，或新建一个空数据库",
                     fg=C_TEXT_MUTED, font_size=FS_TINY).pack(
                         anchor=W, padx=PAD_INDENT, pady=(0, PAD_TIGHT))
 
-        result = {'mode': None}
-
         def on_ok():
-            result['mode'] = mode_var.get()
-            dialog.destroy()
+            card.close(mode_var.get())
 
         def on_cancel():
-            dialog.destroy()
+            card.close(None)
 
         btn_frame = ctk.CTkFrame(frame, fg_color="transparent")
         btn_frame.pack(fill=X, side=BOTTOM, pady=(PAD_GAP, 0))
-        make_button(btn_frame, "下一步", command=on_ok, accent=True).pack(
-            side=RIGHT, padx=PAD_XS)
-        make_button(btn_frame, "取消", command=on_cancel).pack(side=RIGHT)
-        self.root.wait_window(dialog)
-        return result['mode']
+        ok_btn = make_button(btn_frame, "下一步", command=on_ok, accent=True)
+        ok_btn.pack(side=RIGHT, padx=PAD_XS)
+        cancel_btn = make_button(btn_frame, "取消", command=on_cancel)
+        cancel_btn.pack(side=RIGHT)
+        card.register_focusable(ok_btn)
+        card.register_focusable(cancel_btn)
+        return card.wait()
 
     def _on_migrate_preset_finished(self, success: bool, preset_name: str,
                                      target_db: Path, src_removed: bool):
@@ -4614,12 +4794,12 @@ class PulsesSwapApp:
             self.root.after(0, lambda: self.progress_bar.set(pct))
             self.root.after(0, lambda: self.progress_label.configure(
                 text=f"{message} ({current}/{total})"))
-        self.root.after(0, lambda: self.root.update())
+        self.root.after(0, lambda: self.root.update_idletasks())
 
     def hide_progress(self):
         self.root.after(0, lambda: self.progress_bar.pack_forget())
         self.root.after(0, lambda: self.progress_label.pack_forget())
-        self.root.after(0, lambda: self.root.update())
+        self.root.after(0, lambda: self.root.update_idletasks())
 
     def set_busy_state(self, busy, operation=""):
         if busy:
@@ -4878,6 +5058,12 @@ class PulsesSwapApp:
             "枪包列表右上角「📂 打开TACZ」按钮")
 
     def show_about(self):
+        # 「关于」已并入设置页的选项卡，不再弹独立信息框
+        self.show_page("settings")
+        if self.settings_page is not None:
+            self.settings_page.show_about_tab()
+
+    def show_about_detail(self):
         db_str = "未初始化"
         if self.settings._settings_file:
             db_str = str(self.settings._settings_file.parent)
@@ -4927,7 +5113,27 @@ def apply_window_icon(window) -> None:
         pass
 
 
+# Windows 任务栏按钮的图标不取窗口图标，而是取进程 AppUserModelID 对应的图标
+# （快捷方式图标 / exe 内嵌图标）。不显式设置时任务栏会退回 Tk 默认羽毛图标。
+# 取值与 installer.iss 的 publisher 命名保持一致。
+APP_USER_MODEL_ID = "Pulses0Studio.PulsesSwap"
+
+
+def _set_app_user_model_id() -> None:
+    """设置进程 AppUserModelID。必须在任何 Tk 窗口创建之前调用，否则不生效。"""
+    if not IS_WINDOWS:
+        # ctypes.windll 只在 Windows 上存在，非 Windows 直接短路，避免 AttributeError
+        return
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            APP_USER_MODEL_ID)
+    except Exception:
+        pass
+
+
 def main():
+    # 第一件事：任务栏图标归属必须在任何窗口存在之前定好
+    _set_app_user_model_id()
     if HAS_DND:
         try:
             root = TkinterDnD.Tk()
