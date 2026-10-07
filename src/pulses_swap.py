@@ -161,9 +161,101 @@ C_STATUS_ADDED_BG     = "#E8EFF7"
 
 C_GUIDE_GLOW     = "#3D7A6E"
 
-FONT_FAMILY_CN = "Microsoft YaHei UI"
-FONT_FAMILY = FONT_FAMILY_CN
+# 层级用色：宣传片靠 box-shadow 分层，CustomTkinter 的 CTkFrame 不支持投影，
+# 这里用「卡片底色微差 + 更浅的发丝描边」近似（见 R_CARD 注释）。
+C_CARD_BG        = "#FFFFFF"   # 卡片底色：与 C_WINDOW_BG(#F5F7F8) 形成微差层级
+C_BORDER_SOFT    = "#E3EAEB"   # 卡片/控件描边：C_BORDER 向白底混合约 50%，
+                               # 近似宣传片的 rgba 半透明极细低对比线
+
+# ==================== 形状令牌（对齐宣传片 :root） ====================
+# 宣传片：--r-window:26px / --r-card:16px / --r-control:12px
+R_WINDOW   = 26   # 顶层窗口圆角；CustomTkinter 不能给 toplevel 画圆角，
+                  # 实际由 DWM_CORNER_PREF 在 Windows 11 上近似（见该常量）
+R_CARD     = 16   # 卡片 / 面板（含拖入框等 panel）
+R_CONTROL  = 12   # 按钮 / 输入框 / 显示框 / 列表框 / 文本框
+R_PROGRESS = 4    # 进度条：高 8px，取 4px 即为胶囊全圆角
+BORDER_W       = 1   # 发丝描边宽度
+BORDER_W_FOCUS = 3   # 新手引导高亮描边宽度
+
+# Windows 11 DWM 窗口圆角偏好：1=直角(v2.1 现状) 2=圆角(约 8px) 3=小圆角(约 4px)。
+# 26px 系统不可达，取最接近的 DWM 圆角；如需恢复 v2.1 的直角窗口改回 1。
+DWM_CORNER_PREF = 2
+
+# ==================== 字体令牌 ====================
+# 跨平台回退链：先 Apple 字体，再 Windows 中文字体，最后通用无衬线。
+# 启动时由 apply_font_fallbacks() 取第一个系统真实存在的族。
+FONT_STACK_CN = (
+    "SF Pro Display", "SF Pro Text", "PingFang SC", "Helvetica Neue",
+    "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI",
+    "Noto Sans CJK SC", "DejaVu Sans", "Arial",
+)
+FONT_STACK_MONO = (
+    "SF Mono", "JetBrains Mono", "Cascadia Mono",
+    "Consolas", "Menlo", "DejaVu Sans Mono", "Courier New",
+)
+# 兜底值（Windows 必备中文字体）；apply_font_fallbacks() 会就地更新这三个名字。
+FONT_FAMILY_CN   = "Microsoft YaHei UI"
+FONT_FAMILY      = FONT_FAMILY_CN
 FONT_FAMILY_MONO = "Consolas"
+
+# 字号阶梯（整体上移 1~2pt，拉开层级、避免拥挤）
+FS_TINY    = 10   # 提示 / 说明小字（原 9）
+FS_SMALL   = 11   # 次要信息、单行标签、单选项（原 10）
+FS_BODY    = 12   # 正文与控件默认字号（原 10/11）
+FS_SUBHEAD = 13   # 卡片小节标题（原 11 粗体）
+FS_TITLE   = 15   # 对话框主标题（原 14 粗体）
+FS_DISPLAY = 19   # 展示型标题（原 18）
+
+# ==================== 尺寸 / 间距令牌 ====================
+H_CONTROL   = 32   # 按钮 / 输入框 / 显示框高度（原 28）
+H_DROP_AREA = 76   # 拖入框高度（原 70）
+H_LOG_BOX   = 132  # 日志文本框高度（原 120）
+H_PROGRESS  = 8    # 进度条高度
+H_BTN_BAR   = 68   # 对话框底部按钮条高度（原 64）
+PAD_CARD_X  = 16   # 卡片内左右内边距（原 12）
+PAD_CARD_Y  = 12   # 卡片内上下内边距（原 10）
+PAD_DIALOG  = 18   # 对话框内容边距（原 15/20）
+PAD_GAP     = 10   # 卡片之间 / 行与行之间（原 8）
+PAD_TIGHT   = 6    # 紧邻控件之间（原 4~6）
+PAD_XS      = 4    # 极小间距（原 4）
+PAD_MICRO   = 2    # 单选项与说明文字之间的极小间距（原 2）
+PAD_INNER   = 8    # 控件内部文字与边框的距离
+PAD_INDENT  = 32   # 单选项说明文字的缩进（与指示器对齐，原 32）
+PAD_WINDOW  = 8    # 主窗口内容与窗口边框的距离
+
+LEFT_COL_W = 340   # 主窗口左栏宽度（与宣传片布局一致）
+
+WINDOW_W, WINDOW_H = 1150, 760             # 主窗口（与宣传片一致）
+WINDOW_MIN_W, WINDOW_MIN_H = 1000, 700     # 主窗口最小尺寸
+
+# 固定尺寸对话框 (宽, 高)：字号放大后需同步留足按钮行宽度
+DLG_LOCATOR  = (680, 520)   # 数据库定位（含 4 个长文本按钮，原 580x500）
+DLG_SETTINGS = (560, 800)   # 设置（可滚动，原 540x780）
+DLG_CHOICE   = (540, 380)   # 迁移后处理 / 身份提示 / 冲突处理（原 480~520x320~340）
+DLG_SMALL    = (520, 340)   # 迁移预设（原 480x300）
+
+
+def resolve_font_family(stack, fallback):
+    """从回退链中挑第一个系统可用的字体族；无 Tk 环境时返回 fallback。"""
+    try:
+        from tkinter import font as tkfont
+        available = set(tkfont.families())
+    except Exception:
+        return fallback
+    for name in stack:
+        if name in available:
+            return name
+    return fallback
+
+
+def apply_font_fallbacks():
+    """创建 root 之后调用：把 FONT_FAMILY* 解析成当前平台真实存在的字体族。"""
+    global FONT_FAMILY_CN, FONT_FAMILY, FONT_FAMILY_MONO
+    FONT_FAMILY_CN = resolve_font_family(FONT_STACK_CN, FONT_FAMILY_CN)
+    FONT_FAMILY = FONT_FAMILY_CN
+    FONT_FAMILY_MONO = resolve_font_family(FONT_STACK_MONO, FONT_FAMILY_MONO)
+    return FONT_FAMILY_CN, FONT_FAMILY_MONO
+
 
 ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
@@ -275,9 +367,9 @@ def make_button(parent, text, command=None, width=None, state="normal", accent=F
         fg_color=C_ACCENT if accent else C_PANEL_ALT_BG,
         hover_color=C_ACCENT_HOVER if accent else C_ACCENT_SOFT,
         text_color=C_TEXT_INVERSE if accent else C_TEXT_MAIN,
-        border_color=C_ACCENT if accent else C_BORDER,
-        border_width=1, corner_radius=6,
-        font=(FONT_FAMILY, 10), height=28, state=state)
+        border_color=C_ACCENT if accent else C_BORDER_SOFT,
+        border_width=BORDER_W, corner_radius=R_CONTROL,
+        font=(FONT_FAMILY, FS_BODY), height=H_CONTROL, state=state)
     if width is not None:
         kwargs['width'] = width
     return ctk.CTkButton(parent, **kwargs)
@@ -285,10 +377,10 @@ def make_button(parent, text, command=None, width=None, state="normal", accent=F
 
 def make_entry(parent, textvariable=None, placeholder="", width=None):
     kwargs = dict(
-        fg_color=C_INPUT_BG, border_color=C_BORDER, border_width=1,
-        corner_radius=6, text_color=C_TEXT_MAIN,
+        fg_color=C_INPUT_BG, border_color=C_BORDER_SOFT, border_width=BORDER_W,
+        corner_radius=R_CONTROL, text_color=C_TEXT_MAIN,
         placeholder_text=placeholder, placeholder_text_color=C_TEXT_MUTED,
-        font=(FONT_FAMILY, 10), height=28)
+        font=(FONT_FAMILY, FS_BODY), height=H_CONTROL)
     if textvariable is not None:
         kwargs['textvariable'] = textvariable
     if width is not None:
@@ -296,17 +388,19 @@ def make_entry(parent, textvariable=None, placeholder="", width=None):
     return ctk.CTkEntry(parent, **kwargs)
 
 
-def make_display_box(parent, text="", width=None, height=28):
-    frame = ctk.CTkFrame(parent, fg_color=C_INPUT_BG, border_color=C_BORDER,
-                          border_width=1, corner_radius=6, height=height)
+def make_display_box(parent, text="", width=None, height=H_CONTROL):
+    frame = ctk.CTkFrame(parent, fg_color=C_INPUT_BG, border_color=C_BORDER_SOFT,
+                          border_width=BORDER_W, corner_radius=R_CONTROL,
+                          height=height)
     frame.pack_propagate(False)
     label = ctk.CTkLabel(frame, text=text, text_color=C_TEXT_SECONDARY,
-                          font=(FONT_FAMILY, 10), anchor="w", fg_color="transparent")
-    label.pack(fill=BOTH, expand=True, padx=8)
+                          font=(FONT_FAMILY, FS_SMALL), anchor="w",
+                          fg_color="transparent")
+    label.pack(fill=BOTH, expand=True, padx=PAD_INNER)
     return frame, label
 
 
-def make_label(parent, text="", fg=None, bg=None, font_size=10, bold=False):
+def make_label(parent, text="", fg=None, bg=None, font_size=FS_BODY, bold=False):
     if fg is None:
         fg = C_TEXT_MAIN
     weight = "bold" if bold else "normal"
@@ -584,9 +678,10 @@ class DatabaseLocatorDialog:
         self.legacy_to_migrate: Path | None = None
 
     def show(self) -> Path | None:
+        dlg_w, dlg_h = DLG_LOCATOR
         dialog = ctk.CTkToplevel(self.parent)
         dialog.title("初始化 Pulses Swap")
-        dialog.geometry("580x500")
+        dialog.geometry(f"{dlg_w}x{dlg_h}")
         dialog.resizable(False, False)
         dialog.transient(self.parent)
         dialog.grab_set()
@@ -598,17 +693,19 @@ class DatabaseLocatorDialog:
             pass
 
         dialog.update_idletasks()
-        x = self.parent.winfo_x() + (self.parent.winfo_width() - 580) // 2
-        y = self.parent.winfo_y() + (self.parent.winfo_height() - 500) // 2
+        x = self.parent.winfo_x() + (self.parent.winfo_width() - dlg_w) // 2
+        y = self.parent.winfo_y() + (self.parent.winfo_height() - dlg_h) // 2
         dialog.geometry(f"+{x}+{y}")
 
         frame = ctk.CTkFrame(dialog, fg_color="transparent")
-        frame.pack(fill=BOTH, expand=True, padx=20, pady=20)
+        frame.pack(fill=BOTH, expand=True, padx=PAD_DIALOG, pady=PAD_DIALOG)
 
         make_label(frame, text="欢迎使用 Pulses Swap",
-                    fg=C_ACCENT, font_size=14, bold=True).pack(anchor=W, pady=(0, 6))
+                    fg=C_ACCENT, font_size=FS_TITLE, bold=True).pack(
+                        anchor=W, pady=(0, PAD_TIGHT))
         make_label(frame, text="Step 1 · 选择数据库位置",
-                    fg=C_GUIDE_GLOW, font_size=11, bold=True).pack(anchor=W, pady=(0, 8))
+                    fg=C_GUIDE_GLOW, font_size=FS_SUBHEAD, bold=True).pack(
+                        anchor=W, pady=(0, PAD_INNER))
 
         desc = make_label(frame,
             text="首次启动需要指定数据库位置。\n"
@@ -616,21 +713,23 @@ class DatabaseLocatorDialog:
                  "• 新用户 → 点「✨ 新建数据库」或「使用默认位置」\n"
                  "• 已有 Pulses Swap 数据库 → 点「📂 定位已有数据库」\n"
                  "• 有旧版 FGC_database → 点「📦 适配旧版数据库」",
-            fg=C_TEXT_SECONDARY, font_size=10)
-        desc.configure(wraplength=530, justify=LEFT, anchor=W)
-        desc.pack(anchor=W, fill=X, pady=(0, 15))
+            fg=C_TEXT_SECONDARY, font_size=FS_BODY)
+        desc.configure(wraplength=dlg_w - 2 * PAD_DIALOG - 6, justify=LEFT, anchor=W)
+        desc.pack(anchor=W, fill=X, pady=(0, PAD_DIALOG))
 
-        loc_frame = ctk.CTkFrame(frame, fg_color=C_PANEL_BG, corner_radius=8,
-                                   border_width=1, border_color=C_BORDER)
-        loc_frame.pack(fill=X, pady=(0, 15))
+        loc_frame = ctk.CTkFrame(frame, fg_color=C_CARD_BG, corner_radius=R_CARD,
+                                   border_width=BORDER_W, border_color=C_BORDER_SOFT)
+        loc_frame.pack(fill=X, pady=(0, PAD_DIALOG))
 
         make_label(loc_frame, text="默认数据库位置（与程序同目录）:",
-                    fg=C_TEXT_SECONDARY, font_size=10).pack(anchor=W, padx=12, pady=(10, 4))
+                    fg=C_TEXT_SECONDARY, font_size=FS_SMALL).pack(
+                        anchor=W, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
         make_label(loc_frame, text=str(DEFAULT_DB_DIR),
-                    fg=C_TEXT_MAIN, font_size=10).pack(anchor=W, padx=12, pady=(0, 12))
+                    fg=C_TEXT_MAIN, font_size=FS_SMALL).pack(
+                        anchor=W, padx=PAD_CARD_X, pady=(0, PAD_CARD_Y))
 
         btn_frame = ctk.CTkFrame(frame, fg_color="transparent")
-        btn_frame.pack(fill=X, pady=(0, 5))
+        btn_frame.pack(fill=X, pady=(0, PAD_TIGHT))
 
         btn_refs = {}
 
@@ -638,9 +737,11 @@ class DatabaseLocatorDialog:
             for k, b in btn_refs.items():
                 try:
                     if k == target_key:
-                        b.configure(border_color=C_GUIDE_GLOW, border_width=3)
+                        b.configure(border_color=C_GUIDE_GLOW,
+                                    border_width=BORDER_W_FOCUS)
                     else:
-                        b.configure(border_color=C_BORDER, border_width=1)
+                        b.configure(border_color=C_BORDER_SOFT,
+                                    border_width=BORDER_W)
                 except Exception:
                     pass
 
@@ -736,13 +837,13 @@ class DatabaseLocatorDialog:
                 messagebox.showerror("错误", "创建默认数据库失败", parent=dialog)
 
         b_exist = make_button(btn_frame, "📂 定位已有数据库", command=on_existing)
-        b_exist.pack(side=LEFT, padx=(0, 6))
+        b_exist.pack(side=LEFT, padx=(0, PAD_TIGHT))
         b_legacy = make_button(btn_frame, "📦 适配旧版数据库", command=on_legacy)
-        b_legacy.pack(side=LEFT, padx=6)
+        b_legacy.pack(side=LEFT, padx=PAD_TIGHT)
         b_new = make_button(btn_frame, "✨ 新建数据库", command=on_new, accent=True)
-        b_new.pack(side=LEFT, padx=6)
+        b_new.pack(side=LEFT, padx=PAD_TIGHT)
         b_default = make_button(btn_frame, "使用默认位置", command=on_default)
-        b_default.pack(side=LEFT, padx=6)
+        b_default.pack(side=LEFT, padx=PAD_TIGHT)
 
         btn_refs = {
             'exist': b_exist, 'legacy': b_legacy,
@@ -880,7 +981,7 @@ class GuideManager:
         self._steps[step_name] = {
             'widgets': [w for w in widgets if w is not None],
             'desc': desc,
-            'colors': colors or (C_GUIDE_GLOW, 3),
+            'colors': colors or (C_GUIDE_GLOW, BORDER_W_FOCUS),
         }
 
     def clear_registered(self):
@@ -912,7 +1013,7 @@ class GuideManager:
                 try:
                     orig_bw = widget.cget('border_width')
                 except Exception:
-                    orig_bw = 1
+                    orig_bw = BORDER_W
                 self._originals[wid] = {
                     'widget': widget,
                     'border_color': orig_bc,
@@ -1914,8 +2015,9 @@ class SettingsDialog:
 
         self.dialog = ctk.CTkToplevel(parent)
         self.dialog.title("设置")
-        self.dialog.geometry("540x780")
-        self.dialog.minsize(500, 580)
+        dlg_w, dlg_h = DLG_SETTINGS
+        self.dialog.geometry(f"{dlg_w}x{dlg_h}")
+        self.dialog.minsize(dlg_w - 60, 620)
         self.dialog.resizable(True, True)
         self.dialog.transient(parent)
         self.dialog.grab_set()
@@ -1927,8 +2029,8 @@ class SettingsDialog:
             pass
 
         self.dialog.update_idletasks()
-        x = parent.winfo_x() + (parent.winfo_width() - 540) // 2
-        y = parent.winfo_y() + (parent.winfo_height() - 780) // 2
+        x = parent.winfo_x() + (parent.winfo_width() - dlg_w) // 2
+        y = parent.winfo_y() + (parent.winfo_height() - dlg_h) // 2
         self.dialog.geometry(f"+{x}+{y}")
 
         self.dialog.grid_rowconfigure(0, weight=1)
@@ -1936,100 +2038,119 @@ class SettingsDialog:
 
         content = ctk.CTkScrollableFrame(
             self.dialog, fg_color=C_WINDOW_BG, corner_radius=0,
-            scrollbar_button_color=C_BORDER,
+            scrollbar_button_color=C_BORDER_SOFT,
             scrollbar_button_hover_color=C_ACCENT)
         content.grid(row=0, column=0, sticky="nsew")
 
         inner = ctk.CTkFrame(content, fg_color="transparent")
-        inner.pack(fill=BOTH, expand=True, padx=15, pady=15)
+        inner.pack(fill=BOTH, expand=True, padx=PAD_DIALOG, pady=PAD_DIALOG)
 
         make_label(inner, text="数据库位置", fg=C_ACCENT,
-                    font_size=11, bold=True).pack(anchor=W, pady=(0, 6))
-        db_card = ctk.CTkFrame(inner, fg_color=C_PANEL_BG, corner_radius=8,
-                                border_width=1, border_color=C_BORDER)
-        db_card.pack(fill=X, pady=(0, 15))
+                    font_size=FS_SUBHEAD, bold=True).pack(
+                        anchor=W, pady=(0, PAD_TIGHT))
+        db_card = ctk.CTkFrame(inner, fg_color=C_CARD_BG, corner_radius=R_CARD,
+                                border_width=BORDER_W, border_color=C_BORDER_SOFT)
+        db_card.pack(fill=X, pady=(0, PAD_DIALOG))
         db_str = str(self.settings._settings_file.parent) if self.settings._settings_file else "未绑定"
-        dl = make_label(db_card, text=db_str, fg=C_TEXT_MAIN, font_size=10)
-        dl.configure(wraplength=440)
-        dl.pack(anchor=W, padx=15, pady=12)
+        dl = make_label(db_card, text=db_str, fg=C_TEXT_MAIN, font_size=FS_SMALL)
+        dl.configure(wraplength=dlg_w - 2 * PAD_DIALOG - 2 * PAD_CARD_X)
+        dl.pack(anchor=W, padx=PAD_CARD_X, pady=PAD_CARD_Y)
 
         make_label(inner, text="数据库存储模式", fg=C_ACCENT,
-                    font_size=11, bold=True).pack(anchor=W, pady=(0, 6))
-        mode_card = ctk.CTkFrame(inner, fg_color=C_PANEL_BG, corner_radius=8,
-                                  border_width=1, border_color=C_BORDER)
-        mode_card.pack(fill=X, pady=(0, 15))
+                    font_size=FS_SUBHEAD, bold=True).pack(
+                        anchor=W, pady=(0, PAD_TIGHT))
+        mode_card = ctk.CTkFrame(inner, fg_color=C_CARD_BG, corner_radius=R_CARD,
+                                  border_width=BORDER_W, border_color=C_BORDER_SOFT)
+        mode_card.pack(fill=X, pady=(0, PAD_DIALOG))
 
         self.storage_var = StringVar(value=settings.storage_mode)
         ctk.CTkRadioButton(mode_card, text="隔离存储（推荐，每个整合包独立预设）",
                             variable=self.storage_var, value="isolated",
-                            text_color=C_TEXT_MAIN, font=(FONT_FAMILY, 10),
+                            text_color=C_TEXT_MAIN, font=(FONT_FAMILY, FS_SMALL),
                             fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
-                            border_color=C_BORDER).pack(anchor=W, padx=15, pady=(12, 2))
+                            border_color=C_BORDER).pack(
+                                anchor=W, padx=PAD_CARD_X,
+                                pady=(PAD_CARD_Y, PAD_MICRO))
         make_label(mode_card, text="  数据库保存在各整合包目录下，避免文件重名",
-                    fg=C_TEXT_MUTED, font_size=9).pack(anchor=W, padx=32, pady=(0, 6))
+                    fg=C_TEXT_MUTED, font_size=FS_TINY).pack(
+                        anchor=W, padx=PAD_INDENT, pady=(0, PAD_TIGHT))
         ctk.CTkRadioButton(mode_card, text="合并存储（所有整合包共用预设）",
                             variable=self.storage_var, value="merged",
-                            text_color=C_TEXT_MAIN, font=(FONT_FAMILY, 10),
+                            text_color=C_TEXT_MAIN, font=(FONT_FAMILY, FS_SMALL),
                             fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
-                            border_color=C_BORDER).pack(anchor=W, padx=15, pady=(6, 2))
+                            border_color=C_BORDER).pack(
+                                anchor=W, padx=PAD_CARD_X,
+                                pady=(PAD_TIGHT, PAD_MICRO))
         make_label(mode_card, text="  数据库保存在指定位置，所有整合包共享预设列表\n"
                                     "  ⚠ 不同整合包的同名枪包可能互相覆盖",
-                    fg=C_TEXT_MUTED, font_size=9, justify=LEFT).pack(anchor=W, padx=32, pady=(0, 12))
+                    fg=C_TEXT_MUTED, font_size=FS_TINY, justify=LEFT).pack(
+                        anchor=W, padx=PAD_INDENT, pady=(0, PAD_CARD_Y))
 
         make_label(inner, text="用户身份", fg=C_ACCENT,
-                    font_size=11, bold=True).pack(anchor=W, pady=(0, 6))
-        role_card = ctk.CTkFrame(inner, fg_color=C_PANEL_BG, corner_radius=8,
-                                  border_width=1, border_color=C_BORDER)
-        role_card.pack(fill=X, pady=(0, 15))
+                    font_size=FS_SUBHEAD, bold=True).pack(
+                        anchor=W, pady=(0, PAD_TIGHT))
+        role_card = ctk.CTkFrame(inner, fg_color=C_CARD_BG, corner_radius=R_CARD,
+                                  border_width=BORDER_W, border_color=C_BORDER_SOFT)
+        role_card.pack(fill=X, pady=(0, PAD_DIALOG))
 
         self.role_var = StringVar(value=settings.role)
         ctk.CTkRadioButton(role_card, text="玩家（默认）",
                             variable=self.role_var, value="player",
-                            text_color=C_TEXT_MAIN, font=(FONT_FAMILY, 10),
+                            text_color=C_TEXT_MAIN, font=(FONT_FAMILY, FS_SMALL),
                             fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
-                            border_color=C_BORDER).pack(anchor=W, padx=15, pady=(12, 2))
+                            border_color=C_BORDER).pack(
+                                anchor=W, padx=PAD_CARD_X,
+                                pady=(PAD_CARD_Y, PAD_MICRO))
         make_label(role_card, text="  检测到变更时提示检查枪包",
-                    fg=C_TEXT_MUTED, font_size=9).pack(anchor=W, padx=32, pady=(0, 6))
+                    fg=C_TEXT_MUTED, font_size=FS_TINY).pack(
+                        anchor=W, padx=PAD_INDENT, pady=(0, PAD_TIGHT))
         ctk.CTkRadioButton(role_card, text="开发者",
                             variable=self.role_var, value="developer",
-                            text_color=C_TEXT_MAIN, font=(FONT_FAMILY, 10),
+                            text_color=C_TEXT_MAIN, font=(FONT_FAMILY, FS_SMALL),
                             fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
-                            border_color=C_BORDER).pack(anchor=W, padx=15, pady=(6, 2))
+                            border_color=C_BORDER).pack(
+                                anchor=W, padx=PAD_CARD_X,
+                                pady=(PAD_TIGHT, PAD_MICRO))
         make_label(role_card, text="  检测到变更时提示导出增量更新",
-                    fg=C_TEXT_MUTED, font_size=9).pack(anchor=W, padx=32, pady=(0, 12))
+                    fg=C_TEXT_MUTED, font_size=FS_TINY).pack(
+                        anchor=W, padx=PAD_INDENT, pady=(0, PAD_CARD_Y))
 
         make_label(inner, text="数据库管理", fg=C_ACCENT,
-                    font_size=11, bold=True).pack(anchor=W, pady=(0, 6))
-        db_mgr_card = ctk.CTkFrame(inner, fg_color=C_PANEL_BG, corner_radius=8,
-                                    border_width=1, border_color=C_BORDER)
-        db_mgr_card.pack(fill=X, pady=(0, 15))
+                    font_size=FS_SUBHEAD, bold=True).pack(
+                        anchor=W, pady=(0, PAD_TIGHT))
+        db_mgr_card = ctk.CTkFrame(inner, fg_color=C_CARD_BG, corner_radius=R_CARD,
+                                    border_width=BORDER_W, border_color=C_BORDER_SOFT)
+        db_mgr_card.pack(fill=X, pady=(0, PAD_DIALOG))
 
         btn_row1 = ctk.CTkFrame(db_mgr_card, fg_color="transparent")
-        btn_row1.pack(fill=X, padx=12, pady=(12, 6))
+        btn_row1.pack(fill=X, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
         make_button(btn_row1, "切换数据库", command=self.on_switch_db).pack(
-            side=LEFT, padx=(0, 6))
+            side=LEFT, padx=(0, PAD_TIGHT))
         make_button(btn_row1, "合并数据库", command=self.on_merge_db).pack(
-            side=LEFT, padx=6)
+            side=LEFT, padx=PAD_TIGHT)
         make_button(btn_row1, "适配旧版数据库", command=self.on_migrate_legacy).pack(
-            side=LEFT, padx=6)
+            side=LEFT, padx=PAD_TIGHT)
 
         btn_row2 = ctk.CTkFrame(db_mgr_card, fg_color="transparent")
-        btn_row2.pack(fill=X, padx=12, pady=(0, 12))
+        btn_row2.pack(fill=X, padx=PAD_CARD_X, pady=(0, PAD_CARD_Y))
         make_button(btn_row2, "打开数据库文件夹", command=self.on_open_db).pack(
-            side=LEFT, padx=(0, 6))
+            side=LEFT, padx=(0, PAD_TIGHT))
         make_label(db_mgr_card,
             text="提示：右键预设可迁移到其他整合包/数据库。",
-            fg=C_TEXT_MUTED, font_size=9).pack(anchor=W, padx=12, pady=(0, 12))
+            fg=C_TEXT_MUTED, font_size=FS_TINY).pack(
+                anchor=W, padx=PAD_CARD_X, pady=(0, PAD_CARD_Y))
 
-        btn_bar = ctk.CTkFrame(self.dialog, fg_color=C_PANEL_BG,
-                                corner_radius=0, height=64,
-                                border_width=1, border_color=C_BORDER)
+        btn_bar = ctk.CTkFrame(self.dialog, fg_color=C_CARD_BG,
+                                corner_radius=0, height=H_BTN_BAR,
+                                border_width=BORDER_W, border_color=C_BORDER_SOFT)
         btn_bar.grid(row=1, column=0, sticky="ew")
         btn_bar.grid_propagate(False)
         make_button(btn_bar, "保存", command=self.save, accent=True,
-                     width=90).pack(side=RIGHT, padx=(6, 15), pady=16)
+                     width=90).pack(side=RIGHT, padx=(PAD_TIGHT, PAD_DIALOG),
+                                    pady=(H_BTN_BAR - H_CONTROL) // 2)
         make_button(btn_bar, "取消", command=self.dialog.destroy,
-                     width=90).pack(side=RIGHT, padx=(0, 6), pady=16)
+                     width=90).pack(side=RIGHT, padx=(0, PAD_TIGHT),
+                                    pady=(H_BTN_BAR - H_CONTROL) // 2)
 
     def on_switch_db(self):
         messagebox.showinfo("切换数据库",
@@ -2090,8 +2211,8 @@ class PulsesSwapApp:
     def __init__(self, root):
         self.root = root
         self.root.title(f"{PROJECT_NAME} v{VERSION}")
-        self.root.geometry("1150x760")
-        self.root.minsize(1000, 700)
+        self.root.geometry(f"{WINDOW_W}x{WINDOW_H}")
+        self.root.minsize(WINDOW_MIN_W, WINDOW_MIN_H)
 
         # ==================== Win11 透明修复 ====================
         try:
@@ -2154,7 +2275,8 @@ class PulsesSwapApp:
                 hwnd, 38, ctypes.byref(v0), ctypes.sizeof(v0))
             ctypes.windll.dwmapi.DwmSetWindowAttribute(
                 hwnd, 20, ctypes.byref(v0), ctypes.sizeof(v0))
-            v1 = ctypes.c_int(1)
+            # 33 = DWMWA_WINDOW_CORNER_PREFERENCE：按设计令牌给窗口圆角
+            v1 = ctypes.c_int(DWM_CORNER_PREF)
             try:
                 ctypes.windll.dwmapi.DwmSetWindowAttribute(
                     hwnd, 33, ctypes.byref(v1), ctypes.sizeof(v1))
@@ -2215,58 +2337,59 @@ class PulsesSwapApp:
     # ==================== UI 构建 ====================
     def setup_ui(self):
         main_frame = ctk.CTkFrame(self.root, fg_color="transparent")
-        main_frame.pack(fill=BOTH, expand=True, padx=8, pady=8)
+        main_frame.pack(fill=BOTH, expand=True, padx=PAD_WINDOW, pady=PAD_WINDOW)
 
         main_frame.grid_rowconfigure(0, weight=1)
-        main_frame.grid_columnconfigure(0, weight=0, minsize=340)
+        main_frame.grid_columnconfigure(0, weight=0, minsize=LEFT_COL_W)
         main_frame.grid_columnconfigure(1, weight=1)
 
         left_panel = ctk.CTkFrame(main_frame, fg_color="transparent")
-        left_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        left_panel.grid(row=0, column=0, sticky="nsew", padx=(0, PAD_TIGHT))
 
         right_panel = ctk.CTkFrame(main_frame, fg_color="transparent")
-        right_panel.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        right_panel.grid(row=0, column=1, sticky="nsew", padx=(PAD_TIGHT, 0))
 
         # ===== 整合包分组（大拖入框） =====
-        pack_group = ctk.CTkFrame(left_panel, fg_color=C_PANEL_BG, corner_radius=8,
-                                    border_width=1, border_color=C_BORDER)
-        pack_group.pack(fill=X, pady=(0, 8))
+        pack_group = ctk.CTkFrame(left_panel, fg_color=C_CARD_BG, corner_radius=R_CARD,
+                                    border_width=BORDER_W, border_color=C_BORDER_SOFT)
+        pack_group.pack(fill=X, pady=(0, PAD_GAP))
         make_label(pack_group, text="Step 1 · 整合包", fg=C_ACCENT,
-                    font_size=11, bold=True).pack(anchor=W, padx=12, pady=(10, 6))
+                    font_size=FS_SUBHEAD, bold=True).pack(
+                        anchor=W, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
         pack_content = ctk.CTkFrame(pack_group, fg_color="transparent")
-        pack_content.pack(fill=X, padx=12, pady=(0, 12))
+        pack_content.pack(fill=X, padx=PAD_CARD_X, pady=(0, PAD_CARD_Y))
 
         # 大拖入框
         self.pack_drop_area = ctk.CTkFrame(pack_content, fg_color=C_PANEL_ALT_BG,
-                                             corner_radius=6, border_width=1,
-                                             border_color=C_BORDER)
-        self.pack_drop_area.pack(fill=X, pady=(0, 6))
+                                             corner_radius=R_CARD, border_width=BORDER_W,
+                                             border_color=C_BORDER_SOFT)
+        self.pack_drop_area.pack(fill=X, pady=(0, PAD_TIGHT))
 
         self.pack_drop_label = ctk.CTkLabel(
             self.pack_drop_area,
             text="Step 1 · 拖入整合包根目录\n"
                  "或整合包内任意文件（自动定位 tacz）",
-            text_color=C_TEXT_SECONDARY, font=(FONT_FAMILY, 10),
+            text_color=C_TEXT_SECONDARY, font=(FONT_FAMILY, FS_BODY),
             justify=LEFT, anchor="w", fg_color="transparent")
-        self.pack_drop_label.pack(fill=X, padx=10, pady=(10, 4))
+        self.pack_drop_label.pack(fill=X, padx=PAD_GAP, pady=(PAD_GAP, PAD_XS))
 
         # 路径显示
         self.pack_path_frame, self.pack_path_label = make_display_box(
-            self.pack_drop_area, text="未选择", height=28)
-        self.pack_path_frame.pack(fill=X, padx=10, pady=(0, 6))
+            self.pack_drop_area, text="未选择", height=H_CONTROL)
+        self.pack_path_frame.pack(fill=X, padx=PAD_GAP, pady=(0, PAD_TIGHT))
 
         # 按钮行
         pack_btn_row = ctk.CTkFrame(self.pack_drop_area, fg_color="transparent")
-        pack_btn_row.pack(fill=X, padx=8, pady=(0, 10))
+        pack_btn_row.pack(fill=X, padx=PAD_INNER, pady=(0, PAD_GAP))
 
         self.select_pack_btn = make_button(pack_btn_row, "选择",
                                              command=self.select_pack,
                                              width=60, accent=True)
-        self.select_pack_btn.pack(side=LEFT, padx=(0, 4))
+        self.select_pack_btn.pack(side=LEFT, padx=(0, PAD_XS))
         self.open_pack_btn = make_button(pack_btn_row, "📂",
                                            command=self.open_pack_folder,
                                            width=32, state="disabled")
-        self.open_pack_btn.pack(side=LEFT, padx=(0, 4))
+        self.open_pack_btn.pack(side=LEFT, padx=(0, PAD_XS))
         self.recent_toggle_btn = make_button(pack_btn_row, "▼ 最近",
                                                command=self.toggle_recent,
                                                width=70)
@@ -2283,61 +2406,63 @@ class PulsesSwapApp:
 
         # 最近打开（折叠）
         self.recent_frame = ctk.CTkFrame(pack_content, fg_color=C_PANEL_ALT_BG,
-                                          corner_radius=6, border_width=1,
-                                          border_color=C_BORDER)
+                                          corner_radius=R_CONTROL, border_width=BORDER_W,
+                                          border_color=C_BORDER_SOFT)
         self.recent_listbox = Listbox(self.recent_frame, height=5,
                                        bg=C_PANEL_ALT_BG, fg=C_TEXT_MAIN,
                                        selectbackground=C_ACCENT_SOFT,
                                        selectforeground=C_ACCENT,
                                        relief='flat', highlightthickness=0,
-                                       font=(FONT_FAMILY, 10))
-        self.recent_listbox.pack(fill=BOTH, expand=True, padx=6, pady=6)
+                                       font=(FONT_FAMILY, FS_SMALL))
+        self.recent_listbox.pack(fill=BOTH, expand=True, padx=PAD_TIGHT, pady=PAD_TIGHT)
         self.recent_listbox.bind('<Double-Button-1>', self.on_recent_double_click)
 
         # 状态标签
         self.pack_status_label = make_label(pack_content, text="状态: 未加载",
-                                             fg=C_ERROR, font_size=10)
-        self.pack_status_label.pack(anchor=W, pady=(4, 0))
+                                             fg=C_ERROR, font_size=FS_SMALL)
+        self.pack_status_label.pack(anchor=W, pady=(PAD_XS, 0))
         self.pack_name_label = make_label(pack_content, text="当前预设: 无",
-                                           fg=C_ACCENT, font_size=10)
-        self.pack_name_label.pack(anchor=W, pady=(2, 0))
+                                           fg=C_ACCENT, font_size=FS_SMALL)
+        self.pack_name_label.pack(anchor=W, pady=(PAD_MICRO, 0))
 
         # ===== 预设管理 =====
-        preset_group = ctk.CTkFrame(left_panel, fg_color=C_PANEL_BG, corner_radius=8,
-                                     border_width=1, border_color=C_BORDER)
-        preset_group.pack(fill=BOTH, expand=True, pady=(0, 8))
+        preset_group = ctk.CTkFrame(left_panel, fg_color=C_CARD_BG, corner_radius=R_CARD,
+                                     border_width=BORDER_W, border_color=C_BORDER_SOFT)
+        preset_group.pack(fill=BOTH, expand=True, pady=(0, PAD_GAP))
         make_label(preset_group, text="Step 2 · 预设管理", fg=C_ACCENT,
-                    font_size=11, bold=True).pack(anchor=W, padx=12, pady=(10, 6))
+                    font_size=FS_SUBHEAD, bold=True).pack(
+                        anchor=W, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
         preset_content = ctk.CTkFrame(preset_group, fg_color="transparent")
-        preset_content.pack(fill=BOTH, expand=True, padx=12, pady=(0, 12))
+        preset_content.pack(fill=BOTH, expand=True, padx=PAD_CARD_X,
+                            pady=(0, PAD_CARD_Y))
 
-        preset_list_wrap = ctk.CTkFrame(preset_content, fg_color=C_PANEL_BG,
-                                         corner_radius=6, border_width=1,
-                                         border_color=C_BORDER)
-        preset_list_wrap.pack(fill=BOTH, expand=True, pady=(0, 8))
+        preset_list_wrap = ctk.CTkFrame(preset_content, fg_color=C_CARD_BG,
+                                         corner_radius=R_CONTROL, border_width=BORDER_W,
+                                         border_color=C_BORDER_SOFT)
+        preset_list_wrap.pack(fill=BOTH, expand=True, pady=(0, PAD_GAP))
         self.preset_listbox = Listbox(preset_list_wrap, height=6,
-                                       bg=C_PANEL_BG, fg=C_TEXT_MAIN,
+                                       bg=C_CARD_BG, fg=C_TEXT_MAIN,
                                        selectbackground=C_ACCENT_SOFT,
                                        selectforeground=C_ACCENT,
                                        relief='flat', highlightthickness=0,
-                                       font=(FONT_FAMILY, 11))
-        self.preset_listbox.pack(fill=BOTH, expand=True, padx=4, pady=4)
+                                       font=(FONT_FAMILY, FS_BODY))
+        self.preset_listbox.pack(fill=BOTH, expand=True, padx=PAD_XS, pady=PAD_XS)
         self.preset_listbox.bind('<<ListboxSelect>>', self.on_preset_selected)
         self.preset_listbox.bind('<Button-3>', self.show_preset_context_menu)
 
         # 拖入框：预设/更新包
         self.drop_area = ctk.CTkFrame(preset_content, fg_color=C_PANEL_ALT_BG,
-                                       corner_radius=6, border_width=1,
-                                       border_color=C_BORDER, height=70)
-        self.drop_area.pack(fill=X, pady=(0, 8))
+                                       corner_radius=R_CARD, border_width=BORDER_W,
+                                       border_color=C_BORDER_SOFT, height=H_DROP_AREA)
+        self.drop_area.pack(fill=X, pady=(0, PAD_GAP))
         self.drop_area.pack_propagate(False)
         self.drop_label = ctk.CTkLabel(
             self.drop_area,
             text="Step 2 · 导入预设包 / 更新包\n"
                  "拖入 .fgcpack / .fgcupdate，或点击此处选择",
-            text_color=C_TEXT_SECONDARY, font=(FONT_FAMILY, 9),
+            text_color=C_TEXT_SECONDARY, font=(FONT_FAMILY, FS_TINY),
             justify=LEFT, anchor="w", fg_color="transparent")
-        self.drop_label.pack(fill=BOTH, expand=True, padx=8, pady=8)
+        self.drop_label.pack(fill=BOTH, expand=True, padx=PAD_INNER, pady=PAD_INNER)
         self.drop_label.bind('<Button-1>', lambda e: self.select_import_file())
         self.drop_area.bind('<Button-1>', lambda e: self.select_import_file())
         if HAS_DND:
@@ -2353,46 +2478,50 @@ class PulsesSwapApp:
         preset_btn_frame.pack(fill=X)
         self.create_preset_btn = make_button(preset_btn_frame, "+ 创建",
                                               command=self.create_preset, state="disabled")
-        self.create_preset_btn.pack(side=LEFT, padx=(0, 4))
+        self.create_preset_btn.pack(side=LEFT, padx=(0, PAD_XS))
         self.export_preset_btn = make_button(preset_btn_frame, "📤 导出",
                                               command=self.export_preset, state="disabled")
-        self.export_preset_btn.pack(side=LEFT, padx=4)
+        self.export_preset_btn.pack(side=LEFT, padx=PAD_XS)
         self.export_incremental_btn = make_button(preset_btn_frame, "🔄 更新",
                                                    command=self.export_incremental,
                                                    state="disabled")
-        self.export_incremental_btn.pack(side=LEFT, padx=4)
+        self.export_incremental_btn.pack(side=LEFT, padx=PAD_XS)
         self.refresh_preset_btn = make_button(preset_btn_frame, "⟳",
                                                command=self.refresh_presets,
                                                state="disabled", width=40)
-        self.refresh_preset_btn.pack(side=LEFT, padx=4)
-        self.loading_label = make_label(preset_btn_frame, text="", fg=C_ACCENT, font_size=9)
-        self.loading_label.pack(side=LEFT, padx=6)
+        self.refresh_preset_btn.pack(side=LEFT, padx=PAD_XS)
+        self.loading_label = make_label(preset_btn_frame, text="", fg=C_ACCENT,
+                                        font_size=FS_TINY)
+        self.loading_label.pack(side=LEFT, padx=PAD_TIGHT)
 
         # ===== 预设详情 =====
-        info_group = ctk.CTkFrame(left_panel, fg_color=C_PANEL_BG, corner_radius=8,
-                                   border_width=1, border_color=C_BORDER)
+        info_group = ctk.CTkFrame(left_panel, fg_color=C_CARD_BG, corner_radius=R_CARD,
+                                   border_width=BORDER_W, border_color=C_BORDER_SOFT)
         info_group.pack(fill=X)
         make_label(info_group, text="Step 3 · 预设详情", fg=C_ACCENT,
-                    font_size=11, bold=True).pack(anchor=W, padx=12, pady=(10, 6))
+                    font_size=FS_SUBHEAD, bold=True).pack(
+                        anchor=W, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
         info_content = ctk.CTkFrame(info_group, fg_color="transparent")
-        info_content.pack(fill=X, padx=12, pady=(0, 12))
+        info_content.pack(fill=X, padx=PAD_CARD_X, pady=(0, PAD_CARD_Y))
 
         self.preset_name_label = make_label(info_content, text="预设: 未选择",
-                                             fg=C_ACCENT, font_size=11, bold=True)
+                                             fg=C_ACCENT, font_size=FS_SUBHEAD,
+                                             bold=True)
         self.preset_name_label.pack(anchor=W)
         self.preset_version_label = make_label(info_content, text="版本号: 无",
-                                                fg=C_TEXT_SECONDARY, font_size=10)
-        self.preset_version_label.pack(anchor=W, pady=(2, 0))
+                                                fg=C_TEXT_SECONDARY, font_size=FS_SMALL)
+        self.preset_version_label.pack(anchor=W, pady=(PAD_MICRO, 0))
         self.preset_status_label = make_label(info_content, text="状态: 未应用",
-                                               fg=C_TEXT_SECONDARY, font_size=10)
-        self.preset_status_label.pack(anchor=W, pady=(2, 0))
+                                               fg=C_TEXT_SECONDARY, font_size=FS_SMALL)
+        self.preset_status_label.pack(anchor=W, pady=(PAD_MICRO, 0))
 
         version_edit_frame = ctk.CTkFrame(info_content, fg_color="transparent")
-        version_edit_frame.pack(fill=X, pady=(8, 0))
+        version_edit_frame.pack(fill=X, pady=(PAD_INNER, 0))
         make_label(version_edit_frame, text="Step 3 · 版本号:", fg=C_TEXT_MAIN,
-                    font_size=10).pack(side=LEFT)
-        self.version_entry = make_entry(version_edit_frame)
-        self.version_entry.pack(side=LEFT, fill=X, expand=True, padx=(6, 6))
+                    font_size=FS_SMALL).pack(side=LEFT)
+        self.version_entry = make_entry(version_edit_frame, width=120)
+        self.version_entry.pack(side=LEFT, fill=X, expand=True,
+                                padx=(PAD_TIGHT, PAD_TIGHT))
         self.version_entry.bind('<Return>', lambda e: self.save_version())
         self.save_version_btn = make_button(version_edit_frame, "保存",
                                              command=self.save_version,
@@ -2400,18 +2529,20 @@ class PulsesSwapApp:
         self.save_version_btn.pack(side=RIGHT)
 
         # ===== 枪包列表 =====
-        gunpack_group = ctk.CTkFrame(right_panel, fg_color=C_PANEL_BG, corner_radius=8,
-                                      border_width=1, border_color=C_BORDER)
-        gunpack_group.pack(fill=BOTH, expand=True, pady=(0, 8))
+        gunpack_group = ctk.CTkFrame(right_panel, fg_color=C_CARD_BG, corner_radius=R_CARD,
+                                      border_width=BORDER_W, border_color=C_BORDER_SOFT)
+        gunpack_group.pack(fill=BOTH, expand=True, pady=(0, PAD_GAP))
         make_label(gunpack_group, text="枪包列表", fg=C_ACCENT,
-                    font_size=11, bold=True).pack(anchor=W, padx=12, pady=(10, 6))
+                    font_size=FS_SUBHEAD, bold=True).pack(
+                        anchor=W, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
         gunpack_content = ctk.CTkFrame(gunpack_group, fg_color="transparent")
-        gunpack_content.pack(fill=BOTH, expand=True, padx=12, pady=(0, 12))
+        gunpack_content.pack(fill=BOTH, expand=True, padx=PAD_CARD_X,
+                             pady=(0, PAD_CARD_Y))
 
         toolbar_frame = ctk.CTkFrame(gunpack_content, fg_color="transparent")
-        toolbar_frame.pack(fill=X, pady=(0, 6))
+        toolbar_frame.pack(fill=X, pady=(0, PAD_TIGHT))
         self.gunpack_count_label = make_label(toolbar_frame, text="共 0 个枪包",
-                                               fg=C_TEXT_MAIN, font_size=10)
+                                               fg=C_TEXT_MAIN, font_size=FS_SMALL)
         self.gunpack_count_label.pack(side=LEFT)
 
         self.refresh_gunpack_btn = make_button(toolbar_frame, "⟳ 刷新",
@@ -2422,57 +2553,59 @@ class PulsesSwapApp:
         self.open_tacz_btn = make_button(toolbar_frame, "📂 打开TACZ",
                                           command=self.open_tacz_folder,
                                           state="disabled", width=100)
-        self.open_tacz_btn.pack(side=RIGHT, padx=(0, 4))
+        self.open_tacz_btn.pack(side=RIGHT, padx=(0, PAD_XS))
 
-        gunpack_list_wrap = ctk.CTkFrame(gunpack_content, fg_color=C_PANEL_BG,
-                                          corner_radius=6, border_width=1,
-                                          border_color=C_BORDER)
+        gunpack_list_wrap = ctk.CTkFrame(gunpack_content, fg_color=C_CARD_BG,
+                                          corner_radius=R_CONTROL, border_width=BORDER_W,
+                                          border_color=C_BORDER_SOFT)
         gunpack_list_wrap.pack(fill=BOTH, expand=True)
         self.gunpack_listbox = Listbox(gunpack_list_wrap, height=10,
-                                        bg=C_PANEL_BG, fg=C_TEXT_MAIN,
+                                        bg=C_CARD_BG, fg=C_TEXT_MAIN,
                                         selectbackground=C_ACCENT_SOFT,
                                         selectforeground=C_ACCENT,
                                         relief='flat', highlightthickness=0,
-                                        font=(FONT_FAMILY, 11))
-        self.gunpack_listbox.pack(fill=BOTH, expand=True, padx=4, pady=4)
+                                        font=(FONT_FAMILY, FS_BODY))
+        self.gunpack_listbox.pack(fill=BOTH, expand=True, padx=PAD_XS, pady=PAD_XS)
 
         # 进度条
-        self.progress_bar = ctk.CTkProgressBar(right_panel, height=8,
-                                                 corner_radius=4,
+        self.progress_bar = ctk.CTkProgressBar(right_panel, height=H_PROGRESS,
+                                                 corner_radius=R_PROGRESS,
                                                  fg_color=C_PANEL_ALT_BG,
                                                  progress_color=C_ACCENT)
-        self.progress_bar.pack(fill=X, pady=(0, 4))
+        self.progress_bar.pack(fill=X, pady=(0, PAD_XS))
         self.progress_bar.pack_forget()
         self.progress_label = make_label(right_panel, text="",
-                                          fg=C_TEXT_SECONDARY, font_size=9)
-        self.progress_label.pack(fill=X, pady=(0, 4))
+                                          fg=C_TEXT_SECONDARY, font_size=FS_TINY)
+        self.progress_label.pack(fill=X, pady=(0, PAD_XS))
         self.progress_label.pack_forget()
 
         self.apply_btn = make_button(right_panel, "Step 4 · ⚡ 一键替换",
                                       command=self.apply_preset,
                                       state="disabled", accent=True)
-        self.apply_btn.pack(fill=X, pady=(0, 8))
+        self.apply_btn.pack(fill=X, pady=(0, PAD_GAP))
 
         # ===== 日志 =====
-        log_group = ctk.CTkFrame(right_panel, fg_color=C_PANEL_BG, corner_radius=8,
-                                  border_width=1, border_color=C_BORDER)
+        log_group = ctk.CTkFrame(right_panel, fg_color=C_CARD_BG, corner_radius=R_CARD,
+                                  border_width=BORDER_W, border_color=C_BORDER_SOFT)
         log_group.pack(fill=BOTH, expand=True)
         make_label(log_group, text="日志", fg=C_ACCENT,
-                    font_size=11, bold=True).pack(anchor=W, padx=12, pady=(10, 6))
+                    font_size=FS_SUBHEAD, bold=True).pack(
+                        anchor=W, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
         log_content = ctk.CTkFrame(log_group, fg_color="transparent")
-        log_content.pack(fill=BOTH, expand=True, padx=12, pady=(0, 12))
+        log_content.pack(fill=BOTH, expand=True, padx=PAD_CARD_X,
+                         pady=(0, PAD_CARD_Y))
         log_toolbar = ctk.CTkFrame(log_content, fg_color="transparent")
-        log_toolbar.pack(fill=X, pady=(0, 6))
+        log_toolbar.pack(fill=X, pady=(0, PAD_TIGHT))
         self.log_toggle_btn = make_button(log_toolbar, "📋 显示完整日志",
                                            command=self.toggle_log_mode)
         self.log_toggle_btn.pack(side=LEFT)
         self.log_clear_btn = make_button(log_toolbar, "清空", command=self.clear_log)
-        self.log_clear_btn.pack(side=LEFT, padx=(6, 0))
-        self.log_text = ctk.CTkTextbox(log_content, height=120,
+        self.log_clear_btn.pack(side=LEFT, padx=(PAD_TIGHT, 0))
+        self.log_text = ctk.CTkTextbox(log_content, height=H_LOG_BOX,
                                         fg_color=C_INPUT_BG,
-                                        border_color=C_BORDER, border_width=1,
-                                        corner_radius=6, text_color=C_TEXT_MAIN,
-                                        font=(FONT_FAMILY_MONO, 11), wrap="word")
+                                        border_color=C_BORDER_SOFT, border_width=BORDER_W,
+                                        corner_radius=R_CONTROL, text_color=C_TEXT_MAIN,
+                                        font=(FONT_FAMILY_MONO, FS_BODY), wrap="word")
         self.log_text.pack(fill=BOTH, expand=True)
 
         self.log_manager = LogManager(self.log_text, self.root)
@@ -2492,12 +2625,12 @@ class PulsesSwapApp:
     def setup_menu(self):
         menubar = Menu(self.root, bg=C_PANEL_BG, fg=C_TEXT_MAIN,
                         activebackground=C_ACCENT_SOFT, activeforeground=C_ACCENT,
-                        font=(FONT_FAMILY, 10), tearoff=0)
+                        font=(FONT_FAMILY, FS_SMALL), tearoff=0)
         self.root.config(menu=menubar)
 
         file_menu = Menu(menubar, tearoff=0, bg=C_PANEL_BG, fg=C_TEXT_MAIN,
                           activebackground=C_ACCENT_SOFT, activeforeground=C_ACCENT,
-                          font=(FONT_FAMILY, 10))
+                          font=(FONT_FAMILY, FS_SMALL))
         menubar.add_cascade(label="文件", menu=file_menu)
         file_menu.add_command(label="打开整合包", command=self.select_pack)
         file_menu.add_command(label="打开整合包路径", command=self.open_pack_folder)
@@ -2508,7 +2641,7 @@ class PulsesSwapApp:
 
         settings_menu = Menu(menubar, tearoff=0, bg=C_PANEL_BG, fg=C_TEXT_MAIN,
                               activebackground=C_ACCENT_SOFT, activeforeground=C_ACCENT,
-                              font=(FONT_FAMILY, 10))
+                              font=(FONT_FAMILY, FS_SMALL))
         menubar.add_cascade(label="设置", menu=settings_menu)
         settings_menu.add_command(label="程序设置", command=self.open_settings)
         settings_menu.add_separator()
@@ -2516,7 +2649,7 @@ class PulsesSwapApp:
 
         func_menu = Menu(menubar, tearoff=0, bg=C_PANEL_BG, fg=C_TEXT_MAIN,
                           activebackground=C_ACCENT_SOFT, activeforeground=C_ACCENT,
-                          font=(FONT_FAMILY, 10))
+                          font=(FONT_FAMILY, FS_SMALL))
         menubar.add_cascade(label="功能", menu=func_menu)
         func_menu.add_command(label="预设管理", command=self.open_preset_manager)
         func_menu.add_separator()
@@ -2524,7 +2657,7 @@ class PulsesSwapApp:
 
         more_menu = Menu(menubar, tearoff=0, bg=C_PANEL_BG, fg=C_TEXT_MAIN,
                           activebackground=C_ACCENT_SOFT, activeforeground=C_ACCENT,
-                          font=(FONT_FAMILY, 10))
+                          font=(FONT_FAMILY, FS_SMALL))
         menubar.add_cascade(label="更多", menu=more_menu)
         more_menu.add_command(label="使用教程", command=self.show_tutorial)
         more_menu.add_separator()
@@ -2843,9 +2976,10 @@ class PulsesSwapApp:
         self._update_guide()
 
     def _ask_after_migrate(self) -> str | None:
+        dlg_w, dlg_h = DLG_CHOICE
         dialog = ctk.CTkToplevel(self.root)
         dialog.title("迁移后处理")
-        dialog.geometry("500x340")
+        dialog.geometry(f"{dlg_w}x{dlg_h}")
         dialog.transient(self.root)
         dialog.grab_set()
         dialog.configure(fg_color=C_WINDOW_BG)
@@ -2855,20 +2989,21 @@ class PulsesSwapApp:
         except Exception:
             pass
         dialog.update_idletasks()
-        x = self.root.winfo_x() + (self.root.winfo_width() - 500) // 2
-        y = self.root.winfo_y() + (self.root.winfo_height() - 340) // 2
+        x = self.root.winfo_x() + (self.root.winfo_width() - dlg_w) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - dlg_h) // 2
         dialog.geometry(f"+{x}+{y}")
 
         frame = ctk.CTkFrame(dialog, fg_color="transparent")
-        frame.pack(fill=BOTH, expand=True, padx=15, pady=15)
+        frame.pack(fill=BOTH, expand=True, padx=PAD_DIALOG, pady=PAD_DIALOG)
 
         make_label(frame, text="迁移完成后，如何处理旧版数据库？",
-                    fg=C_TEXT_MAIN, font_size=11, bold=True).pack(anchor=W, pady=(0, 8))
+                    fg=C_TEXT_MAIN, font_size=FS_SUBHEAD, bold=True).pack(
+                        anchor=W, pady=(0, PAD_INNER))
         desc = make_label(frame,
             text="建议选择「标记为已迁移」，保留原库作为备份。",
-            fg=C_TEXT_SECONDARY, font_size=9)
-        desc.configure(wraplength=450, justify=LEFT, anchor=W)
-        desc.pack(anchor=W, fill=X, pady=(0, 10))
+            fg=C_TEXT_SECONDARY, font_size=FS_SMALL)
+        desc.configure(wraplength=dlg_w - 2 * PAD_DIALOG, justify=LEFT, anchor=W)
+        desc.pack(anchor=W, fill=X, pady=(0, PAD_GAP))
 
         mode_var = StringVar(value=self.last_after_migrate_mode)
         for text, val, tip in [
@@ -2880,11 +3015,12 @@ class PulsesSwapApp:
              "  不做任何处理，下次启动仍会提示适配"),
         ]:
             ctk.CTkRadioButton(frame, text=text, variable=mode_var, value=val,
-                                text_color=C_TEXT_MAIN, font=(FONT_FAMILY, 10),
+                                text_color=C_TEXT_MAIN, font=(FONT_FAMILY, FS_SMALL),
                                 fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
-                                border_color=C_BORDER).pack(anchor=W, pady=(2, 0))
-            make_label(frame, text=tip, fg=C_TEXT_MUTED, font_size=9).pack(
-                anchor=W, padx=28, pady=(0, 4))
+                                border_color=C_BORDER).pack(anchor=W,
+                                                            pady=(PAD_MICRO, 0))
+            make_label(frame, text=tip, fg=C_TEXT_MUTED, font_size=FS_TINY).pack(
+                anchor=W, padx=PAD_INDENT, pady=(0, PAD_XS))
 
         result = {'mode': None}
 
@@ -2897,17 +3033,18 @@ class PulsesSwapApp:
             dialog.destroy()
 
         btn_frame = ctk.CTkFrame(frame, fg_color="transparent")
-        btn_frame.pack(fill=X, side=BOTTOM, pady=(10, 0))
+        btn_frame.pack(fill=X, side=BOTTOM, pady=(PAD_GAP, 0))
         make_button(btn_frame, "确定", command=on_ok, accent=True).pack(
-            side=RIGHT, padx=5)
+            side=RIGHT, padx=PAD_XS)
         make_button(btn_frame, "取消", command=on_cancel).pack(side=RIGHT)
         self.root.wait_window(dialog)
         return result['mode']
 
     def _ask_conflict_mode(self, message: str) -> str | None:
+        dlg_w, dlg_h = DLG_CHOICE
         dialog = ctk.CTkToplevel(self.root)
         dialog.title("冲突处理")
-        dialog.geometry("480x320")
+        dialog.geometry(f"{dlg_w}x{dlg_h}")
         dialog.transient(self.root)
         dialog.grab_set()
         dialog.configure(fg_color=C_WINDOW_BG)
@@ -2917,15 +3054,15 @@ class PulsesSwapApp:
         except Exception:
             pass
         dialog.update_idletasks()
-        x = self.root.winfo_x() + (self.root.winfo_width() - 480) // 2
-        y = self.root.winfo_y() + (self.root.winfo_height() - 320) // 2
+        x = self.root.winfo_x() + (self.root.winfo_width() - dlg_w) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - dlg_h) // 2
         dialog.geometry(f"+{x}+{y}")
 
         frame = ctk.CTkFrame(dialog, fg_color="transparent")
-        frame.pack(fill=BOTH, expand=True, padx=15, pady=15)
-        lbl = make_label(frame, text=message, fg=C_TEXT_MAIN, font_size=10)
-        lbl.configure(wraplength=440, justify=LEFT, anchor=W)
-        lbl.pack(anchor=W, fill=X, pady=(0, 10))
+        frame.pack(fill=BOTH, expand=True, padx=PAD_DIALOG, pady=PAD_DIALOG)
+        lbl = make_label(frame, text=message, fg=C_TEXT_MAIN, font_size=FS_BODY)
+        lbl.configure(wraplength=dlg_w - 2 * PAD_DIALOG, justify=LEFT, anchor=W)
+        lbl.pack(anchor=W, fill=X, pady=(0, PAD_GAP))
 
         mode_var = StringVar(value="rename")
         for text, val in [
@@ -2934,9 +3071,9 @@ class PulsesSwapApp:
             ("覆盖冲突预设（危险，会删除现有）", "overwrite"),
         ]:
             ctk.CTkRadioButton(frame, text=text, variable=mode_var, value=val,
-                                text_color=C_TEXT_MAIN, font=(FONT_FAMILY, 10),
+                                text_color=C_TEXT_MAIN, font=(FONT_FAMILY, FS_SMALL),
                                 fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
-                                border_color=C_BORDER).pack(anchor=W, pady=2)
+                                border_color=C_BORDER).pack(anchor=W, pady=PAD_MICRO)
 
         result = {'mode': None}
 
@@ -2980,9 +3117,10 @@ class PulsesSwapApp:
 
     # ==================== 身份提示 ====================
     def _show_role_dialog(self, title, message) -> str:
+        dlg_w, dlg_h = DLG_CHOICE
         dialog = ctk.CTkToplevel(self.root)
         dialog.title(title)
-        dialog.geometry("520x340")
+        dialog.geometry(f"{dlg_w}x{dlg_h}")
         dialog.transient(self.root)
         dialog.grab_set()
         dialog.configure(fg_color=C_WINDOW_BG)
@@ -2992,25 +3130,26 @@ class PulsesSwapApp:
         except Exception:
             pass
         dialog.update_idletasks()
-        x = self.root.winfo_x() + (self.root.winfo_width() - 520) // 2
-        y = self.root.winfo_y() + (self.root.winfo_height() - 340) // 2
+        x = self.root.winfo_x() + (self.root.winfo_width() - dlg_w) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - dlg_h) // 2
         dialog.geometry(f"+{x}+{y}")
 
         frame = ctk.CTkFrame(dialog, fg_color="transparent")
-        frame.pack(fill=BOTH, expand=True, padx=15, pady=15)
-        msg_label = make_label(frame, text=message, fg=C_TEXT_MAIN, font_size=10)
-        msg_label.configure(wraplength=470, justify=LEFT, anchor=W)
-        msg_label.pack(anchor=W, fill=X, pady=(0, 10))
+        frame.pack(fill=BOTH, expand=True, padx=PAD_DIALOG, pady=PAD_DIALOG)
+        msg_label = make_label(frame, text=message, fg=C_TEXT_MAIN, font_size=FS_BODY)
+        msg_label.configure(wraplength=dlg_w - 2 * PAD_DIALOG, justify=LEFT, anchor=W)
+        msg_label.pack(anchor=W, fill=X, pady=(0, PAD_GAP))
 
         dont_remind_var = BooleanVar(value=False)
         ctk.CTkCheckBox(frame, text="本次启动不再提醒",
                         variable=dont_remind_var,
-                        text_color=C_TEXT_MAIN, font=(FONT_FAMILY, 10),
+                        text_color=C_TEXT_MAIN, font=(FONT_FAMILY, FS_SMALL),
                         fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
-                        border_color=C_BORDER).pack(anchor=W, pady=(5, 10))
+                        border_color=C_BORDER).pack(anchor=W,
+                                                    pady=(PAD_XS, PAD_GAP))
 
         btn_frame = ctk.CTkFrame(frame, fg_color="transparent")
-        btn_frame.pack(fill=X, side=BOTTOM, pady=(10, 0))
+        btn_frame.pack(fill=X, side=BOTTOM, pady=(PAD_GAP, 0))
         result = {'action': 'ok'}
 
         def on_ok():
@@ -3027,7 +3166,7 @@ class PulsesSwapApp:
 
         if self.settings.role == "developer":
             make_button(btn_frame, "导出增量更新", command=on_export,
-                         accent=True).pack(side=RIGHT, padx=5)
+                         accent=True).pack(side=RIGHT, padx=PAD_XS)
         make_button(btn_frame, "确定", command=on_ok).pack(side=RIGHT)
         self.root.wait_window(dialog)
         return result['action']
@@ -3458,7 +3597,7 @@ class PulsesSwapApp:
         self.on_preset_selected(None)
         menu = Menu(self.root, tearoff=0, bg=C_PANEL_BG, fg=C_TEXT_MAIN,
                     activebackground=C_ACCENT_SOFT, activeforeground=C_ACCENT,
-                    font=(FONT_FAMILY, 10))
+                    font=(FONT_FAMILY, FS_SMALL))
         menu.add_command(label="迁移预设…",
                           command=lambda: self.migrate_preset(name))
         menu.add_separator()
@@ -3570,9 +3709,10 @@ class PulsesSwapApp:
         threading.Thread(target=worker, daemon=True).start()
 
     def _ask_migrate_target(self) -> str | None:
+        dlg_w, dlg_h = DLG_SMALL
         dialog = ctk.CTkToplevel(self.root)
         dialog.title("迁移预设")
-        dialog.geometry("480x300")
+        dialog.geometry(f"{dlg_w}x{dlg_h}")
         dialog.transient(self.root)
         dialog.grab_set()
         dialog.configure(fg_color=C_WINDOW_BG)
@@ -3582,32 +3722,37 @@ class PulsesSwapApp:
         except Exception:
             pass
         dialog.update_idletasks()
-        x = self.root.winfo_x() + (self.root.winfo_width() - 480) // 2
-        y = self.root.winfo_y() + (self.root.winfo_height() - 300) // 2
+        x = self.root.winfo_x() + (self.root.winfo_width() - dlg_w) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - dlg_h) // 2
         dialog.geometry(f"+{x}+{y}")
 
         frame = ctk.CTkFrame(dialog, fg_color="transparent")
-        frame.pack(fill=BOTH, expand=True, padx=15, pady=15)
+        frame.pack(fill=BOTH, expand=True, padx=PAD_DIALOG, pady=PAD_DIALOG)
 
         make_label(frame, text="迁移预设到：",
-                    fg=C_TEXT_MAIN, font_size=11, bold=True).pack(anchor=W, pady=(0, 10))
+                    fg=C_TEXT_MAIN, font_size=FS_SUBHEAD, bold=True).pack(
+                        anchor=W, pady=(0, PAD_GAP))
 
         mode_var = StringVar(value="pack")
         ctk.CTkRadioButton(frame, text="另一个整合包（使用其数据库）",
                             variable=mode_var, value="pack",
-                            text_color=C_TEXT_MAIN, font=(FONT_FAMILY, 10),
+                            text_color=C_TEXT_MAIN, font=(FONT_FAMILY, FS_SMALL),
                             fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
-                            border_color=C_BORDER).pack(anchor=W, pady=(2, 0))
+                            border_color=C_BORDER).pack(anchor=W,
+                                                        pady=(PAD_MICRO, 0))
         make_label(frame, text="  选择整合包根目录，预设会迁移到该整合包的数据库",
-                    fg=C_TEXT_MUTED, font_size=9).pack(anchor=W, padx=28, pady=(0, 6))
+                    fg=C_TEXT_MUTED, font_size=FS_TINY).pack(
+                        anchor=W, padx=PAD_INDENT, pady=(0, PAD_TIGHT))
 
         ctk.CTkRadioButton(frame, text="另一个数据库（直接选择数据库文件夹）",
                             variable=mode_var, value="db",
-                            text_color=C_TEXT_MAIN, font=(FONT_FAMILY, 10),
+                            text_color=C_TEXT_MAIN, font=(FONT_FAMILY, FS_SMALL),
                             fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
-                            border_color=C_BORDER).pack(anchor=W, pady=(2, 0))
+                            border_color=C_BORDER).pack(anchor=W,
+                                                        pady=(PAD_MICRO, 0))
         make_label(frame, text="  选择已存在的数据库，或新建一个空数据库",
-                    fg=C_TEXT_MUTED, font_size=9).pack(anchor=W, padx=28, pady=(0, 6))
+                    fg=C_TEXT_MUTED, font_size=FS_TINY).pack(
+                        anchor=W, padx=PAD_INDENT, pady=(0, PAD_TIGHT))
 
         result = {'mode': None}
 
@@ -3619,9 +3764,9 @@ class PulsesSwapApp:
             dialog.destroy()
 
         btn_frame = ctk.CTkFrame(frame, fg_color="transparent")
-        btn_frame.pack(fill=X, side=BOTTOM, pady=(10, 0))
+        btn_frame.pack(fill=X, side=BOTTOM, pady=(PAD_GAP, 0))
         make_button(btn_frame, "下一步", command=on_ok, accent=True).pack(
-            side=RIGHT, padx=5)
+            side=RIGHT, padx=PAD_XS)
         make_button(btn_frame, "取消", command=on_cancel).pack(side=RIGHT)
         self.root.wait_window(dialog)
         return result['mode']
@@ -4280,6 +4425,9 @@ def main():
     else:
         root = ctk.CTk()
 
+    # 字体回退链：root 就绪后解析一次，供所有控件工厂使用
+    apply_font_fallbacks()
+
     # ==================== Win11 透明修复（第一道） ====================
     try:
         root.attributes('-alpha', 1.0)
@@ -4313,7 +4461,8 @@ def main():
                 hwnd, 38, ctypes.byref(v0), ctypes.sizeof(v0))
             ctypes.windll.dwmapi.DwmSetWindowAttribute(
                 hwnd, 20, ctypes.byref(v0), ctypes.sizeof(v0))
-            v1 = ctypes.c_int(1)
+            # 33 = DWMWA_WINDOW_CORNER_PREFERENCE：按设计令牌给窗口圆角
+            v1 = ctypes.c_int(DWM_CORNER_PREF)
             try:
                 ctypes.windll.dwmapi.DwmSetWindowAttribute(
                     hwnd, 33, ctypes.byref(v1), ctypes.sizeof(v1))
