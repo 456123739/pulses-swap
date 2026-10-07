@@ -1,0 +1,126 @@
+name: build
+
+# 推送 tag（v*）时构建安装包并自动发布 Release；
+# 手动触发（workflow_dispatch）只出 artifact，方便先验证。
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # ───────────────────────── Windows 安装器 ─────────────────────────
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: 语法自检
+        run: python -m py_compile src/pulses_swap.py
+
+      - name: PyInstaller 打包
+        run: pyinstaller packaging/pulses_swap.spec --noconfirm --clean
+
+      - name: 安装 Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: 解析版本号
+        id: ver
+        shell: bash
+        run: |
+          V=$(python -c "import re,pathlib;print(re.search(r'VERSION\s*=\s*\"([^\"]+)\"',pathlib.Path('src/pulses_swap.py').read_text(encoding='utf-8')).group(1))")
+          echo "version=$V" >> $GITHUB_OUTPUT
+          echo "版本号: $V"
+
+      - name: 编译安装器
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            "packaging\installer.iss" "/DMyAppVersion=${{ steps.ver.outputs.version }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PulsesSwap-Setup-Windows
+          path: dist/installer/*.exe
+          if-no-files-found: error
+
+  # ───────────────────────── Linux 单文件版 ─────────────────────────
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 安装系统依赖（Tk + tkdnd）
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-tk tk-dev xvfb
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: 语法自检
+        run: python -m py_compile src/pulses_swap.py
+
+      - name: PyInstaller 打包
+        run: pyinstaller packaging/pulses_swap.spec --noconfirm --clean
+
+      - name: 冒烟测试（无显示器，用 xvfb）
+        run: |
+          xvfb-run -a python -c "
+          import sys; sys.path.insert(0,'src')
+          import pulses_swap as m
+          print('import ok, VERSION =', m.VERSION)
+          "
+
+      - name: 打包为 tar.gz
+        run: |
+          cd dist
+          tar -czf PulsesSwap-linux-x86_64.tar.gz PulsesSwap
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PulsesSwap-Linux
+          path: dist/PulsesSwap-linux-x86_64.tar.gz
+          if-no-files-found: error
+
+  # ───────────────────────── 发布 Release ─────────────────────────
+  release:
+    needs: [windows, linux]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: 整理产物
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name "*.exe" -o -name "*.tar.gz" \) -exec cp {} release/ \;
+          ls -la release/
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Pulses Swap ${{ github.ref_name }}
+          generate_release_notes: true
+          files: release/*
