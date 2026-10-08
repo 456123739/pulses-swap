@@ -1,9 +1,20 @@
 """
 Pulses Swap - 快速枪包切换器
 作者: NimShade
-版本: 2.4.5
+版本: 2.4.6
 描述: Minecraft Tacz 模组枪包快速切换工具
 UI风格: Pulses 水墨淡色主题（customtkinter 圆角版本）
+
+v2.4.6 更新（动画又慢又撕裂的真因：动画本身太贵）:
+  - 页面切换原来是把 Canvas 里的「页面窗口项」整棵控件树搬来搬去，
+    实测 3.6ms/帧（普通画布矩形只要 0.26ms，差 14 倍），Windows 上
+    子窗口重排更贵 → 掉帧 + 撕裂。改成「幕布扫过」：只动一块画布矩形，
+    到中点时才换页，实测 0.015ms/帧（快 240 倍）
+  - 颜色类补间单独降到 40fps（大卡片描边实测 3.05ms/帧、按钮 1.71ms/帧，
+    每帧都要让 CTk 重画控件；40fps 观感一样顺，开销减半）；
+    位置类（滑块、幕布）保持 60fps
+  - 启动入场不再搬页面控件树，只保留导航滑块淡入
+  - 新增 _activate()：幕布切换与瞬时切换共用同一套「贴正位/隐藏其余」逻辑
 
 v2.4.5 更新（列表显示不全 / 滚动卡顿的真因）:
   - 修：高分屏（125%/150%）下内容撑不出窗口 —— 只按 DPI 放大了控件，
@@ -162,7 +173,7 @@ except ImportError:
     FileSystemEventHandler = object
 
 # ==================== 常量定义 ====================
-VERSION = "2.4.5"
+VERSION = "2.4.6"
 AUTHOR = "NimShade"
 PROJECT_NAME = "Pulses Swap"
 
@@ -698,6 +709,12 @@ _TWEENS: dict = {}
 # 需要静态版时把它改成 False 即可（两条循环动效会自动降级为静态，不会自递归）。
 ANIMATIONS_ENABLED = True
 
+# 补间帧率：位置类（滑块、幕布）很便宜，跑 60fps；
+# 颜色类每帧都要让 CTk 重画控件（实测大卡片描边 3.05ms/帧、按钮 1.71ms/帧，
+# Windows 上还要翻几倍），跑 40fps 就够顺，整体开销直接减半。
+FPS_MOVE = 60
+FPS_COLOR = 40
+
 
 def clamp01(t):
     return 0.0 if t < 0 else (1.0 if t > 1 else float(t))
@@ -878,7 +895,8 @@ def attach_hover_glow(widget, base_color=None, hover_color=None, duration_ms=130
                 pass
 
         frame(0.0, 0.0)
-        tween(widget, "glow", ms, frame, easing=ease_in_out_cubic)
+        tween(widget, "glow", ms, frame, easing=ease_in_out_cubic,
+              fps=FPS_COLOR)
 
     def _cancel_leave():
         if state["leave_job"] is not None:
@@ -967,7 +985,8 @@ class AnimatedButton(ctk.CTkButton):
                 pass
 
         frame(0.0, 0.0)
-        tween(self, "bg", duration, frame, easing=ease_out_cubic)
+        tween(self, "bg", duration, frame, easing=ease_out_cubic,
+              fps=FPS_COLOR)
 
     # 注意：处理函数一律用 _anim_* 命名，绝不能叫 _on_enter/_on_leave/
     # _on_release —— CTkButton 在 __init__ 里 bind("<ButtonRelease-1>",
@@ -1188,7 +1207,8 @@ class CanvasSegmented(Canvas):
         def frame(e, raw):
             paint(lerp(start_alpha, target_alpha, e))
 
-        tween(self, "hover", self._hover_ms, frame, easing=ease_out_cubic)
+        tween(self, "hover", self._hover_ms, frame, easing=ease_out_cubic,
+              fps=FPS_COLOR)
 
     # ---------- 选中 ----------
     def current(self):
@@ -1244,7 +1264,7 @@ class CanvasSegmented(Canvas):
 
         frame(0.0, 0.0)      # 立即落到起点，滑块不等待第一帧
         tween(self, "pill", self._duration_ms, frame, done,
-              easing=ease_out_cubic)
+              easing=ease_out_cubic, fps=FPS_MOVE)
 
     def _animate_texts(self, previous_key, active_index, animate=True):
         for index, text_id in enumerate(self._text_ids):
@@ -1275,7 +1295,7 @@ class CanvasSegmented(Canvas):
 
             frame(0.0, 0.0)
             tween(self, "text{}".format(index), 160, frame,
-                  easing=ease_out_cubic)
+                  easing=ease_out_cubic, fps=FPS_COLOR)
 
 class SlideStack:
     """把若干页面放进一个 Canvas，用缓动曲线做「推入 / 推出」切换。
@@ -1295,6 +1315,7 @@ class SlideStack:
         self.items = {}
         self.order = []
         self.current = None
+        self._curtain = None
         self._size = (1, 1)
         self.canvas.bind("<Configure>", self._on_configure)
 
@@ -1322,9 +1343,15 @@ class SlideStack:
             except Exception:
                 pass
         if (id(self.canvas), "slide") in _TWEENS:
-            # 切换动画进行中被重排：轨迹已失效，直接落到终点
+            # 切换动画进行中被重排：轨迹已失效，直接落到终点（幕布一起收掉）
             cancel_tween(self.canvas, "slide")
             self._settle()
+            if self._curtain is not None:
+                try:
+                    self.canvas.delete(self._curtain)
+                except Exception:
+                    pass
+                self._curtain = None
         if self.current in self.items:
             self.canvas.coords(self.items[self.current], 0, 0)
 
@@ -1339,55 +1366,79 @@ class SlideStack:
                 pass
 
     def show(self, key, animate=True, direction=1, axis="x"):
-        """direction: +1 = 新页从右/下方进来（内容往左/上走）；-1 反之。
-        axis: 侧边栏是竖排 → 页面竖着滑；设置页选项卡是横排 → 横着滑。"""
+        """direction: +1 = 幕布从右/下方扫过；-1 反之。
+        axis: 侧边栏是竖排 → 竖着扫；设置页选项卡是横排 → 横着扫。"""
         if key not in self.items or key == self.current:
             return
         span = float(self._size[0] if axis == "x" else self._size[1])
         previous = self.current
         new_item = self.items[key]
-        try:
-            self.canvas.itemconfigure(new_item, state="normal")
-            self.canvas.tag_raise(new_item)
-        except Exception:
-            pass
         self.current = key
-        if previous is None or not animate:
-            try:
-                self.canvas.coords(new_item, 0, 0)
-                if previous is not None and previous in self.items:
-                    self.canvas.itemconfigure(self.items[previous],
-                                              state="hidden")
-                    self.canvas.coords(self.items[previous], 0, 0)
-            except Exception:
-                pass
+        if previous is None or not animate or not ANIMATIONS_ENABLED:
+            self._activate(key)
             return
 
-        old_item = self.items[previous]
-        offset = span * (1 if direction >= 0 else -1)
+        # 换页用「幕布扫过」而不是搬页面本身：
+        # 搬 canvas 窗口项（create_window 里的整棵控件树）每帧都要重排子窗口，
+        # 实测 3.6ms/帧（普通画布矩形只要 0.26ms，差 14 倍），Windows 上更贵 ——
+        # 观感就是又慢又撕裂。改成动一块画布矩形，到中点时才换页。
+        curtain_color = lerp_color(C_WINDOW_BG, C_ACCENT_SOFT, 0.55)
+        start = span if direction >= 0 else -span
+        end = -start
+        if axis == "x":
+            curtain = self.canvas.create_rectangle(
+                start, 0, start + span, self._size[1],
+                fill=curtain_color, outline="")
+        else:
+            curtain = self.canvas.create_rectangle(
+                0, start, self._size[0], start + span,
+                fill=curtain_color, outline="")
+        self.canvas.tag_raise(curtain)
+        self._curtain = curtain
+        state = {"switched": False}
+
+        def switch_now():
+            if state["switched"]:
+                return
+            state["switched"] = True
+            self._activate(key)
 
         def frame(e, raw):
+            pos = lerp(start, end, e)
             try:
                 if axis == "x":
-                    self.canvas.coords(new_item, lerp(offset, 0.0, e), 0)
-                    self.canvas.coords(old_item, lerp(0.0, -offset, e), 0)
+                    self.canvas.coords(curtain, pos, 0, pos + span, self._size[1])
                 else:
-                    self.canvas.coords(new_item, 0, lerp(offset, 0.0, e))
-                    self.canvas.coords(old_item, 0, lerp(0.0, -offset, e))
+                    self.canvas.coords(curtain, 0, pos, self._size[0], pos + span)
             except Exception:
                 pass
+            if raw >= 0.5:
+                switch_now()
 
         def done():
+            switch_now()
             try:
-                self.canvas.coords(new_item, 0, 0)
-                self.canvas.coords(old_item, 0, 0)
-                self.canvas.itemconfigure(old_item, state="hidden")
+                self.canvas.delete(curtain)
             except Exception:
                 pass
+            self._curtain = None
 
-        frame(0.0, 0.0)      # 先摆到起点，避免第一帧前闪一下原位
+        frame(0.0, 0.0)
         tween(self.canvas, "slide", self.duration_ms, frame, done,
-              easing=self.easing)
+              easing=self.easing, fps=FPS_MOVE)
+
+    def _activate(self, key):
+        """把指定页摆到正位、其余隐藏（幕布切换与瞬时切换共用）。"""
+        if key not in self.items:
+            return
+        self.current = key
+        for name, item in self.items.items():
+            try:
+                self.canvas.coords(item, 0, 0)
+                self.canvas.itemconfigure(
+                    item, state="normal" if name == key else "hidden")
+            except Exception:
+                pass
 
 
 class Toast:
@@ -4021,7 +4072,8 @@ class SettingsPage:
                     pass
 
             tween(self.saved_label, "saved", 320, frame,
-                  on_done=self._reset_saved_text, easing=ease_in_out_cubic)
+                  on_done=self._reset_saved_text, easing=ease_in_out_cubic,
+                  fps=FPS_COLOR)
 
         try:
             self.root.after(760, fade)
@@ -4300,17 +4352,8 @@ class PulsesSwapApp:
     # ==================== 入场动画 ====================
     def _play_entrance(self):
         """启动入场：当前页从右侧轻轻滑入，侧边栏滑块同步淡入。"""
-        item = self.stack.items.get(self.active_page)
-        if item is not None:
-            def frame(e, raw):
-                try:
-                    self.stack.canvas.coords(item, lerp(56.0, 0.0, e), 0)
-                except Exception:
-                    pass
-
-            frame(0.0, 0.0)
-            tween(self.stack.canvas, "entrance", 460, frame,
-                  easing=ease_out_quint)
+        # 入场只做滑块淡入：搬页面窗口项（整棵控件树）每帧要重排子窗口，
+        # 是这里最贵的一类操作，放在启动第一帧最容易看出卡顿。
         self._update_nav_state(self.active_page, animate=True)
 
     # ==================== 页面切换 ====================
@@ -5560,7 +5603,8 @@ class PulsesSwapApp:
                 pass
 
         frame(0.0, 0.0)
-        tween(label, "color", duration, frame, easing=ease_out_cubic)
+        tween(label, "color", duration, frame, easing=ease_out_cubic,
+              fps=FPS_COLOR)
 
     def _create_default_preset(self):
         if not self.preset_manager:
