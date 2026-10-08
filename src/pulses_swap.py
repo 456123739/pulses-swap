@@ -1,9 +1,18 @@
 """
 Pulses Swap - 快速枪包切换器
 作者: NimShade
-版本: 2.4.4
+版本: 2.4.5
 描述: Minecraft Tacz 模组枪包快速切换工具
 UI风格: Pulses 水墨淡色主题（customtkinter 圆角版本）
+
+v2.4.5 更新（列表显示不全 / 滚动卡顿的真因）:
+  - 修：高分屏（125%/150%）下内容撑不出窗口 —— 只按 DPI 放大了控件，
+    窗口尺寸没跟着放大，于是布局溢出：列表被撑得很大、下面的一键替换和
+    日志被挤出窗口，看起来就是「强制展示所有枪包、不允许被裁切」。
+    现在 set_window_scaling(UI_SCALE) 一起放大窗口（150% 下 1280x840
+    → 1920x1260），实测日志卡底部 1247 < 1260，内容完整在窗口内
+  - 滚轮改成逐帧滑动：Tk 的 Listbox 只能整行滚，直接 yview_scroll 会一顿
+    一顿的；现在换算成视图比例后用 140ms 补间滑过去
 
 v2.4.4 更新（两个真 bug + 列表滚动）:
   - 修：按钮点下去什么都不执行 —— AnimatedButton 用了和 CTkButton 同名的
@@ -153,7 +162,7 @@ except ImportError:
     FileSystemEventHandler = object
 
 # ==================== 常量定义 ====================
-VERSION = "2.4.4"
+VERSION = "2.4.5"
 AUTHOR = "NimShade"
 PROJECT_NAME = "Pulses Swap"
 
@@ -552,12 +561,21 @@ def enable_dpi_awareness() -> float:
 
 
 def sync_ui_scale(root_widget) -> float:
-    """root 建好后同步一次：CTk 的控件缩放 × 自绘控件用的像素换算。"""
+    """root 建好后同步一次：CTk 的控件缩放 × 自绘控件用的像素换算。
+
+    窗口尺寸也必须一起放大（set_window_scaling）。只放大控件不放大窗口，
+    内容就撑不下 —— 表现是列表被撑得很大、下面的一键替换/日志被挤出窗口，
+    看起来像「强制展示所有条目、不允许被裁切」。
+    """
     global UI_SCALE
     try:
         UI_SCALE = float(ctk.ScalingTracker.get_widget_scaling(root_widget))
     except Exception:
         UI_SCALE = 1.0
+    try:
+        ctk.set_window_scaling(UI_SCALE)
+    except Exception:
+        pass
     return UI_SCALE
 
 
@@ -1496,7 +1514,26 @@ def make_list_scroll(parent, listbox, width=10):
     listbox.configure(yscrollcommand=bar.set)
 
     def _scroll(units):
-        listbox.yview_scroll(units, "units")
+        """逐帧滑过去，而不是整行一跳。
+
+        Tk 的 Listbox 只能按「行」滚，直接 yview_scroll 会一顿一顿的；
+        这里把目标位置换算成视图比例，用补间在 140ms 内滑过去。
+        """
+        total = max(1, listbox.size())
+        first, last = listbox.yview()
+        visible = max(0.0, last - first)
+        start = first
+        target = min(max(0.0, first + units / total), max(0.0, 1.0 - visible))
+        if abs(target - start) < 1e-6:
+            return "break"
+
+        def frame(e, raw):
+            try:
+                listbox.yview_moveto(start + (target - start) * e)
+            except Exception:
+                pass
+
+        tween(listbox, "scroll", 140, frame, easing=ease_out_cubic)
         return "break"
 
     def _on_wheel(event):
