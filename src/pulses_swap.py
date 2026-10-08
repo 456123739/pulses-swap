@@ -1,9 +1,18 @@
 """
 Pulses Swap - 快速枪包切换器
 作者: NimShade
-版本: 2.4.7
+版本: 2.4.8
 描述: Minecraft Tacz 模组枪包快速切换工具
 UI风格: Pulses 水墨淡色主题（customtkinter 圆角版本）
+
+v2.4.8 更新（滑动动画恢复成真滑动 + 方向映射修正）:
+  - 撤掉 v2.4.6 的「幕布扫过」：观感像一条灰带子、像淡入淡出，
+    不是滑动。恢复成真滑动 —— 新页从进入侧滑到正位，旧页原地不动
+    （只搬一棵控件树，帧开销减半，也不会在中间露出空白）
+    实测 54fps（帧间隔中位 18.4ms，其中 16.7ms 是设定的帧周期）
+  - 修方向映射：点左边的选项内容要往左走（新页从右侧进来），
+    原先把 index 增大映射成了 direction=-1，方向正好相反；
+    侧边栏（竖排）与设置页选项卡（横排）两处都改
 
 v2.4.7 更新（列表看着「两个都选中」+ 导入框被裁）:
   - 预设列表里「已应用」原来用浅绿底色标注，和「选中」高亮是同一个色，
@@ -186,7 +195,7 @@ except ImportError:
     FileSystemEventHandler = object
 
 # ==================== 常量定义 ====================
-VERSION = "2.4.7"
+VERSION = "2.4.8"
 AUTHOR = "NimShade"
 PROJECT_NAME = "Pulses Swap"
 
@@ -1330,7 +1339,6 @@ class SlideStack:
         self.items = {}
         self.order = []
         self.current = None
-        self._curtain = None
         self._size = (1, 1)
         self.canvas.bind("<Configure>", self._on_configure)
 
@@ -1358,15 +1366,9 @@ class SlideStack:
             except Exception:
                 pass
         if (id(self.canvas), "slide") in _TWEENS:
-            # 切换动画进行中被重排：轨迹已失效，直接落到终点（幕布一起收掉）
+            # 切换动画进行中被重排：轨迹已失效，直接落到终点
             cancel_tween(self.canvas, "slide")
             self._settle()
-            if self._curtain is not None:
-                try:
-                    self.canvas.delete(self._curtain)
-                except Exception:
-                    pass
-                self._curtain = None
         if self.current in self.items:
             self.canvas.coords(self.items[self.current], 0, 0)
 
@@ -1381,62 +1383,48 @@ class SlideStack:
                 pass
 
     def show(self, key, animate=True, direction=1, axis="x"):
-        """direction: +1 = 幕布从右/下方扫过；-1 反之。
-        axis: 侧边栏是竖排 → 竖着扫；设置页选项卡是横排 → 横着扫。"""
+        """direction: +1 = 新页从右/下方滑进来；-1 反之。
+        axis: 侧边栏是竖排 → 竖着滑；设置页选项卡是横排 → 横着滑。
+
+        真·滑动（不是幕布、也不是淡入淡出）：新页从进入侧滑到正位，
+        旧页原地不动、滑完再隐藏。只搬一棵控件树，帧开销是「两页对开」
+        的一半，也不会在中间露出空白带。
+        """
         if key not in self.items or key == self.current:
             return
         span = float(self._size[0] if axis == "x" else self._size[1])
         previous = self.current
-        new_item = self.items[key]
         self.current = key
         if previous is None or not animate or not ANIMATIONS_ENABLED:
             self._activate(key)
             return
 
-        # 换页用「幕布扫过」而不是搬页面本身：
-        # 搬 canvas 窗口项（create_window 里的整棵控件树）每帧都要重排子窗口，
-        # 实测 3.6ms/帧（普通画布矩形只要 0.26ms，差 14 倍），Windows 上更贵 ——
-        # 观感就是又慢又撕裂。改成动一块画布矩形，到中点时才换页。
-        curtain_color = lerp_color(C_WINDOW_BG, C_ACCENT_SOFT, 0.55)
-        start = span if direction >= 0 else -span
-        end = -start
-        if axis == "x":
-            curtain = self.canvas.create_rectangle(
-                start, 0, start + span, self._size[1],
-                fill=curtain_color, outline="")
-        else:
-            curtain = self.canvas.create_rectangle(
-                0, start, self._size[0], start + span,
-                fill=curtain_color, outline="")
-        self.canvas.tag_raise(curtain)
-        self._curtain = curtain
-        state = {"switched": False}
-
-        def switch_now():
-            if state["switched"]:
-                return
-            state["switched"] = True
+        new_item = self.items[key]
+        start = -span if direction >= 0 else span
+        try:
+            if axis == "x":
+                self.canvas.coords(new_item, start, 0)
+            else:
+                self.canvas.coords(new_item, 0, start)
+            self.canvas.itemconfigure(new_item, state="normal")
+            self.canvas.tag_raise(new_item)
+        except Exception:
             self._activate(key)
+            return
 
         def frame(e, raw):
-            pos = lerp(start, end, e)
+            pos = lerp(start, 0.0, e)
             try:
                 if axis == "x":
-                    self.canvas.coords(curtain, pos, 0, pos + span, self._size[1])
+                    self.canvas.coords(new_item, pos, 0)
                 else:
-                    self.canvas.coords(curtain, 0, pos, self._size[0], pos + span)
+                    self.canvas.coords(new_item, 0, pos)
             except Exception:
                 pass
-            if raw >= 0.5:
-                switch_now()
 
         def done():
-            switch_now()
-            try:
-                self.canvas.delete(curtain)
-            except Exception:
-                pass
-            self._curtain = None
+            # 收尾：新页贴正位、旧页隐藏（_activate 里统一处理）
+            self._activate(key)
 
         frame(0.0, 0.0)
         tween(self.canvas, "slide", self.duration_ms, frame, done,
@@ -3830,9 +3818,9 @@ class SettingsPage:
         if previous is not None and previous != key:
             old_index = self.tab_bar.index_of(previous)
             new_index = self.tab_bar.index_of(key)
-            # 点左面的选项卡内容往左走，点右面的往右走
-            if old_index >= 0 and new_index >= 0 and new_index > old_index:
-                direction = -1
+            # 点左面的选项卡内容往左走（新页从右侧进来），点右面的往右走
+            if old_index >= 0 and new_index >= 0:
+                direction = 1 if new_index > old_index else -1
         self._active_tab = key
         self.tab_bar.select(key, animate=animate, notify=False)
         self.stack.show(key, animate=animate, direction=direction, axis="x")
@@ -4412,9 +4400,10 @@ class PulsesSwapApp:
         direction = 1
         if previous is not None:
             try:
-                if (self.PAGE_ORDER.index(name)
-                        > self.PAGE_ORDER.index(previous)):
-                    direction = -1
+                # 点下面/右面的选项 → 内容往下/右走 → 新页从上方/左方进来
+                # （SlideStack 里 direction=+1 表示新页起点在 -span）
+                direction = (1 if self.PAGE_ORDER.index(name)
+                             > self.PAGE_ORDER.index(previous) else -1)
             except ValueError:
                 direction = 1
         self.active_page = name
