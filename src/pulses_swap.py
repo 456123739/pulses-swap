@@ -1,9 +1,21 @@
 """
 Pulses Swap - 快速枪包切换器
 作者: NimShade
-版本: 2.4.2
+版本: 2.4.3
 描述: Minecraft Tacz 模组枪包快速切换工具
 UI风格: Pulses 水墨淡色主题（customtkinter 圆角版本）
+
+v2.4.3 更新（需求澄清）:
+  - 之前把「去掉图标和动画」理解成整个动效层都关掉 —— 实际要去掉的是
+    「图标动画」，页面/选项卡的滑动、按钮 hover、卡片描边、进度条、
+    Toast 这些全部恢复（ANIMATIONS_ENABLED 重新打开）
+  - 两条循环动效（加载小圆点、引导描边呼吸）一并恢复；开关关掉时它们
+    会自动降级为静态一次到位，不会自递归
+  - 图标仍然保持去掉（侧边栏纯文字）
+  - 修：按钮按下没有反馈 —— 普通按钮的 press_color 默认取了 hover 色，
+    按下与悬停一模一样；现在强调按钮按下用 C_ACCENT_PRESSED（更深一档），
+    普通按钮按下混向强调色 45%，按下/松开都有明确的下压感
+  - 去掉新手引导的绿色描边高亮（Step 1 卡片那圈绿边），引导只留日志文案
 
 v2.4.2 更新（按反馈集中修四类问题）:
   - Win11 窗口变半透明：DWMWA_SYSTEMBACKDROP_TYPE 原来设的是 0(AUTO)，
@@ -34,8 +46,7 @@ v2.4.0 更新（方向调整：去掉图标与动画）:
   - 侧边栏导航改为纯文字（主界面 / 设置 / 日志），不再有任何图标；
     选中态是一块静态圆角药丸
   - 全部过渡动画关闭：页面切换、选项卡切换、按钮 hover、卡片描边、
-    进度条、Toast 入场……一律瞬时到位（ANIMATIONS_ENABLED = False，
-    所有 tween 调用点不变，想恢复动效改这一个开关即可）
+    进度条、Toast 入场……（v2.4.3 已重新打开：去掉的只是图标动画）
   - 随之删掉：自绘矢量图标引擎、烘制脚本 packaging/make_icons.py、
     packaging/icons/ 下的 SVG、以及两条循环动效（加载脉冲、引导呼吸）
   - 保留之前的结构性改动：无顶栏、侧边栏 200px 宽、设置项即时自动保存、
@@ -129,7 +140,7 @@ except ImportError:
     FileSystemEventHandler = object
 
 # ==================== 常量定义 ====================
-VERSION = "2.4.2"
+VERSION = "2.4.3"
 AUTHOR = "NimShade"
 PROJECT_NAME = "Pulses Swap"
 
@@ -649,10 +660,12 @@ def locate_tacz_by_path(path: Path) -> Path | None:
 # 不会出现两条动画互相拉扯；控件销毁后 after 回调由 Tk 自动丢弃。
 _TWEENS: dict = {}
 
-# 动画总开关（需求：去掉图标与动画，界面保持静态、瞬时切换）。
-# 关掉时 tween() 直接把终态画上、on_done 立即回调 —— 所有调用点不用改，
-# 想恢复动效把这里改成 True 即可（两条循环动效已随图标一起删除，不会有自递归）。
-ANIMATIONS_ENABLED = False
+# 动画总开关。
+# 需求澄清：要去掉的是「图标动画」，不是页面/选项卡的滑动动画 ——
+# 图标已经整体去掉，动画全部保留，所以这里是 True。
+# 关掉时 tween() 会把终态直接画上、on_done 立即回调（所有调用点不用改），
+# 需要静态版时把它改成 False 即可（两条循环动效会自动降级为静态，不会自递归）。
+ANIMATIONS_ENABLED = True
 
 
 def clamp01(t):
@@ -1416,9 +1429,12 @@ def make_button(parent, text, command=None, width=None, state="normal", accent=F
     if width is not None:
         kwargs['width'] = width
     if accent:
+        # 按下要更沉一档：之前 press_color 直接用了 hover 色，按下去看不出变化
         return AnimatedButton(parent, C_ACCENT, C_ACCENT_HOVER,
-                               press_color=C_ACCENT_HOVER, **kwargs)
-    return AnimatedButton(parent, C_PANEL_ALT_BG, C_ACCENT_SOFT, **kwargs)
+                               press_color=C_ACCENT_PRESSED, **kwargs)
+    return AnimatedButton(parent, C_PANEL_ALT_BG, C_ACCENT_SOFT,
+                           press_color=lerp_color(C_ACCENT_SOFT, C_ACCENT, 0.45),
+                           **kwargs)
 
 
 def make_entry(parent, textvariable=None, placeholder="", width=None):
@@ -2489,10 +2505,15 @@ class GuideManager:
         self._current: str | None = None
         self._originals: dict = {}
 
-    def register(self, step_name: str, widgets: list,
+    def register(self, step_name: str, widgets: list = None,
                  desc: str = "", colors: tuple = None):
+        """只登记步骤与说明文案。
+
+        需求：去掉控件上的绿色描边高亮（Step 1 卡片那圈绿边），
+        所以 widgets 不再参与显示 —— 引导只通过日志文案提示当前该做哪步。
+        """
         self._steps[step_name] = {
-            'widgets': [w for w in widgets if w is not None],
+            'widgets': [],
             'desc': desc,
             'colors': colors or (C_GUIDE_GLOW, BORDER_W_FOCUS),
         }
@@ -2538,11 +2559,22 @@ class GuideManager:
             pass
 
     def _pulse(self, widget, color):
-        """引导描边（静态高亮；呼吸动画已按需求去掉）。"""
-        try:
-            widget.configure(border_color=color)
-        except Exception:
-            pass
+        """描边呼吸：在强调色与提亮色之间来回缓动（三角波），直到 hide()。"""
+        light = lerp_color(color, "#FFFFFF", 0.6)
+
+        def frame(e, raw):
+            triangle = raw if raw <= 0.5 else (1.0 - raw)
+            try:
+                widget.configure(
+                    border_color=lerp_color(color, light, triangle))
+            except Exception:
+                pass
+
+        frame(0.0, 0.0)
+        if ANIMATIONS_ENABLED:
+            tween(widget, "guide", 1100, frame,
+                  on_done=lambda: self._pulse(widget, color),
+                  easing=ease_linear)
 
     def _restore_all(self):
         for wid, saved in list(self._originals.items()):
@@ -5375,12 +5407,24 @@ class PulsesSwapApp:
 
     # ==================== 加载指示动画 ====================
     def _start_loading_dots(self, prefix="刷新中"):
-        """加载提示（静态文字；动画已按需求去掉）。"""
-        cancel_tween(self.loading_label, "dots")
-        try:
-            self.loading_label.configure(text=f"{prefix}…")
-        except Exception:
-            pass
+        """加载文字脉冲：小圆点逐帧增长（关掉动画时自动降级为静态一次到位）。"""
+        def frame(e, raw):
+            dots = "." * min(3, int(raw * 4))
+            try:
+                self.loading_label.configure(text=f"{prefix}{dots}")
+            except Exception:
+                pass
+
+        frame(0.0, 0.0)
+        if ANIMATIONS_ENABLED:
+            tween(self.loading_label, "dots", 560, frame,
+                  on_done=lambda: self._start_loading_dots(prefix),
+                  easing=ease_linear)
+        else:
+            try:
+                self.loading_label.configure(text=f"{prefix}…")
+            except Exception:
+                pass
 
     def _stop_loading_dots(self):
         cancel_tween(self.loading_label, "dots")
