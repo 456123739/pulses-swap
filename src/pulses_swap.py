@@ -1,9 +1,22 @@
 """
 Pulses Swap - 快速枪包切换器
 作者: NimShade
-版本: 2.4.6
+版本: 2.4.7
 描述: Minecraft Tacz 模组枪包快速切换工具
 UI风格: Pulses 水墨淡色主题（customtkinter 圆角版本）
+
+v2.4.7 更新（列表看着「两个都选中」+ 导入框被裁）:
+  - 预设列表里「已应用」原来用浅绿底色标注，和「选中」高亮是同一个色，
+    看起来像两个都被选中。改成文字前缀「✓ 名字」（绿色字），
+    底色只留给选中态；读取处统一走 preset_name_of() 剥前缀
+  - 导入框文字被裁：CTkScrollbar 默认 200x200，加滚动条时没压高度，
+    把列表容器的请求高度顶到 208，Step2 卡下限因此虚高 140px。
+    滚动条改 height=1（实际高度由 fill="y" 决定）
+  - 左列三张卡下限按实测重设：258 / 292 / 190（原 215/275/138 偏小）
+  - 预设/枪包/最近列表初始行数 6/10/5 → 4/6/4（请求高度只是下限，
+    实际仍随窗口拉伸）
+  - 窗口默认 1280x900、最小 1140x812；启动尺寸按屏幕收口
+    （高分屏下窗口会被放大，避免比屏幕还高）
 
 v2.4.6 更新（动画又慢又撕裂的真因：动画本身太贵）:
   - 页面切换原来是把 Canvas 里的「页面窗口项」整棵控件树搬来搬去，
@@ -173,7 +186,7 @@ except ImportError:
     FileSystemEventHandler = object
 
 # ==================== 常量定义 ====================
-VERSION = "2.4.6"
+VERSION = "2.4.7"
 AUTHOR = "NimShade"
 PROJECT_NAME = "Pulses Swap"
 
@@ -439,20 +452,22 @@ LEFT_COL_W = 340   # 主界面「Step 1/2/3」列宽度（与宣传片布局一�
 SIDEBAR_W  = 200   # 侧边导航栏宽度（原顶栏/菜单入口改为侧边栏页面）
 H_NAV      = 38    # 侧边栏导航项高度
 
-WINDOW_W, WINDOW_H = 1280, 840             # 主窗口（原 1150x760 偏小）
-WINDOW_MIN_W, WINDOW_MIN_H = 1140, 800     # 主窗口最小尺寸（纵向预算见 H_STEP_*_MIN）
+WINDOW_W, WINDOW_H = 1280, 900             # 主窗口（原 1150x760 偏小）
+WINDOW_MIN_W, WINDOW_MIN_H = 1140, 812     # 主窗口最小尺寸（纵向预算见 H_STEP_*_MIN）
 
-# 主界面左列纵向预算（px）。逐项按 FS_*/H_*/PAD_* 令牌累加：
-#   Step1 整合包 ≈ 215 = 标题(12+6+17) + 拖入框 126 + 间隔 6 + 状态两行 36 + 内边距 12
+# 主界面左列纵向预算（px）。逐项按 FS_*/H_*/PAD_* 令牌累加，数值为实测需求：
+#   Step1 整合包 ≈ 258 = 标题 + 拖入框 126 + 状态两行 + 内边距
+#   Step2 预设管理 ≈ 350 = 标题 + 预设列表(4 行) + 导入框 76 + 按钮行 + 内边距
+#   Step3 预设详情 ≈ 190 = 标题 + 三行信息 + 版本号行 + 内边距
 #   Step2 预设   ≈ 275 = 标题 35 + 列表 ≥110 + 导入框 76 + 间隔 10 + 按钮行 32 + 内边距 12
 #   Step3 详情   ≈ 138 = 标题 35 + 三行信息 51 + 版本行(8+32) + 内边距 12
 #   合计 628 + 两个 PAD_GAP(10) = 648
 # 顶栏（原生菜单栏）已移除，最小窗口内容高度 = 800 - 上下 PAD_WINDOW 16 = 784 ≥ 648，
 # 余量 136px 通过 grid 行权重全部给 Step2 的预设列表（它会先被压缩），
 # 因此 Step1/Step3 在任何允许的窗口尺寸下都不会被裁切。
-H_STEP1_MIN = 215
-H_STEP2_MIN = 275
-H_STEP3_MIN = 138
+H_STEP1_MIN = 258
+H_STEP2_MIN = 292
+H_STEP3_MIN = 190
 
 # 覆盖层卡片 (宽, 高)：改为主窗口内覆盖层后高度由内容自适应，这里只取宽度
 DLG_LOCATOR  = (680, 520)   # 数据库定位（含 4 个长文本按钮）
@@ -1558,8 +1573,11 @@ def make_list_scroll(parent, listbox, width=10):
     条目多的时候一格一格跳，手感很卡。这里统一滚 3 行/格，
     并且只在指针位于列表上时生效（返回 "break" 不让事件冒到外层）。
     """
+    # height=1 很关键：CTkScrollbar 默认 200x200，不压下去会把列表容器
+    # 的「请求高度」顶到 200+，卡片下限跟着虚高，导入框就会被挤出卡片。
+    # 实际高度由 pack(fill="y") 决定，这里只要请求值够小。
     bar = ctk.CTkScrollbar(
-        parent, width=px(width), corner_radius=R_PROGRESS,
+        parent, width=px(width), height=1, corner_radius=R_PROGRESS,
         fg_color="transparent", button_color=C_BORDER,
         button_hover_color=C_ACCENT, command=listbox.yview)
     listbox.configure(yscrollcommand=bar.set)
@@ -2894,6 +2912,16 @@ class TaczWatcher:
 
 
 # ==================== 预设数据管理 ====================
+PRESET_MARK_APPLIED = "✓ "
+
+
+def preset_name_of(row_text: str) -> str:
+    """列表行文本 → 预设名（「已应用」前缀不算名字）。"""
+    if row_text.startswith(PRESET_MARK_APPLIED):
+        return row_text[len(PRESET_MARK_APPLIED):]
+    return row_text
+
+
 class PresetManager:
     PROTECTED_FILES = ['tacz-pre.toml', '.export-state.json', 'blacklist.txt']
     PROTECTED_DIRS = ['tacz_default_gun']
@@ -4093,7 +4121,17 @@ class PulsesSwapApp:
     def __init__(self, root):
         self.root = root
         self.root.title(f"{PROJECT_NAME} v{VERSION}")
-        self.root.geometry(f"{WINDOW_W}x{WINDOW_H}")
+        # 高分屏下窗口会被 window_scaling 放大，启动尺寸要按屏幕收口，
+        # 否则 125%/150% 时窗口可能比屏幕还高。
+        try:
+            scr_w = int(self.root.winfo_screenwidth() or WINDOW_W)
+            scr_h = int(self.root.winfo_screenheight() or WINDOW_H)
+        except Exception:
+            scr_w, scr_h = WINDOW_W, WINDOW_H
+        scale = UI_SCALE if UI_SCALE > 0 else 1.0
+        win_w = int(min(WINDOW_W, max(WINDOW_MIN_W, scr_w / scale - 40)))
+        win_h = int(min(WINDOW_H, max(WINDOW_MIN_H, scr_h / scale - 90)))
+        self.root.geometry(f"{win_w}x{win_h}")
         self.root.minsize(WINDOW_MIN_W, WINDOW_MIN_H)
 
         # ==================== Win11 透明修复 ====================
@@ -4501,7 +4539,7 @@ class PulsesSwapApp:
         self.recent_frame = ctk.CTkFrame(self.recent_wrap, fg_color=C_PANEL_ALT_BG,
                                           corner_radius=R_CONTROL, border_width=BORDER_W,
                                           border_color=C_BORDER_SOFT)
-        self.recent_listbox = Listbox(self.recent_frame, height=5,
+        self.recent_listbox = Listbox(self.recent_frame, height=4,
                                        bg=C_PANEL_ALT_BG, fg=C_TEXT_MAIN,
                                        selectbackground=C_ACCENT_SOFT,
                                        selectforeground=C_ACCENT,
@@ -4541,7 +4579,7 @@ class PulsesSwapApp:
                                          border_color=C_BORDER_SOFT)
         preset_list_wrap.pack(fill=BOTH, expand=True, pady=(0, PAD_GAP))
         attach_hover_glow(preset_list_wrap)
-        self.preset_listbox = Listbox(preset_list_wrap, height=6,
+        self.preset_listbox = Listbox(preset_list_wrap, height=4,
                                        bg=C_CARD_BG, fg=C_TEXT_MAIN,
                                        selectbackground=C_ACCENT_SOFT,
                                        selectforeground=C_ACCENT,
@@ -4680,7 +4718,7 @@ class PulsesSwapApp:
                                           border_color=C_BORDER_SOFT)
         gunpack_list_wrap.pack(fill=BOTH, expand=True)
         attach_hover_glow(gunpack_list_wrap)
-        self.gunpack_listbox = Listbox(gunpack_list_wrap, height=10,
+        self.gunpack_listbox = Listbox(gunpack_list_wrap, height=6,
                                         bg=C_CARD_BG, fg=C_TEXT_MAIN,
                                         selectbackground=C_ACCENT_SOFT,
                                         selectforeground=C_ACCENT,
@@ -5544,7 +5582,7 @@ class PulsesSwapApp:
                 first = list(self.preset_manager.presets.keys())[0]
             if first:
                 for i in range(self.preset_listbox.size()):
-                    if self.preset_listbox.get(i) == first:
+                    if preset_name_of(self.preset_listbox.get(i)) == first:
                         self.preset_listbox.selection_set(i)
                         self.on_preset_selected(None)
                         break
@@ -5716,17 +5754,22 @@ class PulsesSwapApp:
             return
         self.preset_listbox.delete(0, END)
         for name, info in self.preset_manager.presets.items():
-            self.preset_listbox.insert(END, name)
-            if info.get('applied', False):
+            # 「已应用」用文字前缀标注，不用底色 —— 底色是选中态的专属视觉，
+            # 两者都用浅绿会出现「两个都被点亮」的错觉（用户截图反馈过）。
+            applied = bool(info.get('applied', False))
+            self.preset_listbox.insert(
+                END, (PRESET_MARK_APPLIED + name) if applied else name)
+            if applied:
                 idx = self.preset_listbox.size() - 1
-                self.preset_listbox.itemconfig(idx, bg=C_ACCENT_SOFT, fg=C_ACCENT)
+                self.preset_listbox.itemconfig(idx, fg=C_SUCCESS)
         if self.preset_manager.current_preset:
             self.pack_name_label.configure(text=f"当前预设: {self.preset_manager.current_preset}")
         else:
             self.pack_name_label.configure(text="当前预设: 无")
         if self.current_selected_preset:
             for i in range(self.preset_listbox.size()):
-                if self.preset_listbox.get(i) == self.current_selected_preset:
+                if (preset_name_of(self.preset_listbox.get(i))
+                        == self.current_selected_preset):
                     self.preset_listbox.selection_set(i)
                     break
         self._update_sidebar_status()
@@ -5766,7 +5809,7 @@ class PulsesSwapApp:
         sel = self.preset_listbox.curselection()
         if not sel:
             return
-        name = self.preset_listbox.get(sel[0])
+        name = preset_name_of(self.preset_listbox.get(sel[0]))
         self.current_selected_preset = name
         info = self.preset_manager.presets.get(name)
         if not info:
@@ -5800,7 +5843,7 @@ class PulsesSwapApp:
         idx = self.preset_listbox.nearest(event.y)
         if idx < 0:
             return
-        name = self.preset_listbox.get(idx)
+        name = preset_name_of(self.preset_listbox.get(idx))
         info = self.preset_manager.presets.get(name)
         if not info:
             return
@@ -6019,7 +6062,7 @@ class PulsesSwapApp:
             if self.preset_manager.rename_preset(preset_name, new_name):
                 self._update_preset_list()
                 for i in range(self.preset_listbox.size()):
-                    if self.preset_listbox.get(i) == new_name:
+                    if preset_name_of(self.preset_listbox.get(i)) == new_name:
                         self.preset_listbox.selection_set(i)
                         self.on_preset_selected(None)
                         break
@@ -6537,7 +6580,8 @@ class PulsesSwapApp:
             self.refresh_gunpacks(use_cache=False)
             if self.preset_manager and self.preset_manager.current_preset:
                 for i in range(self.preset_listbox.size()):
-                    if self.preset_listbox.get(i) == self.preset_manager.current_preset:
+                    if (preset_name_of(self.preset_listbox.get(i))
+                            == self.preset_manager.current_preset):
                         self.preset_listbox.selection_set(i)
                         self.on_preset_selected(None)
                         break
