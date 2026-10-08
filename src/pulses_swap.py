@@ -1,9 +1,22 @@
 """
 Pulses Swap - 快速枪包切换器
 作者: NimShade
-版本: 2.4.3
+版本: 2.4.4
 描述: Minecraft Tacz 模组枪包快速切换工具
 UI风格: Pulses 水墨淡色主题（customtkinter 圆角版本）
+
+v2.4.4 更新（两个真 bug + 列表滚动）:
+  - 修：按钮点下去什么都不执行 —— AnimatedButton 用了和 CTkButton 同名的
+    私有方法 _on_enter/_on_leave/_on_release，把 CTk 内部「执行 command」
+    的那段覆盖掉了。改名成 _anim_* 后恢复
+  - 修：按钮按下无反馈 —— 普通按钮的 press_color 默认取了 hover 色；
+    强调按钮按下改用 C_ACCENT_PRESSED，普通按钮按下混向强调色 45%
+  - 修：hover_color 交给 CTk 用「目标色」，避免 CTk 的进出/点击动画把
+    逐帧混出来的中间色顶掉
+  - 三个列表框（枪包 / 预设 / 最近）都配了细滚动条，滚轮改成 3 行/格
+    （Tk 默认一格一行，条目多时手感很卡）
+  - 兜底：加载/刷新结束时无条件解除按钮禁用，避免中途出错把界面锁死
+  - 去掉新手引导的绿色描边（Step 1 那圈绿边），引导只留日志文案
 
 v2.4.3 更新（需求澄清）:
   - 之前把「去掉图标和动画」理解成整个动效层都关掉 —— 实际要去掉的是
@@ -140,7 +153,7 @@ except ImportError:
     FileSystemEventHandler = object
 
 # ==================== 常量定义 ====================
-VERSION = "2.4.3"
+VERSION = "2.4.4"
 AUTHOR = "NimShade"
 PROJECT_NAME = "Pulses Swap"
 
@@ -893,7 +906,10 @@ class AnimatedButton(ctk.CTkButton):
     def __init__(self, master, base_color, hover_target, press_color=None,
                  **kwargs):
         kwargs["fg_color"] = base_color
-        kwargs["hover_color"] = base_color
+        # hover_color 交给 CTk 用「目标色」：CTk 自己也会在进出/点击动画里
+        # 瞬时刷一次颜色，如果这里填底色，就会把我逐帧混出来的中间色顶掉
+        # （表现是 hover 一下又弹回原色）。填目标色两边一致，不会打架。
+        kwargs["hover_color"] = hover_target
         super().__init__(master, **kwargs)
         self._base_color = base_color
         self._hover_target = hover_target
@@ -901,10 +917,10 @@ class AnimatedButton(ctk.CTkButton):
         self._current = base_color
         self._hovering = False
         try:
-            self.bind("<Enter>", self._on_enter, add="+")
-            self.bind("<Leave>", self._on_leave, add="+")
-            self.bind("<ButtonPress-1>", self._on_press, add="+")
-            self.bind("<ButtonRelease-1>", self._on_release, add="+")
+            self.bind("<Enter>", self._anim_enter, add="+")
+            self.bind("<Leave>", self._anim_leave, add="+")
+            self.bind("<ButtonPress-1>", self._anim_press, add="+")
+            self.bind("<ButtonRelease-1>", self._anim_release, add="+")
         except Exception:
             pass
 
@@ -935,23 +951,27 @@ class AnimatedButton(ctk.CTkButton):
         frame(0.0, 0.0)
         tween(self, "bg", duration, frame, easing=ease_out_cubic)
 
-    def _on_enter(self, _event=None):
+    # 注意：处理函数一律用 _anim_* 命名，绝不能叫 _on_enter/_on_leave/
+    # _on_release —— CTkButton 在 __init__ 里 bind("<ButtonRelease-1>",
+    # self._on_release)，那是它执行 command 的地方；一旦被同名覆盖，
+    # 按钮就变成「点下去什么都不执行」。
+    def _anim_enter(self, _event=None):
         self._hovering = True
         self._reassert()
         if self._enabled():
             self._to(self._hover_target)
 
-    def _on_leave(self, _event=None):
+    def _anim_leave(self, _event=None):
         self._hovering = False
         self._reassert()
         self._to(self._base_color)
 
-    def _on_press(self, _event=None):
+    def _anim_press(self, _event=None):
         self._reassert()
         if self._enabled():
             self._to(self._press_color, 70)
 
-    def _on_release(self, _event=None):
+    def _anim_release(self, _event=None):
         self._reassert()
         if not self._enabled():
             return
@@ -1460,6 +1480,40 @@ def make_display_box(parent, text="", width=None, height=H_CONTROL):
                           fg_color="transparent")
     label.pack(fill=BOTH, expand=True, padx=PAD_INNER)
     return frame, label
+
+
+def make_list_scroll(parent, listbox, width=10):
+    """给 tk.Listbox 配一条细滚动条 + 顺滑滚轮。
+
+    tk.Listbox 本身没有滚动条（要自己配），而且默认滚轮是「一格一行」，
+    条目多的时候一格一格跳，手感很卡。这里统一滚 3 行/格，
+    并且只在指针位于列表上时生效（返回 "break" 不让事件冒到外层）。
+    """
+    bar = ctk.CTkScrollbar(
+        parent, width=px(width), corner_radius=R_PROGRESS,
+        fg_color="transparent", button_color=C_BORDER,
+        button_hover_color=C_ACCENT, command=listbox.yview)
+    listbox.configure(yscrollcommand=bar.set)
+
+    def _scroll(units):
+        listbox.yview_scroll(units, "units")
+        return "break"
+
+    def _on_wheel(event):
+        delta = getattr(event, "delta", 0) or 0
+        return _scroll(-3 if delta > 0 else 3)
+
+    def _on_wheel_x11(event):
+        return _scroll(-3 if event.num == 4 else 3)
+
+    for seq, fn in (("<MouseWheel>", _on_wheel),
+                    ("<Button-4>", _on_wheel_x11),
+                    ("<Button-5>", _on_wheel_x11)):
+        try:
+            listbox.bind(seq, fn, add="+")
+        except Exception:
+            pass
+    return bar
 
 
 def make_label(parent, text="", fg=None, bg=None, font_size=FS_BODY, bold=False,
@@ -4374,7 +4428,12 @@ class PulsesSwapApp:
                                        relief='flat', highlightthickness=0,
                                        font=(FONT_FAMILY,
                                              max(1, int(FS_SMALL * UI_SCALE))))
-        self.recent_listbox.pack(fill=BOTH, expand=True, padx=PAD_TIGHT, pady=PAD_TIGHT)
+        self.recent_scroll = make_list_scroll(self.recent_frame,
+                                               self.recent_listbox, width=8)
+        self.recent_listbox.pack(side=LEFT, fill=BOTH, expand=True,
+                                  padx=(PAD_TIGHT, 0), pady=PAD_TIGHT)
+        self.recent_scroll.pack(side=RIGHT, fill=Y, padx=(2, PAD_TIGHT),
+                                 pady=PAD_TIGHT)
         self.recent_listbox.bind('<Double-Button-1>', self.on_recent_double_click)
 
         # 状态标签
@@ -4409,7 +4468,12 @@ class PulsesSwapApp:
                                        relief='flat', highlightthickness=0,
                                        font=(FONT_FAMILY,
                                              max(1, int(FS_BODY * UI_SCALE))))
-        self.preset_listbox.pack(fill=BOTH, expand=True, padx=PAD_XS, pady=PAD_XS)
+        self.preset_scroll = make_list_scroll(preset_list_wrap,
+                                               self.preset_listbox)
+        self.preset_listbox.pack(side=LEFT, fill=BOTH, expand=True,
+                                  padx=(PAD_XS, 0), pady=PAD_XS)
+        self.preset_scroll.pack(side=RIGHT, fill=Y, padx=(2, PAD_XS),
+                                 pady=PAD_XS)
         self.preset_listbox.bind('<<ListboxSelect>>', self.on_preset_selected)
         self.preset_listbox.bind('<Button-3>', self.show_preset_context_menu)
 
@@ -4543,7 +4607,12 @@ class PulsesSwapApp:
                                         relief='flat', highlightthickness=0,
                                         font=(FONT_FAMILY,
                                               max(1, int(FS_BODY * UI_SCALE))))
-        self.gunpack_listbox.pack(fill=BOTH, expand=True, padx=PAD_XS, pady=PAD_XS)
+        self.gunpack_scroll = make_list_scroll(gunpack_list_wrap,
+                                                self.gunpack_listbox)
+        self.gunpack_listbox.pack(side=LEFT, fill=BOTH, expand=True,
+                                   padx=(PAD_XS, 0), pady=PAD_XS)
+        self.gunpack_scroll.pack(side=RIGHT, fill=Y, padx=(2, PAD_XS),
+                                  pady=PAD_XS)
 
         self.apply_btn = make_button(right_panel, "Step 4 · 一键替换",
                                       command=self.apply_preset,
@@ -5356,14 +5425,26 @@ class PulsesSwapApp:
         try:
             self.preset_manager.load_all_presets(use_cache=True)
         except Exception as e:
+            safe_print("加载预设线程出错:", traceback.format_exc())
             self.log_manager.log(f"加载预设失败: {e}", 'ERROR')
         finally:
+            # 无论成功失败都要回到主线程收尾（否则按钮会一直锁着）
             ui_call(self.root, self._on_presets_loaded)
 
     def _on_presets_loaded(self):
+        # 兜底放在最前面：只要回调跑到，界面就绝不能留在「按钮全禁用」的状态。
+        # 之前加载线程一旦出错，_disable_buttons(True) 就再也解不开，
+        # 表现就是「所有按钮按下去都没反应」。
         self.loading_presets = False
         self._stop_loading_dots()
         self._disable_buttons(False)
+        try:
+            self._on_presets_loaded_body()
+        except Exception as exc:
+            safe_print("预设加载完成回调出错:", traceback.format_exc())
+            self.log_manager.log(f"预设加载完成回调出错: {exc}", 'ERROR')
+
+    def _on_presets_loaded_body(self):
         self._update_preset_list()
         # 单行日志模式下这条就是「加载完成」的主信息（细节条目见完整日志）
         pack_name = (self.current_pack_path.name
@@ -5586,12 +5667,17 @@ class PulsesSwapApp:
             ui_call(self.root, self._on_refresh_presets_done)
 
     def _on_refresh_presets_done(self):
+        # 同上：先解锁，再做其余收尾
         self.loading_presets = False
         self._stop_loading_dots()
         self._disable_buttons(False)
-        self._update_preset_list()
-        self.log_manager.log("预设列表刷新完成", 'INFO', verbose=True)
-        self._update_guide()
+        try:
+            self._update_preset_list()
+            self.log_manager.log("预设列表刷新完成", 'INFO', verbose=True)
+            self._update_guide()
+        except Exception as exc:
+            safe_print("预设刷新回调出错:", traceback.format_exc())
+            self.log_manager.log(f"预设刷新回调出错: {exc}", 'ERROR')
 
     def on_preset_selected(self, event):
         if not self.preset_manager or self.loading_presets:
