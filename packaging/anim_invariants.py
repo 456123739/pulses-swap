@@ -52,37 +52,37 @@ def sample(start, duration_ms, sampler, steps=14):
 pump(900)
 canvas = app.stack.canvas
 
-# ── 1. 侧边栏切页：两页必须严格拼接（无缝、不重叠） ──
-print("== 1. 侧边栏切页：任意中间帧两页严格拼接 ==")
+# ── 1. 侧边栏切页：走位图路径，控件树一动不动 ──
+print("== 1. 侧边栏切页：只搬位图，活控件树不动 ==")
 app.show_page("home")
-pump(600)
-span = app.stack._size[1]
+pump(700)
+for _p in ("settings", "log", "home"):
+    app.show_page(_p)
+    pump(700)
+check("三页快照齐备", sorted(app.stack._shots) == ["home", "log", "settings"],
+      sorted(app.stack._shots))
 
 
 def sampler_page():
-    # 注意顺序：新页 settings 在前，旧页 home 在后
+    imgs = [i for i in canvas.find_all() if canvas.type(i) == "image"]
     return (canvas.coords(app.stack.items["settings"])[1],
             canvas.coords(app.stack.items["home"])[1],
-            app.stack.frames["settings"].winfo_height())
+            (canvas.coords(imgs[-1])[1] if imgs else None))
 
 
 rows = sample(lambda: app.show_page("settings"), 260, sampler_page)
-new_ys = [r[0] for r in rows]
-old_ys = [r[1] for r in rows]
-check("旧页全程留在原地（整页铺满视口 → 不会露底色）",
-      all(abs(y) < 1.5 for y in old_ys), [round(y, 1) for y in old_ys[:5]])
-check("新页在视口范围内单调滑入（-span → 0，不回弹）",
-      all(-span - 1 <= y <= 1 for y in new_ys)
-      and all(a <= b + 0.6 for a, b in zip(new_ys, new_ys[1:]))
-      and new_ys[0] < new_ys[-1], [round(y, 1) for y in new_ys[:6]])
-check("滑动过程中新页尺寸始终等于视口",
-      all(h == app.stack.canvas.winfo_height() for _n, _o, h in rows),
-      {h for _n, _o, h in rows})
-check("结束后新页贴正位、旧页停到视口外（停靠走 x 轴）",
-      tuple(canvas.coords(app.stack.items["settings"]))[:2] == (0.0, 0.0)
-      and abs(canvas.coords(app.stack.items["home"])[0]) > 1,
-      (canvas.coords(app.stack.items["settings"])[:2],
-       canvas.coords(app.stack.items["home"])[:2]))
+live_new = [r[0] for r in rows]
+live_old = [r[1] for r in rows]
+img_ys = [r[2] for r in rows if r[2] is not None]
+check("走位图路径（有图片项在动）", len(img_ys) > 6, len(img_ys))
+check("位图单调滑入（-span → 0）",
+      img_ys and all(a <= b + 0.6 for a, b in zip(img_ys, img_ys[1:])),
+      [round(y, 1) for y in img_ys[:6]])
+check("滑动期间活控件树一动不动（不会 remap 闪白）",
+      live_new and all(abs(y - live_new[0]) < 0.01 for y in live_new),
+      live_new[:4])
+check("旧页也保持停靠不动", live_old and all(abs(y - live_old[0]) < 0.01
+                                        for y in live_old), live_old[:4])
 
 # ── 2. 设置页选项卡：同样必须拼接 ──
 print("== 2. 设置页选项卡切换：任意中间帧严格拼接 ==")

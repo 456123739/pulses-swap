@@ -1,9 +1,18 @@
 """
 Pulses Swap - 快速枪包切换器
 作者: NimShade
-版本: 2.4.12
+版本: 2.4.13
 描述: Minecraft Tacz 模组枪包快速切换工具
 UI风格: Pulses 水墨淡色主题（customtkinter 圆角版本）
+
+v2.4.13 更新（中间帧控件闪白的根治：切页只搬位图）:
+  - 现象：切换页面时中间某一帧所有控件变成白色（用户说的「插帧」）
+  - 机制：Tk 会把移出 Canvas 可视区的窗口项 unmap，滑回来时再 remap；
+    remap 那一下控件重新绘制，在 Windows 上就是一片白
+  - 修法：切页动画期间只搬两张**静态位图快照**，活的控件树一动不动 ——
+    不触发 unmap/remap，任何平台都不会闪白。页面每次落定后自动补拍快照
+    （延后 180ms 等布局绘制落定），拍不到就退回原路径，功能不受影响
+  - 配合 v2.4.12 的定时器精度（1ms）与 40/60fps 分档，动画应当既顺且稳
 
 v2.4.12 更新（Windows 上卡顿的两处根源）:
   - Windows 默认定时器精度约 15.6ms：after(17) 实际会变成 ~31ms，
@@ -234,7 +243,7 @@ except ImportError:
     FileSystemEventHandler = object
 
 # ==================== 常量定义 ====================
-VERSION = "2.4.12"
+VERSION = "2.4.13"
 AUTHOR = "NimShade"
 PROJECT_NAME = "Pulses Swap"
 
@@ -1428,6 +1437,11 @@ class SlideStack:
         self.order = []
         self.current = None
         self._size = (1, 1)
+        # 页面快照：切换动画期间只搬位图，不搬控件树
+        # （搬控件树时 Tk 会把移出可视区的窗口项 unmap/remap，
+        #   Windows 上 remap 那一下控件会闪成白的 —— 用户反馈的「插帧」）
+        self._shots = {}
+        self._slide_imgs = None
         self.canvas.bind("<Configure>", self._on_configure)
 
     def add(self, key, frame):
@@ -1497,6 +1511,12 @@ class SlideStack:
         new_item = self.items[key]
         old_item = self.items.get(previous)
         start = -span if direction >= 0 else span      # 新页起点
+        # 有快照就只搬位图（控件树一动不动，不会出现 remap 闪白）
+        old_shot = self._shots.get(previous)
+        new_shot = self._shots.get(key)
+        if old_shot is not None and new_shot is not None:
+            self._slide_images(key, start, old_shot, new_shot, axis, span)
+            return
         try:
             # 旧页留在原地当背景（它整页不透明，天然铺满视口，不会露底色），
             # 只搬新页 —— 每帧只搬一棵控件树，开销是对开推入的一半。
@@ -1552,6 +1572,81 @@ class SlideStack:
         except Exception:
             pass
 
+    def _capture(self, key):
+        """给正在显示的页面拍一张位图，供切换动画当素材。失败返回 None。"""
+        try:
+            from PIL import ImageGrab, ImageTk
+        except Exception:
+            return None
+        try:
+            w, h = int(self._size[0]), int(self._size[1])
+            if w < 16 or h < 16:
+                return None
+            cv = self.canvas
+            x, y = cv.winfo_rootx(), cv.winfo_rooty()
+            img = ImageGrab.grab(bbox=(x, y, x + w, y + h))
+            return ImageTk.PhotoImage(img)
+        except Exception:
+            return None
+
+    def _schedule_capture(self, key):
+        """页面稳定后补拍快照（延后一点，等布局与绘制落定）。"""
+        def _do():
+            if key != self.current:
+                return
+            shot = self._capture(key)
+            if shot is not None:
+                self._shots[key] = shot
+        try:
+            self.canvas.after(180, _do)
+        except Exception:
+            pass
+
+    def _slide_images(self, key, start, old_shot, new_shot, axis, span):
+        """只搬两张位图的切换动画：控件树全程不动，任何平台都不会闪白。"""
+        cv = self.canvas
+        park = self._park_position()
+        for item in self.items.values():
+            try:
+                cv.coords(item, park, 0)
+                cv.itemconfigure(item, state="normal")
+            except Exception:
+                pass
+        try:
+            if axis == "x":
+                old_img = cv.create_image(0, 0, anchor="nw", image=old_shot)
+                new_img = cv.create_image(start, 0, anchor="nw", image=new_shot)
+            else:
+                old_img = cv.create_image(0, 0, anchor="nw", image=old_shot)
+                new_img = cv.create_image(0, start, anchor="nw", image=new_shot)
+        except Exception:
+            self._activate(key)
+            return
+        self._slide_imgs = (old_img, new_img)
+
+        def frame(e, raw):
+            pos = lerp(start, 0.0, e)
+            try:
+                if axis == "x":
+                    cv.coords(new_img, pos, 0)
+                else:
+                    cv.coords(new_img, 0, pos)
+            except Exception:
+                pass
+
+        def done():
+            for it in (old_img, new_img):
+                try:
+                    cv.delete(it)
+                except Exception:
+                    pass
+            self._slide_imgs = None
+            self._activate(key)
+
+        frame(0.0, 0.0)
+        tween(cv, "slide", self.duration_ms, frame, done,
+              easing=self.easing, fps=FPS_MOVE)
+
     def _park_position(self):
         """停靠点：视口右侧外一屏。"""
         span = float(self._size[0] if self._size[0] > 1 else 1)
@@ -1578,6 +1673,8 @@ class SlideStack:
                 self.canvas.itemconfigure(item, state="normal")
             except Exception:
                 pass
+        # 页面落定后补拍快照，供下一次切换当素材
+        self._schedule_capture(key)
 
 
 class Toast:
