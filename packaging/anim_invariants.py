@@ -67,12 +67,14 @@ def sampler_page():
 
 
 rows = sample(lambda: app.show_page("settings"), 260, sampler_page)
-gaps = [round(old_y - new_y - span, 2) for new_y, old_y, _h in rows]
-check("每一帧 旧页y - 新页y 都正好等于视口高度（无缝拼接）",
-      all(abs(g) < 1.5 for g in gaps), gaps)
-check("两页始终铺满视口（新页 y 单调从 -span 到 0）",
-      all(-span - 1 <= ny <= 1 for ny, _o, _h in rows)
-      and rows[0][0] < rows[-1][0], [round(r[0], 1) for r in rows])
+new_ys = [r[0] for r in rows]
+old_ys = [r[1] for r in rows]
+check("旧页全程留在原地（整页铺满视口 → 不会露底色）",
+      all(abs(y) < 1.5 for y in old_ys), [round(y, 1) for y in old_ys[:5]])
+check("新页在视口范围内单调滑入（-span → 0，不回弹）",
+      all(-span - 1 <= y <= 1 for y in new_ys)
+      and all(a <= b + 0.6 for a, b in zip(new_ys, new_ys[1:]))
+      and new_ys[0] < new_ys[-1], [round(y, 1) for y in new_ys[:6]])
 check("滑动过程中新页尺寸始终等于视口",
       all(h == app.stack.canvas.winfo_height() for _n, _o, h in rows),
       {h for _n, _o, h in rows})
@@ -94,15 +96,21 @@ pump(300)
 
 
 def sampler_tab():
-    return (tabs.coords(sp.stack.items["general"])[0],
-            tabs.coords(sp.stack.items["about"])[0],
+    # 顺序：新页 about 在前，旧页 general 在后
+    return (tabs.coords(sp.stack.items["about"])[0],
+            tabs.coords(sp.stack.items["general"])[0],
             sp.stack.frames["about"].winfo_width())
 
 
 rows2 = sample(lambda: sp.show_tab("about"), 260, sampler_tab)
-gaps2 = [round(abs(old_x - new_x) - span_x, 2) for new_x, old_x, _w in rows2]
-check("每一帧两选项卡 x 间距都正好等于视口宽度",
-      all(abs(g) < 1.5 for g in gaps2), gaps2)
+new_xs = [r[0] for r in rows2]
+old_xs = [r[1] for r in rows2]
+check("旧选项卡留在原地（铺满视口 → 不露底色）",
+      all(abs(x) < 1.5 for x in old_xs), [round(x, 1) for x in old_xs[:5]])
+check("新选项卡在视口范围内单调滑入",
+      all(-span_x - 1 <= x <= 1 for x in new_xs)
+      and all(a <= b + 0.6 for a, b in zip(new_xs, new_xs[1:])),
+      [round(x, 1) for x in new_xs[:6]])
 check("选项卡尺寸始终等于视口",
       all(w == tabs.winfo_width() for _n, _o, w in rows2),
       {w for _n, _o, w in rows2})

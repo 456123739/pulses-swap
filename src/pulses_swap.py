@@ -1,9 +1,18 @@
 """
 Pulses Swap - 快速枪包切换器
 作者: NimShade
-版本: 2.4.11
+版本: 2.4.12
 描述: Minecraft Tacz 模组枪包快速切换工具
 UI风格: Pulses 水墨淡色主题（customtkinter 圆角版本）
+
+v2.4.12 更新（Windows 上卡顿的两处根源）:
+  - Windows 默认定时器精度约 15.6ms：after(17) 实际会变成 ~31ms，
+    60fps 的补间直接掉到 30fps —— 观感就是「一卡一卡」。
+    启动时 timeBeginPeriod(1) 把精度提到 1ms（退出时还回去）
+  - 切页动画改成「覆盖式」：旧页留在原地当背景（整页不透明，天然铺满
+    视口），只搬新页 —— 每帧只搬一棵控件树，开销是对开推入的一半
+  - 新增实测帧率日志（完整日志模式可见）：「动画实测: N 帧 ·
+    平均帧间隔 X ms (≈Y fps)」，卡不卡用数字说话
 
 v2.4.11 更新（逐个动画审计中间帧）:
   - 新增中间帧不变量审计：把每个动画逐帧采样，断言几何/颜色不变量
@@ -225,7 +234,7 @@ except ImportError:
     FileSystemEventHandler = object
 
 # ==================== 常量定义 ====================
-VERSION = "2.4.11"
+VERSION = "2.4.12"
 AUTHOR = "NimShade"
 PROJECT_NAME = "Pulses Swap"
 
@@ -599,6 +608,30 @@ def start_ui_pump(root, interval_ms: int = 25) -> None:
 UI_SCALE = 1.0
 
 
+def enable_high_resolution_timer() -> None:
+    """Windows 默认定时器精度约 15.6ms：after(17) 实际会变成 ~31ms，
+    60fps 的补间直接掉到 30fps，观感就是「一卡一卡」。
+
+    timeBeginPeriod(1) 把精度提到 1ms（用完在退出时 timeEndPeriod 还回去）。
+    非 Windows 平台无事发生。
+    """
+    if not IS_WINDOWS:
+        return
+    try:
+        ctypes.windll.winmm.timeBeginPeriod(1)
+    except Exception:
+        pass
+
+
+def release_high_resolution_timer() -> None:
+    if not IS_WINDOWS:
+        return
+    try:
+        ctypes.windll.winmm.timeEndPeriod(1)
+    except Exception:
+        pass
+
+
 def enable_dpi_awareness() -> float:
     """声明 DPI 感知并返回系统缩放系数（1.0 / 1.25 / 1.5 …）。
 
@@ -855,6 +888,27 @@ def cancel_all_tweens(widget):
         cancel_tween(widget, token[1])
 
 
+_FPS_LOG = {"interval": None, "total_ms": 0.0, "frames": 0}
+
+
+def _note_frame_time(interval_ms: float) -> None:
+    """累计补间帧间隔，切换结束后由调用方读出来记日志。"""
+    _FPS_LOG["interval"] = interval_ms
+    _FPS_LOG["total_ms"] += interval_ms
+    _FPS_LOG["frames"] += 1
+
+
+def take_frame_stats() -> tuple:
+    """取走累计的帧统计 → (平均帧间隔ms, 帧数)，并清零。"""
+    frames = _FPS_LOG["frames"]
+    total = _FPS_LOG["total_ms"]
+    _FPS_LOG["frames"] = 0
+    _FPS_LOG["total_ms"] = 0.0
+    if frames <= 0 or total <= 0:
+        return (0.0, 0)
+    return (total / frames, frames)
+
+
 def tween(widget, key, duration_ms, on_frame, on_done=None,
           easing=ease_out_cubic, fps=60):
     """
@@ -882,13 +936,17 @@ def tween(widget, key, duration_ms, on_frame, on_done=None,
     max_frames = int(duration_ms / interval) + 3
     token = (id(widget), key)
     start = time.perf_counter()
-    state = {"frames": 0}
+    state = {"frames": 0, "last": None}
 
     def step():
         if token not in _TWEENS:
             return
         state["frames"] += 1
-        elapsed = (time.perf_counter() - start) * 1000.0
+        now = time.perf_counter()
+        if state.get("last") is not None:
+            _note_frame_time((now - state["last"]) * 1000.0)
+        state["last"] = now
+        elapsed = (now - start) * 1000.0
         raw = clamp01(elapsed / duration_ms)
         if state["frames"] >= max_frames:
             raw = 1.0
@@ -1439,31 +1497,31 @@ class SlideStack:
         new_item = self.items[key]
         old_item = self.items.get(previous)
         start = -span if direction >= 0 else span      # 新页起点
-        exit_pos = span if direction >= 0 else -span   # 旧页去向（反向）
         try:
+            # 旧页留在原地当背景（它整页不透明，天然铺满视口，不会露底色），
+            # 只搬新页 —— 每帧只搬一棵控件树，开销是对开推入的一半。
+            if old_item is not None:
+                if axis == "x":
+                    self.canvas.coords(old_item, 0, 0)
+                else:
+                    self.canvas.coords(old_item, 0, 0)
+                self.canvas.itemconfigure(old_item, state="normal")
             if axis == "x":
                 self.canvas.coords(new_item, start, 0)
             else:
                 self.canvas.coords(new_item, 0, start)
             self.canvas.itemconfigure(new_item, state="normal")
-            if old_item is not None:
-                self.canvas.itemconfigure(old_item, state="normal")
         except Exception:
             self._activate(key)
             return
 
         def frame(e, raw):
             pos = lerp(start, 0.0, e)
-            old_pos = lerp(0.0, exit_pos, e)
             try:
                 if axis == "x":
                     self.canvas.coords(new_item, pos, 0)
-                    if old_item is not None:
-                        self.canvas.coords(old_item, old_pos, 0)
                 else:
                     self.canvas.coords(new_item, 0, pos)
-                    if old_item is not None:
-                        self.canvas.coords(old_item, 0, old_pos)
             except Exception:
                 pass
 
@@ -4511,6 +4569,17 @@ class PulsesSwapApp:
         self.active_page = name
         self._update_nav_state(name, animate=animate)
         self.stack.show(name, animate=animate, direction=direction, axis="y")
+        if animate:
+            # 切页动画结束后记一次实测帧率（完整日志可见）：
+            # 卡不卡用数字说话，不靠感觉。
+            def _log_fps():
+                interval, frames = take_frame_stats()
+                if frames > 3:
+                    self.log_manager.log(
+                        f"动画实测: {frames} 帧 · 平均帧间隔 {interval:.1f}ms "
+                        f"(≈{1000 / max(interval, 0.01):.0f}fps)",
+                        'INFO', verbose=True)
+            ui_call(self.root, lambda: self.root.after(340, _log_fps))
         if name == "settings" and self.settings_page is not None:
             self.settings_page.reload()
 
@@ -6875,6 +6944,8 @@ def main():
     _set_app_user_model_id()
     # 第二件：DPI 感知也要在窗口创建之前声明，否则 Windows 会拉伸位图（字糊）
     detected_scale = enable_dpi_awareness()
+    # 第三件：把 Windows 定时器精度提到 1ms，否则补间只有 ~30fps（一卡一卡）
+    enable_high_resolution_timer()
     if HAS_DND:
         try:
             root = TkinterDnD.Tk()
