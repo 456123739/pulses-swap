@@ -1,9 +1,18 @@
 """
 Pulses Swap - 快速枪包切换器
 作者: NimShade
-版本: 2.4.9
+版本: 2.4.10
 描述: Minecraft Tacz 模组枪包快速切换工具
 UI风格: Pulses 水墨淡色主题（customtkinter 圆角版本）
+
+v2.4.10 更新（动画撕裂的真因：隐藏的页面尺寸是错的）:
+  - 撕裂根因：Canvas 窗口项在 state="hidden" 期间不会被 Tk 调整尺寸，
+    实测设置页/日志页停在 384x483（CTk 默认尺寸），一显示就带着这个尺寸
+    滑进来 —— 四周露出下面那页的内容，看起来就是撕裂/割裂
+  - 改成「停到视口外」而不是隐藏：三页始终 map，尺寸永远等于画布
+    （实测三页都是 1064x883）；切换时两页对开推入，任意时刻正好铺满
+    视口，既不露底色也不重叠
+  - 这样也顺带消掉了「首次显示要重新布局」的开销，配合预热，切页不再延迟
 
 v2.4.9 更新（切页「延迟很久」与「关闭后选不了包」）:
   - 切页延迟的真因：Canvas 窗口项第一次被 map 时，Tk 要跑一遍整棵控件树
@@ -207,7 +216,7 @@ except ImportError:
     FileSystemEventHandler = object
 
 # ==================== 常量定义 ====================
-VERSION = "2.4.9"
+VERSION = "2.4.10"
 AUTHOR = "NimShade"
 PROJECT_NAME = "Pulses Swap"
 
@@ -1419,25 +1428,33 @@ class SlideStack:
             return
 
         new_item = self.items[key]
-        start = -span if direction >= 0 else span
+        old_item = self.items.get(previous)
+        start = -span if direction >= 0 else span      # 新页起点
+        exit_pos = span if direction >= 0 else -span   # 旧页去向（反向）
         try:
             if axis == "x":
                 self.canvas.coords(new_item, start, 0)
             else:
                 self.canvas.coords(new_item, 0, start)
             self.canvas.itemconfigure(new_item, state="normal")
-            self.canvas.tag_raise(new_item)
+            if old_item is not None:
+                self.canvas.itemconfigure(old_item, state="normal")
         except Exception:
             self._activate(key)
             return
 
         def frame(e, raw):
             pos = lerp(start, 0.0, e)
+            old_pos = lerp(0.0, exit_pos, e)
             try:
                 if axis == "x":
                     self.canvas.coords(new_item, pos, 0)
+                    if old_item is not None:
+                        self.canvas.coords(old_item, old_pos, 0)
                 else:
                     self.canvas.coords(new_item, 0, pos)
+                    if old_item is not None:
+                        self.canvas.coords(old_item, 0, old_pos)
             except Exception:
                 pass
 
@@ -1468,16 +1485,30 @@ class SlideStack:
         except Exception:
             pass
 
+    def _park_position(self):
+        """停靠点：视口右侧外一屏。"""
+        span = float(self._size[0] if self._size[0] > 1 else 1)
+        return span
+
     def _activate(self, key):
-        """把指定页摆到正位、其余隐藏（幕布切换与瞬时切换共用）。"""
+        """当前页摆正位，其余**停到视口外**（不是隐藏）。
+
+        为什么不能隐藏：Canvas 窗口项在 state="hidden" 期间不会被 Tk 调整
+        尺寸，再显示时还带着旧尺寸（实测设置页/日志页停在 384x483 的 CTk
+        默认尺寸），滑进来时四周会露出下面那页的内容 —— 就是用户反馈的
+        「撕裂」。一直保持 map、只挪到视口外，尺寸就始终跟画布一致。
+        """
         if key not in self.items:
             return
         self.current = key
+        park = self._park_position()
         for name, item in self.items.items():
             try:
-                self.canvas.coords(item, 0, 0)
-                self.canvas.itemconfigure(
-                    item, state="normal" if name == key else "hidden")
+                if name == key:
+                    self.canvas.coords(item, 0, 0)
+                else:
+                    self.canvas.coords(item, park, 0)
+                self.canvas.itemconfigure(item, state="normal")
             except Exception:
                 pass
 
