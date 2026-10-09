@@ -1,9 +1,24 @@
 """
 Pulses Swap - 快速枪包切换器
 作者: NimShade
-版本: 2.4.14
+版本: 2.4.15
 描述: Minecraft Tacz 模组枪包快速切换工具
 UI风格: Pulses 水墨淡色主题（customtkinter 圆角版本）
+
+v2.4.15 更新（全流程 + 全 UI 操作扫描，修三处漏洞）:
+  - 修：弹窗「先空白、再出内容」—— 遮罩和卡片原来在 __init__ 里立刻摆上去，
+    而调用方是之后才往 body 里塞内容的，于是先看到一张空白卡片。
+    改成 after_idle 等内容建好（同一调用栈跑完）再显示，一出现就是完整的；
+    Toplevel 版同样处理（先 withdraw，内容就绪再 deiconify）
+  - 修：Linux / macOS 上所有「打开文件夹」按钮都无效 —— 原来直接用
+    os.startfile（Windows 专有 API）。新增 open_path() 跨平台实现
+    （Windows startfile / macOS open / Linux xdg-open），6 处调用点统一替换
+  - 新增：枪包列表双击 → 在文件管理器里定位该枪包（原来列表完全没有交互）
+  - 新增 packaging/ui_audit.py：全流程 + 全 UI 操作扫描，覆盖
+    A 遍历所有按钮逐个点击 / B 每种弹窗开关 / C 设置页全部选项 /
+    D 三个列表交互 / E 四条错误路径 / F 窗口尺寸变化后的布局 /
+    G 收尾一致性（无残留遮罩·浮层·补间）/ H 边界用例
+    （超长名称、空 tacz、连点替换、操作中切页、监视器启停）
 
 v2.4.14 更新（真正的元凶：「最近」下拉面板）:
   - 用户指着 Step 1 的「最近」按钮反馈：展开/收起又慢、中间帧控件全白
@@ -220,6 +235,7 @@ import json
 import os
 import queue
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -254,7 +270,7 @@ except ImportError:
     FileSystemEventHandler = object
 
 # ==================== 常量定义 ====================
-VERSION = "2.4.14"
+VERSION = "2.4.15"
 AUTHOR = "NimShade"
 PROJECT_NAME = "Pulses Swap"
 
@@ -1813,6 +1829,27 @@ def make_display_box(parent, text="", width=None, height=H_CONTROL):
     return frame, label
 
 
+def open_path(path) -> bool:
+    """在系统文件管理器里打开路径（Windows / macOS / Linux 都支持）。
+
+    原来直接用 os.startfile —— 那是 Windows 专有 API，Linux 版点了
+    「打开TACZ / 目录 / 数据库」全都静默失败（只往日志里写一条错误）。
+    """
+    target = str(path)
+    try:
+        if IS_WINDOWS:
+            os.startfile(target)
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", target])
+        else:
+            subprocess.Popen(["xdg-open", target],
+                             stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+        return True
+    except Exception:
+        return False
+
+
 def make_list_scroll(parent, listbox, width=10):
     """给 tk.Listbox 配一条细滚动条 + 顺滑滚轮。
 
@@ -2084,16 +2121,20 @@ class OverlayCard(_OverlayCardBase):
         self._esc_funcid = None
         self._var = IntVar(master=self.root)
 
+        # 注意：这里先不 place 遮罩和卡片。
+        # 调用方紧接着才会往 body 里塞内容，如果现在就把遮罩摆上去，
+        # 会先看到一张空白卡片、下一帧内容才出现（用户反馈的
+        # 「先产生空白，然后才展示窗口」）。改成等当前调用栈跑完
+        # （含调用方构建内容）再摆上去，一出现就是完整的。
+        self._revealed = False
+        self._closed = False
         self.mask = ctk.CTkFrame(host.overlay_host, fg_color=C_PANEL_ALT_BG,
                                   corner_radius=0)
-        self.mask.place(relx=0.0, rely=0.0, relwidth=1.0, relheight=1.0)
-        self.mask.lift()
         # height=1 让卡片高度完全由内容决定（CTkFrame 默认 200x200 会撑出空白）
         self.card = ctk.CTkFrame(self.mask, fg_color=C_PANEL_BG,
                                   corner_radius=R_CARD, border_width=BORDER_W,
                                   border_color=C_BORDER_SOFT,
                                   width=width, height=1)
-        self.card.place(relx=0.5, rely=0.5, anchor="center")
         self.body = ctk.CTkFrame(self.card, fg_color="transparent")
         self.body.pack(fill=BOTH, expand=True, padx=PAD_DIALOG, pady=PAD_DIALOG)
 
@@ -2107,8 +2148,27 @@ class OverlayCard(_OverlayCardBase):
             self.mask.focus_set()
         except Exception:
             pass
-        self._play_entrance()
         _OVERLAY_STACK.append(self)
+        # 等调用方把内容塞完（同一调用栈内）再摆上去
+        try:
+            self.root.after_idle(self._reveal)
+        except Exception:
+            self._reveal()
+
+    def _reveal(self):
+        """摆上遮罩与卡片：此时 body 里的内容已经建好并算过尺寸。"""
+        if self._revealed or self._closed:
+            return
+        self._revealed = True
+        try:
+            self.mask.place(relx=0.0, rely=0.0, relwidth=1.0, relheight=1.0)
+            self.mask.lift()
+            self.card.place(relx=0.5, rely=0.5, anchor="center")
+            self.root.update_idletasks()      # 先把内容画出来，再显示
+            self.mask.focus_set()
+        except Exception:
+            pass
+        self._play_entrance()
 
     def _play_entrance(self):
         """卡片入场：从下方 4.5% 处曲线滑到居中，同时描边从强调色淡回发丝色。"""
@@ -2130,6 +2190,7 @@ class OverlayCard(_OverlayCardBase):
         return bool(_OVERLAY_STACK) and _OVERLAY_STACK[-1] is self
 
     def _teardown(self):
+        self._closed = True
         try:
             if _OVERLAY_STACK and _OVERLAY_STACK[-1] is self:
                 _OVERLAY_STACK.pop()
@@ -2171,6 +2232,12 @@ class ToplevelCard(_OverlayCardBase):
         self.window.title(title)
         self.window.geometry(f"{width}x{height}")
         self.window.configure(fg_color=C_WINDOW_BG)
+        # 先藏起来：调用方紧接着才往 body 里塞内容，直接显示会先看到空白窗口
+        self._revealed = False
+        try:
+            self.window.withdraw()
+        except Exception:
+            pass
         # 子窗口图标与主窗口保持一致（apply_window_icon 定义在文件末尾，
         # 运行时才解析，这里调用没有先后顺序问题）
         try:
@@ -2188,6 +2255,22 @@ class ToplevelCard(_OverlayCardBase):
             self.window.protocol("WM_DELETE_WINDOW",
                                   lambda: self.close(escape_value))
             self.window.bind("<Escape>", self._on_escape)
+        except Exception:
+            pass
+        # 等内容建好再显示（同一调用栈跑完）
+        try:
+            parent.after_idle(self._reveal)
+        except Exception:
+            self._reveal()
+
+    def _reveal(self):
+        if self._revealed:
+            return
+        self._revealed = True
+        try:
+            self.window.update_idletasks()
+            self.window.deiconify()
+            self.window.lift()
         except Exception:
             pass
 
@@ -4309,7 +4392,7 @@ class SettingsPage:
         db = self.settings._settings_file.parent if self.settings._settings_file else None
         if db and db.exists():
             try:
-                os.startfile(str(db))
+                open_path(db)
             except Exception:
                 pass
 
@@ -5041,6 +5124,7 @@ class PulsesSwapApp:
                                         relief='flat', highlightthickness=0,
                                         font=(FONT_FAMILY,
                                               max(1, int(FS_BODY * UI_SCALE))))
+        self.gunpack_listbox.bind('<Double-Button-1>', self.on_gunpack_open)
         self.gunpack_scroll = make_list_scroll(gunpack_list_wrap,
                                                 self.gunpack_listbox)
         self.gunpack_listbox.pack(side=LEFT, fill=BOTH, expand=True,
@@ -5201,7 +5285,7 @@ class PulsesSwapApp:
             return
         try:
             if self.current_pack_path.exists():
-                os.startfile(str(self.current_pack_path))
+                open_path(self.current_pack_path)
                 self.log_manager.log(f"已打开整合包路径: {self.current_pack_path}",
                                       'INFO', verbose=True)
             else:
@@ -5209,6 +5293,38 @@ class PulsesSwapApp:
         except Exception as e:
             self.log_manager.log(f"打开整合包路径失败: {e}", 'ERROR')
             show_error("错误", f"打开失败: {e}")
+
+    def on_gunpack_open(self, event=None):
+        """双击枪包：在文件管理器里定位它（已应用 → tacz 目录，否则预设目录）。"""
+        try:
+            sel = self.gunpack_listbox.curselection()
+            if not sel:
+                return
+            name = self.gunpack_listbox.get(sel[0])
+            candidates = []
+            if self.tacz_path:
+                candidates.append(self.tacz_path / name)
+            preset_dir = self._current_preset_dir()
+            if preset_dir:
+                candidates.append(preset_dir / name)
+            for path in candidates:
+                if path.exists():
+                    if open_path(path):
+                        self.log_manager.log(f"已打开枪包位置: {path}", 'INFO',
+                                              verbose=True)
+                    return
+            show_warning("提示", f"找不到枪包位置: {name}")
+        except Exception as exc:
+            self.log_manager.log(f"打开枪包位置失败: {exc}", 'ERROR')
+
+    def _current_preset_dir(self):
+        try:
+            if not self.preset_manager or not self.current_selected_preset:
+                return None
+            info = self.preset_manager.presets.get(self.current_selected_preset)
+            return Path(info["path"]) if info else None
+        except Exception:
+            return None
 
     def open_tacz_folder(self):
         if not self.tacz_path:
@@ -5218,7 +5334,7 @@ class PulsesSwapApp:
             show_error("错误", f"TACZ 路径不存在: {self.tacz_path}")
             return
         try:
-            os.startfile(str(self.tacz_path))
+            open_path(self.tacz_path)
             self.log_manager.log(f"已打开 TACZ 文件夹: {self.tacz_path}", 'INFO',
                                       verbose=True)
         except Exception as e:
@@ -6477,7 +6593,7 @@ class PulsesSwapApp:
         if self.preset_manager.create_preset(name, version):
             path = Path(self.preset_manager.presets[name]['path'])
             try:
-                os.startfile(str(path))
+                open_path(path)
             except Exception:
                 pass
             self._update_preset_list()
@@ -6967,7 +7083,7 @@ class PulsesSwapApp:
             show_warning("提示", "请先加载整合包")
             return
         try:
-            os.startfile(str(self.preset_manager.database_path))
+            open_path(self.preset_manager.database_path)
         except Exception as e:
             self.log_manager.log(f"打开文件夹失败: {e}", 'ERROR')
 
