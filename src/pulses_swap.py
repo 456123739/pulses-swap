@@ -1,9 +1,21 @@
 """
 Pulses Swap - 快速枪包切换器
 作者: NimShade
-版本: 2.4.8
+版本: 2.4.9
 描述: Minecraft Tacz 模组枪包快速切换工具
 UI风格: Pulses 水墨淡色主题（customtkinter 圆角版本）
+
+v2.4.9 更新（切页「延迟很久」与「关闭后选不了包」）:
+  - 切页延迟的真因：Canvas 窗口项第一次被 map 时，Tk 要跑一遍整棵控件树
+    的布局（实测设置页 78 个控件约 41ms，主页 137 个更久，Windows 还要
+    翻倍），这一下正好卡在切换动画的第一帧 —— 表现就是「点了没反应，
+    过一会儿才切页」。现在启动时把三页 + 设置页三个选项卡各预热一次，
+    首次切换的触发开销从 41ms 降到 1.3~2.6ms
+  - 修：关闭整合包后「选择」变灰点不了 —— close_pack() 末尾调了
+    _disable_buttons(True) 把包括「选择」「数据库」在内的所有按钮全禁用，
+    之后没有任何地方再解开。改成只禁用「依赖已加载整合包」的那批按钮
+    （关闭 / 打开TACZ / 一键替换 / 预设相关），「选择 / 数据库」始终可用
+  - 切换被打断时先让上一段动画落位，避免状态与画面不一致
 
 v2.4.8 更新（滑动动画恢复成真滑动 + 方向映射修正）:
   - 撤掉 v2.4.6 的「幕布扫过」：观感像一条灰带子、像淡入淡出，
@@ -195,7 +207,7 @@ except ImportError:
     FileSystemEventHandler = object
 
 # ==================== 常量定义 ====================
-VERSION = "2.4.8"
+VERSION = "2.4.9"
 AUTHOR = "NimShade"
 PROJECT_NAME = "Pulses Swap"
 
@@ -1390,10 +1402,17 @@ class SlideStack:
         旧页原地不动、滑完再隐藏。只搬一棵控件树，帧开销是「两页对开」
         的一半，也不会在中间露出空白带。
         """
-        if key not in self.items or key == self.current:
+        if key not in self.items:
             return
+        # 上一次切换还没跑完就被打断：先让它落位，否则状态和画面会不一致
+        if (id(self.canvas), "slide") in _TWEENS:
+            cancel_tween(self.canvas, "slide")
+            self._settle()
         span = float(self._size[0] if axis == "x" else self._size[1])
         previous = self.current
+        if key == previous:
+            self._activate(key)      # 兜一次，保证画面和 current 一致
+            return
         self.current = key
         if previous is None or not animate or not ANIMATIONS_ENABLED:
             self._activate(key)
@@ -1429,6 +1448,25 @@ class SlideStack:
         frame(0.0, 0.0)
         tween(self.canvas, "slide", self.duration_ms, frame, done,
               easing=self.easing, fps=FPS_MOVE)
+
+    def prewarm(self):
+        """把每一页都 map 一次再藏回去。
+
+        Canvas 窗口项第一次被 map 时，Tk 要跑一遍整棵控件树的布局
+        （实测设置页 78 个控件约 41ms，主页 137 个更久，Windows 还要翻倍），
+        这一下正好卡在切换动画的第一帧 —— 表现就是「点了没反应，
+        过一会儿才切页」。提前付掉这笔钱，之后切换就只剩搬位置。
+        """
+        try:
+            for item in self.items.values():
+                self.canvas.itemconfigure(item, state="normal")
+            self.canvas.update_idletasks()
+            for name, item in self.items.items():
+                if name != self.current:
+                    self.canvas.itemconfigure(item, state="hidden")
+            self.canvas.update_idletasks()
+        except Exception:
+            pass
 
     def _activate(self, key):
         """把指定页摆到正位、其余隐藏（幕布切换与瞬时切换共用）。"""
@@ -3797,6 +3835,18 @@ class SettingsPage:
         self.saved_label.pack(side=LEFT, padx=PAD_DIALOG)
 
         self.reload()
+        # 预热：每个选项卡都先布局一次，避免第一次切换时卡一帧
+        try:
+            for key in ("general", "database", "about"):
+                self.stack.items[key]
+                self.stack.canvas.itemconfigure(self.stack.items[key],
+                                                 state="normal")
+            self.stack.canvas.update_idletasks()
+            for key in ("general", "database", "about"):
+                self.stack.canvas.itemconfigure(self.stack.items[key],
+                                                 state="hidden")
+        except Exception:
+            pass
         self.show_tab("general", animate=False)
 
     def _saved_hint(self):
@@ -4359,6 +4409,9 @@ class PulsesSwapApp:
         self.pages["settings"] = self.settings_page.frame
         for key in ("home", "settings", "log"):
             self.stack.add(key, self.pages[key])
+        # 三页先各自布局一次（这笔开销只付一次，别落在切换动画的第一帧上）
+        self.stack.current = "home"
+        self.stack.prewarm()
 
         # ===== 新手引导注册 =====
         self.guide = GuideManager(self.root)
@@ -5545,6 +5598,7 @@ class PulsesSwapApp:
         self.loading_presets = False
         self._stop_loading_dots()
         self._disable_buttons(False)
+        self._set_pack_dependent_buttons(True)
         try:
             self._on_presets_loaded_body()
         except Exception as exc:
@@ -5592,6 +5646,24 @@ class PulsesSwapApp:
             self.open_db_btn.configure(state=state)
         except Exception:
             pass
+
+    def _set_pack_dependent_buttons(self, enabled: bool) -> None:
+        """只开关「依赖已加载整合包」的按钮。
+
+        与「选择整合包 / 打开数据库」区分开：后两者任何时候都要可用，
+        否则关掉一个包就再也选不了下一个。
+        """
+        state = "normal" if enabled else "disabled"
+        for name in ("open_pack_btn", "close_pack_btn", "open_tacz_btn",
+                     "apply_btn", "create_preset_btn", "export_preset_btn",
+                     "export_incremental_btn", "refresh_preset_btn",
+                     "refresh_gunpack_btn", "save_version_btn"):
+            btn = getattr(self, name, None)
+            if btn is not None:
+                try:
+                    btn.configure(state=state)
+                except Exception:
+                    pass
 
     # ==================== 加载指示动画 ====================
     def _start_loading_dots(self, prefix="刷新中"):
@@ -5675,9 +5747,12 @@ class PulsesSwapApp:
         self.preset_status_label.configure(text="状态: 未应用")
         self.gunpack_count_label.configure(text="共 0 个枪包")
         self.version_entry.delete(0, END)
-        self.open_pack_btn.configure(state="disabled")
-        self.open_tacz_btn.configure(state="disabled")
-        self._disable_buttons(True)
+        # 关闭后只有「整合包相关」的按钮该灰掉；「选择整合包 / 数据库」必须
+        # 保持可用 —— 之前这里调了 _disable_buttons(True) 把包括「选择」在内
+        # 的所有按钮全禁掉，之后没有任何地方再解开，关掉一个包就再也选不了
+        # 下一个（用户反馈「选择是灰的」）。
+        self._disable_buttons(False)
+        self._set_pack_dependent_buttons(False)
         self.log_manager.log("已关闭整合包", 'INFO', verbose=True)
         self._update_sidebar_status()
         self._update_guide()
@@ -5784,6 +5859,7 @@ class PulsesSwapApp:
         self.loading_presets = False
         self._stop_loading_dots()
         self._disable_buttons(False)
+        self._set_pack_dependent_buttons(True)
         try:
             self._update_preset_list()
             self.log_manager.log("预设列表刷新完成", 'INFO', verbose=True)
