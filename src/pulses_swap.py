@@ -1,9 +1,20 @@
 """
 Pulses Swap - 快速枪包切换器
 作者: NimShade
-版本: 2.4.13
+版本: 2.4.14
 描述: Minecraft Tacz 模组枪包快速切换工具
 UI风格: Pulses 水墨淡色主题（customtkinter 圆角版本）
+
+v2.4.14 更新（真正的元凶：「最近」下拉面板）:
+  - 用户指着 Step 1 的「最近」按钮反馈：展开/收起又慢、中间帧控件全白
+  - 真因：面板是 pack 在卡片里的，展开/收起每帧都在改高度 ——
+    每改一次高度，整页（137 个控件）都要重新布局，Windows 上就是
+    又慢又闪白
+  - 改成「不参与布局」的下拉浮层：用 place 挂在按钮行下方，
+    place 不影响 pack/grid 排版 —— 实测展开前后卡片请求高度 254 → 254
+    完全不变、兄弟控件零位移，只有面板自己在动
+  - 顺带：设置页新增「动画」开关（流畅 / 关闭），关掉后所有补间一帧到位；
+    开关状态写进 .settings.json，重启后保持
 
 v2.4.13 更新（中间帧控件闪白的根治：切页只搬位图）:
   - 现象：切换页面时中间某一帧所有控件变成白色（用户说的「插帧」）
@@ -243,7 +254,7 @@ except ImportError:
     FileSystemEventHandler = object
 
 # ==================== 常量定义 ====================
-VERSION = "2.4.13"
+VERSION = "2.4.14"
 AUTHOR = "NimShade"
 PROJECT_NAME = "Pulses Swap"
 
@@ -916,6 +927,12 @@ def take_frame_stats() -> tuple:
     if frames <= 0 or total <= 0:
         return (0.0, 0)
     return (total / frames, frames)
+
+
+def apply_animations_setting(enabled: bool) -> None:
+    """把「动画」设置应用到全局开关（设置页切换时也走这里）。"""
+    global ANIMATIONS_ENABLED
+    ANIMATIONS_ENABLED = bool(enabled)
 
 
 def tween(widget, key, duration_ms, on_frame, on_done=None,
@@ -2740,12 +2757,14 @@ class DatabaseLocatorDialog:
 class AppSettings:
     def __init__(self):
         self.storage_mode = "isolated"
+        self.animations = True
         self.role = "player"
         self._settings_file: Path | None = None
 
     def bind_database(self, db_path: Path):
         self._settings_file = db_path / ".settings.json"
         self.load()
+        apply_animations_setting(self.animations)
 
     def load(self):
         if self._settings_file and self._settings_file.exists():
@@ -2754,6 +2773,7 @@ class AppSettings:
                     data = json.load(f)
                 self.storage_mode = data.get('storage_mode', 'isolated')
                 self.role = data.get('role', 'player')
+                self.animations = bool(data.get('animations', True))
             except Exception:
                 pass
 
@@ -2763,7 +2783,9 @@ class AppSettings:
         try:
             self._settings_file.parent.mkdir(parents=True, exist_ok=True)
             with open(self._settings_file, 'w', encoding='utf-8') as f:
-                json.dump({'storage_mode': self.storage_mode, 'role': self.role},
+                json.dump({'storage_mode': self.storage_mode,
+                           'role': self.role,
+                           'animations': self.animations},
                           f, indent=2, ensure_ascii=False)
             return True
         except Exception as e:
@@ -4101,6 +4123,24 @@ class SettingsPage:
             height=px(2 * (H_NAV + PAD_XS) + 12))
         self.mode_seg.pack(fill=X, padx=PAD_TIGHT, pady=PAD_TIGHT)
 
+        make_label(tab, text="动画", fg=C_ACCENT,
+                    font_size=FS_SUBHEAD, bold=True).pack(
+                        anchor=W, pady=(0, PAD_TIGHT))
+        anim_card = ctk.CTkFrame(tab, fg_color=C_CARD_BG, corner_radius=R_CARD,
+                                  border_width=BORDER_W, border_color=C_BORDER_SOFT)
+        anim_card.pack(fill=X, pady=(0, PAD_DIALOG))
+        attach_hover_glow(anim_card)
+        self.anim_seg = CanvasSegmented(
+            anim_card, [("on", "流畅"), ("off", "关闭")],
+            command=self._on_anim_selected, orientation="vertical",
+            item_height=H_NAV, pad=6, gap=PAD_XS, radius=R_CONTROL,
+            bg_color=C_CARD_BG, pill_color=C_ACCENT_SOFT,
+            hover_color=C_ACCENT_SOFT, text_color=C_TEXT_MAIN,
+            active_text_color=C_ACCENT, font_size=FS_BODY, bold_active=True,
+            text_anchor="w", text_pad=16, duration_ms=240,
+            height=px(2 * (H_NAV + PAD_XS) + 12))
+        self.anim_seg.pack(fill=X, padx=PAD_TIGHT, pady=PAD_TIGHT)
+
         make_label(tab, text="用户身份", fg=C_ACCENT,
                     font_size=FS_SUBHEAD, bold=True).pack(
                         anchor=W, pady=(0, PAD_TIGHT))
@@ -4118,6 +4158,18 @@ class SettingsPage:
             text_anchor="w", text_pad=16, duration_ms=380,
             height=px(2 * (H_NAV + PAD_XS) + 12))
         self.role_seg.pack(fill=X, padx=PAD_TIGHT, pady=PAD_TIGHT)
+
+    def _on_anim_selected(self, key):
+        """动画开关：关掉后所有补间一帧到位（逻辑不变，只是不逐帧画）。"""
+        enabled = (key != "off")
+        apply_animations_setting(enabled)
+        try:
+            self.app.settings.animations = enabled
+            self.app.settings.save()
+        except Exception:
+            pass
+        self.app.toast("动画已关闭" if not enabled else "动画已开启",
+                       kind="info")
 
     def _on_mode_selected(self, key):
         self.storage_var.set(key)
@@ -4210,7 +4262,9 @@ class SettingsPage:
             for seg, key in ((getattr(self, "mode_seg", None),
                               self.settings.storage_mode),
                              (getattr(self, "role_seg", None),
-                              self.settings.role)):
+                              self.settings.role),
+                             (getattr(self, "anim_seg", None),
+                              "on" if ANIMATIONS_ENABLED else "off")):
                 if seg is not None and seg.current() != key:
                     seg.select(key, animate=False)
         except Exception:
@@ -4759,7 +4813,9 @@ class PulsesSwapApp:
         self.pack_path_frame.pack(fill=X, padx=PAD_GAP, pady=(0, PAD_TIGHT))
 
         # 按钮行
-        pack_btn_row = ctk.CTkFrame(self.pack_drop_area, fg_color="transparent")
+        self.pack_btn_row = ctk.CTkFrame(self.pack_drop_area,
+                                          fg_color="transparent")
+        pack_btn_row = self.pack_btn_row
         pack_btn_row.pack(fill=X, padx=PAD_INNER, pady=(0, PAD_GAP))
 
         self.select_pack_btn = make_button(pack_btn_row, "选择",
@@ -4788,10 +4844,13 @@ class PulsesSwapApp:
                 except Exception:
                     pass
 
-        # 最近打开（折叠）：外层 wrap 固定高度，展开/收起用高度补间驱动
-        self.recent_wrap = ctk.CTkFrame(pack_content, fg_color="transparent",
-                                         height=1)
-        self.recent_wrap.pack(fill=X)
+        # 最近打开：做成「不参与布局」的下拉浮层。
+        # 挂在按钮行下面、用 place 定位 —— place 不影响 pack/grid 的排版，
+        # 所以展开/收起时整页不会重新布局。
+        # （之前是 pack + 高度补间：每帧改高度都要重排整页，Windows 上就是
+        #   又慢又闪白，用户指着这个按钮反馈的。）
+        self.recent_wrap = ctk.CTkFrame(self.pack_btn_row,
+                                         fg_color="transparent", height=1)
         self.recent_wrap.pack_propagate(False)
         self.recent_frame = ctk.CTkFrame(self.recent_wrap, fg_color=C_PANEL_ALT_BG,
                                           corner_radius=R_CONTROL, border_width=BORDER_W,
@@ -5606,6 +5665,12 @@ class PulsesSwapApp:
             self.update_recent_list()
             self.recent_toggle_btn.configure(text="▲ 最近")
             self.recent_frame.pack(fill=BOTH, expand=True)
+            try:
+                self.recent_wrap.place(relx=0.0, rely=1.0, relwidth=1.0,
+                                        height=1)
+                self.recent_wrap.lift()
+            except Exception:
+                pass
             self._animate_recent(self.RECENT_H)
 
     def _animate_recent(self, target, hide_after=False):
@@ -5623,19 +5688,24 @@ class PulsesSwapApp:
         def frame(e, raw):
             self._recent_height = lerp(start, float(target), e)
             try:
-                self.recent_wrap.configure(height=max(1, int(self._recent_height)))
+                # 只改浮层自己的高度：兄弟控件不动，页面不重排
+                self.recent_wrap.place_configure(height=max(1, int(self._recent_height)))
             except Exception:
                 pass
 
         def done():
             self._recent_height = float(target)
             try:
-                self.recent_wrap.configure(height=max(1, int(target)))
+                self.recent_wrap.place_configure(height=max(1, int(target)))
             except Exception:
                 pass
             if hide_after:
                 try:
                     self.recent_frame.pack_forget()
+                except Exception:
+                    pass
+                try:
+                    self.recent_wrap.place_forget()   # 完全撤下，不占位
                 except Exception:
                     pass
 

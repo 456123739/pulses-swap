@@ -195,12 +195,12 @@ check("Toast 结束后已收掉", app._toast is None, app._toast)
 # ── 7. 最近面板：高度单调增/减，且落在 1 与 RECENT_H 之间 ──
 print("== 7. 最近面板展开/收起 ==")
 rows7 = sample(lambda: app.toggle_recent(), 260,
-               lambda: app.recent_wrap.cget("height"))
+               lambda: int((app.recent_wrap.place_info() or {}).get("height") or 1))
 check("展开过程中高度单调不减",
       all(a <= b + 0.6 for a, b in zip(rows7, rows7[1:])), rows7)
 check("展开终态 = RECENT_H", rows7[-1] == app.RECENT_H, rows7[-1])
 rows7b = sample(lambda: app.toggle_recent(), 260,
-                lambda: app.recent_wrap.cget("height"))
+                lambda: int((app.recent_wrap.place_info() or {}).get("height") or 1))
 check("收起过程中高度单调不增",
       all(a >= b - 0.6 for a, b in zip(rows7b, rows7b[1:])), rows7b)
 check("收起终态 = 1", rows7b[-1] == 1, rows7b[-1])
