@@ -1,9 +1,18 @@
 """
 Pulses Swap - 快速枪包切换器
 作者: NimShade
-版本: 2.4.10
+版本: 2.4.11
 描述: Minecraft Tacz 模组枪包快速切换工具
 UI风格: Pulses 水墨淡色主题（customtkinter 圆角版本）
+
+v2.4.11 更新（逐个动画审计中间帧）:
+  - 新增中间帧不变量审计：把每个动画逐帧采样，断言几何/颜色不变量
+    （两页严格拼接、滑块不越界、面板高度单调、颜色单调过渡、Toast 收掉…）
+  - 修：Toast 入场方向反了 —— _offset 的符号写错，变成「从里往外弹」，
+    应该是从屏幕右边缘外滑进来（改成 _slide 28 → 0）
+  - 修：Toast 关闭后 app._toast 仍指向已销毁的浮层（现在 close() 里清引用）
+  - 顺带固化进真机测试：滑动过程中「旧页y - 新页y 必须等于视口高度」
+    （任意中间帧都无缝、不重叠）
 
 v2.4.10 更新（动画撕裂的真因：隐藏的页面尺寸是错的）:
   - 撕裂根因：Canvas 窗口项在 state="hidden" 期间不会被 Tk 调整尺寸，
@@ -216,7 +225,7 @@ except ImportError:
     FileSystemEventHandler = object
 
 # ==================== 常量定义 ====================
-VERSION = "2.4.10"
+VERSION = "2.4.11"
 AUTHOR = "NimShade"
 PROJECT_NAME = "Pulses Swap"
 
@@ -1528,7 +1537,10 @@ class Toast:
                                    font=(FONT_FAMILY, FS_SMALL),
                                    fg_color="transparent")
         self.label.pack(padx=PAD_CARD_X, pady=PAD_TIGHT)
-        self._offset = 28
+        # _slide > 0 表示浮层右边缘越出容器右边缘（= 在屏幕外），
+        # 入场从 +28 滑到 0，出场再滑回去 —— 之前符号写反了，
+        # 变成「从里往外滑」，看着像往右弹一下。
+        self._slide = 28.0
         self._hold_ms = duration_ms
         self._place()
         self._play_in()
@@ -1536,13 +1548,13 @@ class Toast:
     def _place(self):
         try:
             self.frame.place(relx=1.0, rely=0.0, anchor="ne",
-                              x=-PAD_WINDOW - self._offset, y=PAD_WINDOW)
+                              x=-PAD_WINDOW + self._slide, y=PAD_WINDOW)
         except Exception:
             pass
 
     def _play_in(self):
         def frame(e, raw):
-            self._offset = lerp(28.0, 0.0, e)
+            self._slide = lerp(28.0, 0.0, e)
             self._place()
 
         def done():
@@ -1556,7 +1568,7 @@ class Toast:
 
     def _play_out(self):
         def frame(e, raw):
-            self._offset = lerp(0.0, 28.0, e)
+            self._slide = lerp(0.0, 28.0, e)
             self._place()
             try:
                 self.frame.configure(
@@ -1572,6 +1584,12 @@ class Toast:
 
     def close(self):
         cancel_all_tweens(self.frame)
+        # 清掉宿主持有的引用，否则 app._toast 会一直指向已销毁的浮层
+        try:
+            if getattr(self.host, "_toast", None) is self:
+                self.host._toast = None
+        except Exception:
+            pass
         try:
             self.frame.destroy()
         except Exception:
