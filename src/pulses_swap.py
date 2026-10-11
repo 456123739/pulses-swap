@@ -1,9 +1,22 @@
 """
 Pulses Swap - 快速枪包切换器
 作者: NimShade
-版本: 2.4.15
+版本: 2.4.16
 描述: Minecraft Tacz 模组枪包快速切换工具
 UI风格: Pulses 水墨淡色主题（customtkinter 圆角版本）
+
+v2.4.16 更新（Win11 半透明：从「关一次」改成「一直按住」）:
+  - 现象：Win11 上打开窗口，整个窗口半透明、壁纸透进来
+  - 真因：DWMWA_SYSTEMBACKDROP_TYPE(38) 系统默认是 0(AUTO)，由 Windows
+    自己挑背景材质，于是套上 Mica —— 而且**窗口失焦时会重新评估**，
+    所以「一有弹窗在前面，主窗口就变透明」
+  - v2.4.2 已改成显式 1(DWMSBT_NONE) 并关掉 DWMWA_MICA_EFFECT(1029)，
+    但只在启动时下发一次 —— DWM 重新评估后 Mica 会回来
+  - 现在改成持续防护：焦点 / 映射 / 可见性 / 尺寸变化时补发（250ms 节流），
+    另有 2 秒兜底轮询；主窗口与**所有 Toplevel 弹窗**一起覆盖；
+    同时每次重新断言 -alpha=1.0 与 -transparentcolor=""
+  - 新增 packaging/win_dwm_check.py：伪造 ctypes.windll 离线验证
+    「下发了哪些属性、值是多少」以及各触发路径是否真的调用到
 
 v2.4.15 更新（全流程 + 全 UI 操作扫描，修三处漏洞）:
   - 修：弹窗「先空白、再出内容」—— 遮罩和卡片原来在 __init__ 里立刻摆上去，
@@ -270,7 +283,7 @@ except ImportError:
     FileSystemEventHandler = object
 
 # ==================== 常量定义 ====================
-VERSION = "2.4.15"
+VERSION = "2.4.16"
 AUTHOR = "NimShade"
 PROJECT_NAME = "Pulses Swap"
 
@@ -4561,17 +4574,53 @@ class PulsesSwapApp:
         self.setup_ui()
         self.setup_menu()
 
-        self.root.after(80, self._disable_win11_transparency)
+        self._install_opacity_guard()
         self.root.after(150, self._init_database_flow)
 
     def _disable_win11_transparency(self):
+        """兼容旧调用：立刻把主窗口与所有子窗口刷成不透明。"""
         if not IS_WINDOWS:
             return
+        refresh_window_opacity(self.root)
+
+    def _install_opacity_guard(self):
+        """Win11 半透明防护：事件驱动 + 兜底轮询。
+
+        只在启动时关一次是不够的 —— 窗口失焦（有弹窗在前面）、重新映射、
+        切换主题时，DWM 会重新评估窗口材质，Mica 会自己回来。这里：
+          · 焦点/映射/可见性/尺寸变化时补一次（250ms 节流，避免频繁调用）
+          · 另外每 2 秒兜一次底，保证任何触发路径都盖得住
+        """
+        if not IS_WINDOWS:
+            return
+        self._opacity_last = 0.0
+        for seq in ("<Map>", "<FocusIn>", "<Visibility>", "<Configure>"):
+            try:
+                self.root.bind(seq, self._on_opacity_event, add="+")
+            except Exception:
+                pass
+        self._opacity_tick()
+        self._opacity_guard_logged = False
+
+    def _on_opacity_event(self, _event=None):
+        now = time.perf_counter()
+        if now - getattr(self, "_opacity_last", 0.0) < 0.25:
+            return
+        self._opacity_last = now
+        n = refresh_window_opacity(self.root)
+        if not getattr(self, "_opacity_guard_logged", False):
+            self._opacity_guard_logged = True
+            try:
+                self.log_manager.log(
+                    f"Win11 窗口材质已设为不透明（覆盖 {n} 个窗口）",
+                    'INFO', verbose=True)
+            except Exception:
+                pass
+
+    def _opacity_tick(self):
+        refresh_window_opacity(self.root)
         try:
-            hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id())
-            if not hwnd:
-                hwnd = self.root.winfo_id()
-            _apply_opaque_window(hwnd)
+            self.root.after(2000, self._opacity_tick)
         except Exception:
             pass
 
@@ -7171,6 +7220,52 @@ def apply_window_icon(window) -> None:
 # （快捷方式图标 / exe 内嵌图标）。不显式设置时任务栏会退回 Tk 默认羽毛图标。
 # 取值与 installer.iss 的 publisher 命名保持一致。
 APP_USER_MODEL_ID = "Pulses0Studio.PulsesSwap"
+
+
+def make_window_opaque(window) -> bool:
+    """把窗口设成完全不透明（禁用 Win11 的 Mica / Acrylic 背景材质）。
+
+    必须能反复调用：窗口失焦、弹出子窗口、切换主题时 DWM 会**重新评估**
+    窗口材质，Mica 会自己回来 —— 这正是「一有弹窗在前面，主窗口就变
+    半透明」的成因。所以除了启动时，还要在焦点/映射变化时补一次。
+    """
+    if not IS_WINDOWS:
+        return False
+    try:
+        window.attributes("-alpha", 1.0)
+    except Exception:
+        pass
+    try:
+        window.attributes("-transparentcolor", "")
+    except Exception:
+        pass
+    try:
+        hwnd = (ctypes.windll.user32.GetParent(window.winfo_id())
+                or window.winfo_id())
+        _apply_opaque_window(hwnd)
+        return True
+    except Exception:
+        return False
+
+
+def refresh_window_opacity(root) -> int:
+    """给主窗口与所有子窗口重新上一次「不透明」，返回处理了几个窗口。"""
+    if not IS_WINDOWS:
+        return 0
+    count = 0
+    if make_window_opaque(root):
+        count += 1
+    try:
+        for child in root.winfo_children():
+            try:
+                if child.winfo_class() == "Toplevel":
+                    if make_window_opaque(child):
+                        count += 1
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return count
 
 
 def _apply_opaque_window(hwnd) -> None:
