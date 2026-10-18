@@ -155,6 +155,24 @@ for _ in range(3):
 check("反复开合后处于收起状态", app.recent_visible is False
       and wrap.winfo_ismapped() == 0)
 
+# 切页面 / 换整合包也要收起
+app.toggle_recent()
+pump(root, 200)
+app.show_page("settings")
+pump(root, 700)
+check("切页面后收起", app.recent_visible is False
+      and wrap.winfo_ismapped() == 0)
+app.show_page("home")
+pump(root, 500)
+app.toggle_recent()
+pump(root, 200)
+app.db_ready = True          # 这个用例要真正走 load_pack
+app.load_pack(PACK)
+pump(root, 900)
+check("换整合包后收起", app.recent_visible is False
+      and wrap.winfo_ismapped() == 0,
+      f"visible={app.recent_visible} mapped={wrap.winfo_ismapped()}")
+
 print()
 print("FAIL" if FAIL else "全部通过")
 root.destroy()
