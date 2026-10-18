@@ -77,13 +77,16 @@ jobs:
           # 1) 绿色版本体（exe + _internal）
           Copy-Item -Path "dist/PulsesSwap/*" -Destination $stage -Recurse -Force
 
-          # 2) 空数据库结构：程序旁边发现 PulsesSwap_database 就直接用它
+          # 2) 空数据库结构：程序旁边发现 PulsesSwap_database 就直接用它。
+          #    用单引号字符串 + WriteAllText(UTF8 无 BOM)：双引号会被 PowerShell
+          #    的转义吃掉，Out-File 还会加 BOM，JSON 解析都会挂。
           $db = Join-Path $stage "PulsesSwap_database"
           New-Item -ItemType Directory -Force -Path $db | Out-Null
-          '{\"storage_mode\": \"isolated\", \"role\": \"player\"}' |
-            Out-File -Encoding utf8 (Join-Path $db ".settings.json")
-          '{\"recent_packs\": []}' |
-            Out-File -Encoding utf8 (Join-Path $db ".global.json")
+          $utf8 = New-Object System.Text.UTF8Encoding($false)
+          $settingsJson = '{"storage_mode": "isolated", "role": "player"}'
+          $globalJson = '{"recent_packs": []}'
+          [IO.File]::WriteAllText((Join-Path $db ".settings.json"), $settingsJson, $utf8)
+          [IO.File]::WriteAllText((Join-Path $db ".global.json"), $globalJson, $utf8)
 
           # 3) 使用说明
           @"
