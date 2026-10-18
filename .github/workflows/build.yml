@@ -245,8 +245,10 @@ jobs:
 
   # ───────────────────────── 发布 Release ─────────────────────────
   release:
-    needs: [windows, macos, linux]
-    if: startsWith(github.ref, 'refs/tags/v')
+    # 只等 Windows + Linux：macOS runner 经常几十分钟排不上队，
+    # 让它拖住整个发布不值得；mac 产物照常进 Actions artifact。
+    needs: [windows, linux]
+    if: startsWith(github.ref, 'refs/tags/v') && !cancelled()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
