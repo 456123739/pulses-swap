@@ -129,6 +129,16 @@ class DatabaseMixin:
             config.UI_ROLE = role
             if role == "developer":
                 theme_widgets(self.root, "player", "developer")
+            # 身份徽标 / 主操作 / 入口可见性：和配色同一来源，避免
+            # 「显示玩家、界面却是开发者配色」这种错乱
+            try:
+                self._update_identity_ui()
+            except Exception:
+                pass
+            try:
+                self._apply_role_actions()
+            except Exception:
+                pass
         except Exception:
             pass
         self.recent_manager = RecentPacksManager(db_path / ".global.json")

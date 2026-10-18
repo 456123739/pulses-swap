@@ -21,6 +21,7 @@ from ..utils import *
 from ..animation import *
 from ..widget import *
 from ..dialogs import *
+from ..dialogs import _OVERLAY_STACK
 
 try:
     from online import diff as online_diff
@@ -111,6 +112,9 @@ class OnlineMixin:
     # ==================================================================
     def _init_online(self, db_path=None):
         self.online = None
+        # 这两个缓存必须在早期就存在：还没选整合包时 _set_role 也会去清它们，
+        # 之前放在 db_path 分支里，导致「没有整合包时切身份」直接崩
+        self._preset_size_cache = getattr(self, "_preset_size_cache", {})
         self.online_states = {}
         self.online_checking = set()
         self.online_pending = {}
@@ -267,7 +271,15 @@ class OnlineMixin:
 
     def open_identity_dialog(self):
         if self.online is None:
-            show_warning("在线功能不可用", "在线模块没有加载成功，请检查安装是否完整。")
+            # 还没选整合包时在线服务是空的 —— 这不是"安装不完整"。
+            # 开发者身份要能随时切回玩家，否则一旦以开发者退出就卡住了。
+            if self.is_developer:
+                self._set_role("player")
+                self.toast("已切回玩家", "info")
+                return
+            show_info("先选择一个整合包",
+                      "在线功能要等选好整合包（tacz 所在目录）之后才可用。\n\n"
+                      "选好之后再点这里，就能登录蓝奏云切换为开发者。")
             return
         if self.is_developer:
             self._open_developer_card()
@@ -410,6 +422,25 @@ class OnlineMixin:
                 ui_call(self.root, self._on_developer_login, card, exc, on_fail)
 
         threading.Thread(target=worker, daemon=True).start()
+
+        # 网络卡住时线程可能长期不返回：兜一层超时，别让卡片永远停在「检查中」
+        def _timeout():
+            if name not in self.online_checking:
+                return
+            self.online_checking.discard(name)
+            state = self.online_states.setdefault(name, {})
+            if state.get("phase") == "checking":
+                state["phase"] = "error"
+                state["error"] = "检查超时（网络太慢，稍后再试）"
+                state["plan"] = None
+                state["checked_at"] = time.time()
+                self.log_manager.log(f"检查更新超时（{name}）", 'WARNING')
+                self._refresh_preset_cards()
+
+        try:
+            self.root.after(45000, _timeout)
+        except Exception:
+            pass
 
     def _on_developer_login(self, card, error, on_fail=None):
         if error is not None:
@@ -1014,6 +1045,56 @@ class OnlineMixin:
 
     def _detail_overview(self, parent, name, info):
         page = ctk.CTkFrame(parent, fg_color="transparent")
+
+        # ===== 名称 / 版本：直接在这里改 =====
+        meta = ctk.CTkFrame(page, fg_color="transparent")
+        meta.pack(fill=X, pady=(0, PAD_GAP))
+        name_var = StringVar(value=name)
+        ver_var = StringVar(value=str(info.get("version") or ""))
+        name_field = FormField(meta, "预设名称", textvariable=name_var,
+                               hint="改名后列表立即更新")
+        name_field.frame.pack(fill=X)
+        ver_field = FormField(meta, "版本号", textvariable=ver_var,
+                              hint="发布到云端时用这个版本号")
+        ver_field.frame.pack(fill=X, pady=(PAD_TIGHT, 0))
+
+        def save_meta():
+            new_name = str(name_var.get() or "").strip()
+            new_ver = str(ver_var.get() or "").strip()
+            manager = self.preset_manager
+            if not manager:
+                return
+            if not new_name:
+                name_field.focus()
+                name_field.error("名字不能为空")
+                return
+            if new_name != name and new_name in manager.presets:
+                name_field.focus()
+                name_field.error("这个名字已经存在")
+                return
+            target = name
+            if new_name != name:
+                if not manager.rename_preset(name, new_name):
+                    name_field.error("改名失败")
+                    return
+                target = new_name
+            if new_ver and new_ver != str(info.get("version") or ""):
+                try:
+                    manager.update_preset_version(target, new_ver)
+                except Exception:
+                    pass
+            try:
+                self._update_preset_list()
+            except Exception:
+                pass
+            try:
+                _OVERLAY_STACK[-1].close(True)
+            except Exception:
+                pass
+            self.toast("已保存", "success")
+
+        make_button(meta, "保存修改", command=save_meta, accent=True,
+                    width=96).pack(anchor=W, pady=(PAD_TIGHT, 0))
         count, size = self._preset_size(name, info)
         state = self._online_state(name)
         plan = state.get("plan")

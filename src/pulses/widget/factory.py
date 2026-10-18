@@ -121,24 +121,10 @@ def make_menu_button(parent, text=None, items=None, width=None, as_text=False):
 
     def popup():
         try:
-            menu = Menu(button, tearoff=0, borderwidth=0, relief="flat",
-                        bg=C_PANEL_BG, fg=C_TEXT_MAIN,
-                        activebackground=C_ACCENT_SOFT,
-                        activeforeground=C_TEXT_MAIN,
-                        font=tk_font(config.FONT_FAMILY, FS_SMALL))
             entries = items() if callable(items) else (items or [])
-            for entry in entries:
-                if entry is None:
-                    menu.add_separator()
-                    continue
-                label, command = entry
-                if command is None:
-                    menu.add_command(label=label, state="disabled")
-                else:
-                    menu.add_command(label=label, command=command)
-            menu.tk_popup(button.winfo_rootx(),
-                          button.winfo_rooty() + button.winfo_height() + 2)
-            menu.grab_release()
+            popup_menu(button, entries,
+                       button.winfo_rootx(),
+                       button.winfo_rooty() + button.winfo_height() + 2)
         except Exception:
             pass
         return "break"
@@ -279,13 +265,6 @@ def attach_entry_menu(entry):
     也要把菜单命令打到那个内部控件上。
     """
     inner = getattr(entry, "_entry", entry)
-    try:
-        menu = Menu(entry, tearoff=0, borderwidth=0, relief="flat",
-                    bg=C_PANEL_BG, fg=C_TEXT_MAIN,
-                    activebackground=C_ACCENT_SOFT, activeforeground=C_TEXT_MAIN,
-                    font=tk_font(config.FONT_FAMILY, FS_SMALL))
-    except Exception:
-        return entry
 
     def run(action):
         try:
@@ -304,24 +283,17 @@ def attach_entry_menu(entry):
             pass
         return "break"
 
-    for label, action in (("剪切", "Cut"), ("复制", "Copy"), ("粘贴", "Paste"),
-                          ("全选", "select"), ("清空", "clear")):
-        try:
-            menu.add_command(label=label, command=lambda a=action: run(a))
-        except Exception:
-            pass
+    entries = [(label, (lambda a=action: run(a)))
+               for label, action in (("剪切", "Cut"), ("复制", "Copy"),
+                                     ("粘贴", "Paste"), ("全选", "select"),
+                                     ("清空", "clear"))]
 
     def popup(event):
         try:
             inner.focus_set()
-            menu.tk_popup(event.x_root, event.y_root)
+            popup_menu(entry, entries, event.x_root, event.y_root, width=120)
         except Exception:
             pass
-        finally:
-            try:
-                menu.grab_release()
-            except Exception:
-                pass
         return "break"
 
     for sequence in ("<Button-3>", "<Button-2>"):

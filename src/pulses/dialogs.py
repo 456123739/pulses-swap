@@ -464,6 +464,43 @@ class ToplevelCard(_OverlayCardBase):
         return self.result
 
 
+def ask_text(host, title, label, initial="", placeholder="", ok_text="确定",
+             width=440, hint=""):
+    """自绘的单行输入弹窗（替代 tkinter.simpledialog.askstring）。返回 str | None。"""
+    card = make_card(host, None, width=width, escape_value=None)
+    card.add_title(title)
+    var = StringVar(value=str(initial or ""))
+    field = FormField(card.body, label, textvariable=var,
+                      placeholder=placeholder, hint=hint)
+    field.frame.pack(fill=X, pady=(PAD_TIGHT, 0))
+
+    result = {"value": None}
+
+    def _ok(_event=None):
+        text = str(var.get() or "").strip()
+        if not text:
+            field.focus()
+            field.error("不能为空")
+            return "break"
+        result["value"] = text
+        card.close(True)
+        return "break"
+
+    bar = ctk.CTkFrame(card.body, fg_color="transparent")
+    bar.pack(fill=X, side=BOTTOM, pady=(PAD_DIALOG, 0))
+    make_button(bar, "取消", command=lambda: card.close(None)).pack(side=RIGHT)
+    make_button(bar, ok_text, command=_ok, accent=True).pack(
+        side=RIGHT, padx=(0, PAD_TIGHT))
+    field.entry.bind("<Return>", _ok)
+    card.register_focusable(field.entry)
+    try:
+        card.root.after(60, field.focus)
+    except Exception:
+        field.focus()
+    card.wait()
+    return result["value"]
+
+
 def make_card(host, parent, width=520, escape_value=None, title=PROJECT_NAME):
     """有宿主就用窗口内覆盖层；没有宿主（启动极早期）才退化成 Toplevel。"""
     if host is not None:

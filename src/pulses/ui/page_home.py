@@ -170,7 +170,7 @@ class HomePageMixin:
         self.recent_wrap.pack_propagate(False)
         self.recent_frame = ctk.CTkFrame(self.recent_wrap, fg_color=C_PANEL_BG,
                                           corner_radius=R_CONTROL, border_width=0)
-        self.recent_listbox = Listbox(self.recent_frame, height=4,
+        self.recent_listbox = Listbox(self.recent_frame, height=6,
                                        bg=C_PANEL_BG, fg=C_TEXT_MAIN,
                                        selectbackground=C_ACCENT_SOFT,
                                        selectforeground=C_ACCENT,
@@ -257,8 +257,11 @@ class HomePageMixin:
         info_head = ctk.CTkFrame(info_group, fg_color="transparent")
         info_head.pack(fill=X, padx=PAD_CARD_X, pady=(PAD_CARD_Y, 0))
         make_section_header(info_head, 3, "预设详情").pack(side=LEFT)
-        self.detail_btn = make_text_button(
-            info_head, "打开详情", command=self._open_current_detail)
+        # 「打开详情」改成一个明确的实心按钮：改名/改版本/看差异都在里面
+        self.detail_btn = make_button(info_head, "打开详情",
+                                       command=self._open_current_detail,
+                                       accent=True, width=96, height=30,
+                                       font_size=FS_SMALL)
         self.detail_btn.pack(side=RIGHT)
         # 开发者常用：换完枪包直接去 tacz 里看结果
         self.tacz_head_btn = make_text_button(
@@ -624,7 +627,7 @@ class HomePageMixin:
             show_error("错误", f"打开失败: {e}")
 
     # ==================== 最近打开 ====================
-    RECENT_H = 118   # 展开后的固定高度（列表 5 行 + 内边距）
+    RECENT_H = 172   # 展开后的固定高度（列表 6 行 + 内边距）
 
     def toggle_recent(self):
         if self.recent_visible:
@@ -645,7 +648,23 @@ class HomePageMixin:
             self._animate_recent(self.RECENT_H)
 
     def _animate_recent(self, target, hide_after=False):
-        """折叠面板的高度补间：0 -> 118 展开，118 -> 0 收起。"""
+        """展开 / 收起：直接落位。
+
+        原来每帧改 place 高度做补间，浮层里的整个 Listbox 会跟着重绘，
+        条目一多就像"卡住"；这里改成一次性设置高度，观感反而更利落。
+        """
+        try:
+            self._recent_height = float(target)
+            self.recent_wrap.place_configure(height=max(1, int(target)))
+        except Exception:
+            pass
+        if hide_after:
+            try:
+                self.recent_frame.pack_forget()
+            except Exception:
+                pass
+        return
+
         start = float(getattr(self, "_recent_height", 1.0))
         if start == target:
             try:

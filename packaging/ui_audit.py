@@ -69,6 +69,12 @@ import tkinter.simpledialog as sd
 import tkinter.filedialog as fd
 sd.askstring = lambda *a, **k: "审计预设"
 fd.asksaveasfilename = lambda *a, **k: str(EXPORT / "out.fgcpack")
+# 自绘输入框是**阻塞**的（card.wait）：按钮遍历到这里会卡住，
+# 测试里给个固定返回，别让它挡路
+ps.ask_text = lambda *a, **k: "自动测试"
+for _mod in (ps.pages, ps.dialogs, ps.widget):
+    if hasattr(_mod, "ask_text"):
+        _mod.ask_text = ps.ask_text
 fd.askopenfilename = lambda *a, **k: ""
 fd.askdirectory = lambda *a, **k: str(PACK)
 ps.os.startfile = lambda *a, **k: None

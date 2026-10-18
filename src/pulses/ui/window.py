@@ -106,7 +106,7 @@ class WindowMixin:
     def _opacity_tick(self):
         refresh_window_opacity(self.root)
         try:
-            self.root.after(2000, self._opacity_tick)
+            self.root.after(8000, self._opacity_tick)
         except Exception:
             pass
 

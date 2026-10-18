@@ -204,7 +204,16 @@ class SlideStack:
             pass
 
     def _capture(self, key):
-        """给正在显示的页面拍一张位图，供切换动画当素材。失败返回 None。"""
+        """不再截图。
+
+        原来用 ImageGrab 抓整页位图做滑动素材：抓一次 30~80ms，
+        Windows 上还会闪一下（抓到的是屏幕内容，窗口一动就花）——
+        这就是"切页面拉丝、卡顿"的来源。现在直接用页面 frame 平移，
+        不产生位图，切换是纯窗口移动，稳定且没有撕裂。
+        """
+        return None
+
+    def _capture_disabled(self, key):
         try:
             from PIL import ImageGrab, ImageTk
         except Exception:
@@ -221,7 +230,9 @@ class SlideStack:
             return None
 
     def _schedule_capture(self, key):
-        """页面稳定后补拍快照（延后一点，等布局与绘制落定）。"""
+        """截图已停用（见 _capture），这里直接返回。"""
+        return
+
         def _do():
             if key != self.current:
                 return

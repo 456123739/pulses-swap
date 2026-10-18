@@ -483,46 +483,30 @@ class PacksMixin:
             return
         self.preset_cards.select(name, notify=False)
         self.on_preset_selected(name)
-        menu = Menu(self.root, tearoff=0, bg=C_PANEL_BG, fg=C_TEXT_MAIN,
-                    activebackground=C_ACCENT_SOFT, activeforeground=C_ACCENT,
-                    font=(config.FONT_FAMILY, FS_SMALL))
-        menu.add_command(label="详情…",
-                         command=lambda: self.open_preset_detail(name))
-        menu.add_separator()
+        # 自绘菜单：和卡片同一套样式，不再是系统方角菜单
+        items = [("详情…", lambda: self.open_preset_detail(name)), None]
         if self.is_developer:
-            menu.add_command(label="发布到云端…",
-                             command=lambda: self.open_publish_dialog(name))
+            items.append(("发布到云端…",
+                          lambda: self.open_publish_dialog(name)))
         else:
-            menu.add_command(label="检查更新",
-                             command=lambda: self._online_check(name))
-            menu.add_command(label="同步…",
-                             command=lambda: self.open_sync_dialog(name))
-        menu.add_command(label="云端来源…",
-                         command=lambda: self.open_source_dialog(name))
+            items.append(("检查更新", lambda: self._online_check(name)))
+            items.append(("更新这个预设", lambda: self._sync_now(name)))
+        items.append(("云端来源…", lambda: self.open_source_dialog(name)))
         if self.is_developer:
-            menu.add_separator()
-            menu.add_command(label="迁移预设…",
-                             command=lambda: self.migrate_preset(name))
-        menu.add_separator()
-        menu.add_command(label="重命名", command=lambda: self.rename_preset(name))
-        menu.add_separator()
+            items += [None, ("迁移预设…", lambda: self.migrate_preset(name))]
+        items += [None, ("重命名…", lambda: self.rename_preset(name)), None]
         if name != "default":
             if info.get('applied', False):
-                menu.add_command(label="删除预设 (已应用，请先切换)", state=DISABLED)
+                items.append(("删除预设（已应用，请先切换）", None))
             else:
-                menu.add_command(label="删除预设",
-                                  command=lambda: self.delete_preset(name))
-        try:
-            if event is not None and hasattr(event, "x_root"):
-                menu.tk_popup(event.x_root, event.y_root)
-            else:
-                menu.tk_popup(self.root.winfo_pointerx(),
-                              self.root.winfo_pointery())
-        finally:
-            try:
-                menu.grab_release()
-            except Exception:
-                pass
+                items.append(("删除预设", lambda: self.delete_preset(name)))
+
+        x_root = y_root = None
+        if event is not None and hasattr(event, "x_root"):
+            x_root, y_root = event.x_root, event.y_root
+        else:
+            x_root, y_root = self.root.winfo_pointerxy()
+        popup_menu(self, items, x_root, y_root, width=168)
 
     def migrate_preset(self, preset_name: str):
         if not self.preset_manager or self.loading_presets:
@@ -696,10 +680,9 @@ class PacksMixin:
     def rename_preset(self, preset_name):
         if not self.preset_manager or self.loading_presets:
             return
-        from tkinter import simpledialog
-        new_name = simpledialog.askstring("重命名预设",
-                                            f"请输入新的预设名称 (当前: {preset_name}):",
-                                            initialvalue=preset_name)
+        new_name = ask_text(self, "重命名预设", "新的预设名称",
+                            initial=preset_name,
+                            placeholder="例如 SSR 预设包", ok_text="重命名")
         if not new_name or not new_name.strip():
             return
         new_name = new_name.strip()
@@ -719,7 +702,7 @@ class PacksMixin:
                 self._update_preset_list()
                 self.preset_cards.select(new_name, notify=False)
                 self.on_preset_selected(new_name)
-                show_info("成功", f"预设已重命名为: {new_name}")
+                self.toast(f"已重命名为「{new_name}」", "success")
             else:
                 show_error("错误", "预设重命名失败")
         finally:
@@ -755,7 +738,7 @@ class PacksMixin:
                     self.gunpack_listbox.delete(0, END)
                     self.gunpack_count_label.configure(text="共 0 个枪包")
                 self._update_preset_list()
-                show_info("成功", f"预设 '{preset_name}' 已删除")
+                self.toast(f"已删除「{preset_name}」", "success")
                 self._update_guide()
             else:
                 show_error("错误", "删除预设失败")
@@ -765,15 +748,16 @@ class PacksMixin:
     def create_preset(self):
         if not self.preset_manager or self.loading_presets:
             return
-        from tkinter import simpledialog
-        name = simpledialog.askstring("创建预设", "请输入预设名称:")
+        name = ask_text(self, "新建预设", "预设名称",
+                        placeholder="例如 SSR 预设包", ok_text="创建")
         if not name or not name.strip():
             return
         name = name.strip()
         if name in self.preset_manager.presets:
             show_error("错误", f"预设 '{name}' 已存在")
             return
-        version = simpledialog.askstring("版本号", "请输入版本号 (可选，默认 v1.0.0):")
+        version = ask_text(self, "版本号", "版本号（可留空，默认 v1.0.0）",
+                           placeholder="v1.0.0", ok_text="确定")
         if version is None:
             return
         version = version.strip() or "v1.0.0"
@@ -784,11 +768,10 @@ class PacksMixin:
             except Exception:
                 pass
             self._update_preset_list()
-            show_info("创建成功",
-                f"预设 '{name}' 创建成功！\n\n"
-                f"版本号: {version}\n\n"
-                f"请在打开的文件夹中放入枪包文件(ZIP和文件夹)\n"
-                f"然后点击「刷新」按钮更新索引。")
+            self.log_manager.log(
+                f"预设「{name}」已创建（{version}），把枪包放进刚打开的文件夹后点刷新",
+                'SUCCESS')
+            self.toast(f"已创建「{name}」，把枪包放进打开的文件夹", "success")
             self._update_guide()
 
     def save_version(self):

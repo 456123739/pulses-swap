@@ -822,6 +822,20 @@ class OnlineService:
         取不到就退回上次缓存——发布器会先删同名文件，所以即使缓存旧了也不会
         传重复文件，只是多做几次删除。
         """
+        # 先看文件夹里到底有没有东西：新建的空文件夹根本不需要去抓分享页，
+        # 抓了会走一遍「解析分享页 + 轮询直链」的重试链，表现就是一直"检查中"。
+        try:
+            files = account.list_files(folder)
+        except OnlineError as exc:
+            self._log(f"列云端文件失败：{exc}", "WARNING")
+            files = None
+        if files is not None:
+            names = {str(f.get("name") or "").lower() for f in files}
+            if not names or MANIFEST_NAME.lower() not in names:
+                # 空目录，或只有半成品（没 manifest）→ 视为云端为空，
+                # 让发布把本地全量传上去
+                return manifest_mod.empty_manifest(preset)
+
         record = self.sources.get(preset)
         share_url = str(record.get("share_url") or "")
         share_password = str(record.get("share_password") or "")

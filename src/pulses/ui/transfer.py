@@ -223,6 +223,14 @@ class TransferMixin:
             self._sync_gunpack_empty()
             return
 
+        def kind_of(name: str) -> str:
+            fp = current.get(name) or indexed.get(name) or {}
+            return str(fp.get("type") or "zip")
+
+        def label_of(name: str) -> str:
+            # 文件夹型枪包没有扩展名，光看名字分不出和 zip 的区别
+            return f"{name}（文件夹）" if kind_of(name) == "folder" else name
+
         cur_names = set(current.keys())
         idx_names = set(indexed.keys())
         missing = sorted(idx_names - cur_names)
@@ -239,32 +247,36 @@ class TransferMixin:
         total = len(missing) + len(extra) + len(modified) + len(normal)
 
         for name in missing:
-            self.gunpack_listbox.insert(END, f"× {name}")
+            self.gunpack_listbox.insert(END, f"× {label_of(name)}")
             i = self.gunpack_listbox.size() - 1
             self.gunpack_listbox.itemconfig(i, fg=C_STATUS_MISSING, bg=C_STATUS_MISSING_BG)
 
         for name in extra:
-            self.gunpack_listbox.insert(END, f"⊙ {name}")
+            self.gunpack_listbox.insert(END, f"⊙ {label_of(name)}")
             i = self.gunpack_listbox.size() - 1
             self.gunpack_listbox.itemconfig(i, fg=C_STATUS_EXTRA, bg=C_STATUS_EXTRA_BG)
 
         for name in modified:
-            self.gunpack_listbox.insert(END, f"~ {name}")
+            self.gunpack_listbox.insert(END, f"~ {label_of(name)}")
             i = self.gunpack_listbox.size() - 1
             self.gunpack_listbox.itemconfig(i, fg=C_STATUS_MODIFIED, bg=C_STATUS_MODIFIED_BG)
 
         for name in normal:
-            self.gunpack_listbox.insert(END, f"✓ {name}")
+            self.gunpack_listbox.insert(END, f"✓ {label_of(name)}")
             i = self.gunpack_listbox.size() - 1
             self.gunpack_listbox.itemconfig(i, fg=C_STATUS_NORMAL, bg=C_STATUS_NORMAL_BG)
 
+        folders = sum(1 for n in list(cur_names | idx_names)
+                      if kind_of(n) == "folder")
+        zips = total - folders
+        mix = f"{zips} zip · {folders} 文件夹" if folders else f"{zips} zip"
         if missing or extra or modified:
             self.gunpack_count_label.configure(
-                text=f"共 {total} 个枪包 (正常:{len(normal)} "
-                     f"缺失:{len(missing)} 多余:{len(extra)} 变更:{len(modified)})")
+                text=f"共 {total} 个（{mix}） 正常:{len(normal)} "
+                     f"缺失:{len(missing)} 多余:{len(extra)} 变更:{len(modified)}")
         else:
             self.gunpack_count_label.configure(
-                text=f"共 {total} 个枪包 (来自 {location})")
+                text=f"共 {total} 个（{mix}）· 来自 {location}")
         self._sync_gunpack_empty()
 
         if missing or extra or modified:
