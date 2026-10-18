@@ -66,12 +66,26 @@ jobs:
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
             "packaging\installer.iss" "/DMyAppVersion=${{ steps.ver.outputs.version }}"
 
-      - name: 打包绿色版（免安装，解压即用）
+      - name: 打包绿色版（免安装，解压即用，带空数据库）
         shell: pwsh
         run: |
           $v = "${{ steps.ver.outputs.version }}"
-          New-Item -ItemType Directory -Force -Path dist/portable | Out-Null
-          # 绿色版说明：数据目录优先级本来就是「程序目录可写 → 写在程序旁边」
+          $stage = "dist/portable/PulsesSwap-$v"
+          if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+
+          # 1) 绿色版本体（exe + _internal）
+          Copy-Item -Path "dist/PulsesSwap/*" -Destination $stage -Recurse -Force
+
+          # 2) 空数据库结构：程序旁边发现 PulsesSwap_database 就直接用它
+          $db = Join-Path $stage "PulsesSwap_database"
+          New-Item -ItemType Directory -Force -Path $db | Out-Null
+          '{\"storage_mode\": \"isolated\", \"role\": \"player\"}' |
+            Out-File -Encoding utf8 (Join-Path $db ".settings.json")
+          '{\"recent_packs\": []}' |
+            Out-File -Encoding utf8 (Join-Path $db ".global.json")
+
+          # 3) 使用说明
           @"
           Pulses Swap 绿色版 v$v
           ============================
@@ -80,12 +94,16 @@ jobs:
           3. 预设 / 数据库 / 设置都存在同目录的 PulsesSwap_database\ 里，
              整个文件夹拷走即可带走全部数据；删掉文件夹即卸载干净
              （不写注册表、不写系统目录）
+          4. 这个包里已经带好一个空数据库，双击就能用；
+             第一次选完整合包会自动生成一个 default 预设。
 
           注意：如果放在 C:\Program Files 这类没有写权限的位置，
           程序会自动把数据改存到 %LOCALAPPDATA%\PulsesSwap，
           想保持绿色特性请解压到用户目录或 U 盘。
-          "@ | Out-File -Encoding utf8 dist/portable/使用说明.txt
-          Compress-Archive -Path dist/PulsesSwap/*, dist/portable/使用说明.txt `
+          "@ | Out-File -Encoding utf8 (Join-Path $stage "使用说明.txt")
+
+          # 4) 压缩：exe 在 zip 根目录，解压即见
+          Compress-Archive -Path "$stage/*" `
             -DestinationPath "dist/portable/PulsesSwap-Portable-$v.zip" -Force
           Get-Item "dist/portable/PulsesSwap-Portable-$v.zip" |
             Select-Object Name, Length

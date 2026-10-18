@@ -305,6 +305,20 @@ powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1
 
 产物：`dist\PulsesSwap\PulsesSwap.exe`（目录版）+ `dist\installer\*.exe`（装了 Inno Setup 才有）。
 
+**绿色版 zip 的结构**（CI 的「打包绿色版」步骤生成，解压即用）：
+
+```
+PulsesSwap-Portable-2.5.0.zip
+├─ PulsesSwap.exe            ← 双击就能跑
+├─ _internal\                ← 运行时
+├─ PulsesSwap_database\      ← 空数据库（已带 .settings.json / .global.json）
+│                            ← 程序在自身目录发现它就自动使用，不再弹「选择数据库」
+└─ 使用说明.txt
+```
+
+数据库位置优先级：程序目录可写 → 用程序目录（绿色版）；
+不可写（如 `C:\Program Files`）→ 自动退到 `%LOCALAPPDATA%\PulsesSwap`。
+
 无显示环境跑界面测试（本机做法）：
 
 ```bash
