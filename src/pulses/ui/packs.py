@@ -107,6 +107,7 @@ class PacksMixin:
         self.pack_status_label.configure(text="已加载", text_color=C_SUCCESS)
         self._update_sidebar_status()
         self.pack_name_label.configure(text="当前预设：无", text_color=C_ACCENT)
+        self._sync_tacz_shortcut()
 
         self.preset_manager = PresetManager(pack_db_path, self.log_manager,
                                              tacz_path, pack_name=pack_path.name)
@@ -414,6 +415,16 @@ class PacksMixin:
             safe_print("预设刷新回调出错:", traceback.format_exc())
             self.log_manager.log(f"预设刷新回调出错: {exc}", 'ERROR')
 
+    def _sync_tacz_shortcut(self):
+        """顶部「打开 TACZ」跟着整合包是否加载来开关。"""
+        btn = getattr(self, "tacz_head_btn", None)
+        if btn is None:
+            return
+        try:
+            btn.configure(state="normal" if self.tacz_path else "disabled")
+        except Exception:
+            pass
+
     def on_preset_selected(self, name=None):
         if not self.preset_manager or self.loading_presets:
             return
@@ -423,6 +434,7 @@ class PacksMixin:
             return
         self.preset_cards.select(name, notify=False)
         self.current_selected_preset = name
+        self._sync_tacz_shortcut()
         info = self.preset_manager.presets.get(name)
         if not info:
             return

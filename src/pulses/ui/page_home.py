@@ -260,6 +260,13 @@ class HomePageMixin:
         self.detail_btn = make_text_button(
             info_head, "打开详情", command=self._open_current_detail)
         self.detail_btn.pack(side=RIGHT)
+        # 开发者常用：换完枪包直接去 tacz 里看结果
+        self.tacz_head_btn = make_text_button(
+            info_head, "打开 TACZ", command=self.open_tacz_folder,
+            state="disabled")
+        self.tacz_head_btn.pack(side=RIGHT, padx=(0, PAD_TIGHT))
+        if not self.is_developer:
+            self.tacz_head_btn.pack_forget()
 
         info_body = ctk.CTkFrame(info_group, fg_color="transparent")
         info_body.pack(fill=X, padx=PAD_CARD_X, pady=(PAD_TIGHT, PAD_CARD_Y))
@@ -479,6 +486,14 @@ class HomePageMixin:
         """身份决定主操作：玩家「一键替换」，开发者「发布到云端」。"""
         dev = bool(getattr(self, "is_developer", False))
         try:
+            try:
+                if dev:
+                    self.tacz_head_btn.pack(side=RIGHT, padx=(0, PAD_TIGHT),
+                                            before=self.detail_btn)
+                else:
+                    self.tacz_head_btn.pack_forget()
+            except Exception:
+                pass
             if dev:
                 self.apply_btn.place_forget()
                 self.publish_btn.place(relx=0.0, rely=0.0, relwidth=1.0)

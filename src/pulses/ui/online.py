@@ -1363,6 +1363,8 @@ class OnlineMixin:
         """
         if self.online is None:
             return
+        if not self._online_guard_applied(name, "更新"):
+            return
         state = self._online_state(name)
         plan = state.get("plan")
         if plan is None:
@@ -1527,12 +1529,47 @@ class OnlineMixin:
     # ==================================================================
     # 发布
     # ==================================================================
+    def _online_guard_applied(self, name: str, action: str) -> bool:
+        """上传 / 更新前必须先应用该预设：云端的"真相"就是当前 tacz 里的内容。"""
+        info = {}
+        try:
+            info = (self.preset_manager.presets.get(name) or {})
+        except Exception:
+            pass
+        if info.get("applied"):
+            return True
+        self.toast(f"先应用「{name}」再{action}", "warning")
+        try:
+            show_warning(
+                f"先应用这个预设",
+                f"「{name}」还没有应用到 TACZ。\n\n"
+                f"请先选它并点「一键替换」，把枪包换进 tacz 之后再{action}——\n"
+                f"否则云端内容和本地实际状态对不上。")
+        except Exception:
+            pass
+        return False
+
+    def _preset_version_of(self, name: str) -> str:
+        """发布用预设自己的版本号（开发者可在一键替换右侧改）。"""
+        try:
+            version = str((self.preset_manager.presets.get(name) or {})
+                          .get("version") or "").strip()
+        except Exception:
+            version = ""
+        if not version:
+            version = datetime.now().strftime("v%Y.%m.%d")
+        if not version.lower().startswith("v"):
+            version = f"v{version}"
+        return version
+
     def _publish_now(self, name: str) -> None:
         """开发者点「发布到云端」= 直接发，不再弹差异清单。
 
         要逐项确认可以在设置里打开「发布前预览」。
         """
         if self.online is None:
+            return
+        if not self._online_guard_applied(name, "发布"):
             return
         state = self._online_state(name)
         plan = state.get("plan")
@@ -1547,8 +1584,7 @@ class OnlineMixin:
         if not plan.has_changes or not selection:
             self.toast("云端已是最新", "success")
             return
-        version = datetime.now().strftime("v%Y.%m.%d")
-        self._run_publish(name, plan, selection, version, "")
+        self._run_publish(name, plan, selection, self._preset_version_of(name), "")
 
     def open_publish_dialog(self, name: str):
         if self.online is None:
@@ -1580,7 +1616,7 @@ class OnlineMixin:
 
         form = ctk.CTkFrame(card.body, fg_color="transparent")
         form.pack(fill=X, pady=(PAD_TIGHT, PAD_TIGHT))
-        version_var = StringVar(value=datetime.now().strftime("v%Y.%m.%d"))
+        version_var = StringVar(value=self._preset_version_of(name))
         notes_var = StringVar(value="")
         min_app_var = StringVar(value="")
 
