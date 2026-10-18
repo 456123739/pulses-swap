@@ -14,7 +14,7 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 ROOT = Path(SPECPATH).parent          # noqa: F821  (SPECPATH 由 PyInstaller 注入)
-ENTRY = ROOT / "src" / "pulses_swap.py"
+ENTRY = ROOT / "src" / "main.py"
 
 # tkinterdnd2 带 tkdnd 二进制，必须显式收进来，否则拖拽功能在打包后失效
 datas = collect_data_files("tkinterdnd2")
@@ -30,7 +30,7 @@ hiddenimports = collect_submodules("tkinterdnd2") + ["watchdog.observers", "PIL.
 
 a = Analysis(
     [str(ENTRY)],
-    pathex=[str(ROOT / "src")],
+    pathex=[str(ROOT / "src")],  # 让 pulses/ 包可被找到,
     binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,

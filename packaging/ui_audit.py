@@ -54,14 +54,16 @@ EXPORT = TMP / "export"
 EXPORT.mkdir()
 
 # ---------- 打桩：所有阻塞式对话框自动应答 ----------
-ps.DatabaseLocatorDialog.show = lambda self: None
-ps.show_info = lambda *a, **k: None
-ps.show_warning = lambda *a, **k: None
-ps.show_error = lambda *a, **k: None
-ps.ask_yes_no = lambda *a, **k: True
-ps.ask_ok_cancel = lambda *a, **k: True
+# 拆分后各模块是 from .dialogs import * 的快照，必须逐模块打桩
+for _mod in (ps.dialogs, ps.utils, ps.app, ps.pages, ps.managers):
+    for _name in ("show_info", "show_warning", "show_error", "ask_yes_no",
+                  "ask_ok_cancel", "show_message"):
+        if hasattr(_mod, _name):
+            setattr(_mod, _name, lambda *a, **k: None)
+    if hasattr(_mod, "DatabaseLocatorDialog"):
+        _mod.DatabaseLocatorDialog.show = lambda self: None
 ps.PulsesSwapApp._ask_after_migrate = lambda self: "mark"
-ps.PulsesSwapApp._ask_conflict_mode = lambda self, m: "rename"
+ps.PulsesSwapApp._ask_conflict_mode = lambda self, msg: "rename"
 ps.PulsesSwapApp._show_role_dialog = lambda self, t, m: "ok"
 import tkinter.simpledialog as sd
 import tkinter.filedialog as fd
