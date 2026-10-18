@@ -349,19 +349,23 @@ class PacksMixin:
                       else "未选择"))
         except Exception:
             pass
-        for src, dst, prefix in ((self.pack_status_label, self.sb_status_label, ""),
-                                 (self.pack_name_label, self.sb_preset_label,
-                                  "当前预设：")):
-            try:
-                text = str(src.cget("text"))
-                if prefix:
-                    for cand in (prefix, prefix.replace("：", ": ")):
-                        if text.startswith(cand):
-                            text = text[len(cand):]
-                            break
-                dst.configure(text=text, text_color=src.cget("text_color"))
-            except Exception:
-                pass
+        # 状态那行直接镜像；预设那行保留「预设 · 」标签 —— 去掉前缀可读性反而丢了
+        try:
+            self.sb_status_label.configure(
+                text=str(self.pack_status_label.cget("text")),
+                text_color=self.pack_status_label.cget("text_color"))
+        except Exception:
+            pass
+        try:
+            text = str(self.pack_name_label.cget("text"))
+            for cand in ("当前预设：", "当前预设: "):
+                if text.startswith(cand):
+                    text = text[len(cand):]
+                    break
+            self.sb_preset_label.configure(text=f"预设 · {text}",
+                                            text_color=C_ACCENT)
+        except Exception:
+            pass
 
     def _update_preset_list(self):
         if not self.preset_manager:

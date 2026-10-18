@@ -198,6 +198,10 @@ class OnlineMixin:
             # 数据库分区——里面的管理项只对开发者开放
             config.UI_ROLE = new_role
             try:
+                self._apply_role_actions()
+            except Exception:
+                pass
+            try:
                 roots = [self.root]
                 # 页面挂在 Canvas 的 window item 里，winfo_children 走不到，
                 # 必须把每个页面 frame 也一起刷
@@ -253,6 +257,10 @@ class OnlineMixin:
             else:
                 self.identity_badge.configure(text="玩家", text_color=C_TEXT_SECONDARY)
                 self.identity_btn.configure(text="切换身份")
+        except Exception:
+            pass
+        try:
+            self._apply_role_actions()
         except Exception:
             pass
         self._refresh_preset_cards()
@@ -624,16 +632,23 @@ class OnlineMixin:
                 for item in plan.items:
                     if item.action in (online_diff.DOWNLOAD, online_diff.REPAIR):
                         pending += 1
-            if pending and name == getattr(self, "current_selected_preset", None):
+            show = bool(pending) and name == getattr(
+                self, "current_selected_preset", None)
+            if show:
                 button.configure(text=f"同步 {pending} 项更新")
-                button.grid()
+                button.pack(side=LEFT, fill=X, expand=True)
+                aux = getattr(self, "aux_row", None)
+                if aux is not None:
+                    aux.grid()
             else:
-                button.grid_remove()
+                button.pack_forget()
+                alt = getattr(self, "apply_alt_btn", None)
+                aux = getattr(self, "aux_row", None)
+                if aux is not None and (alt is None
+                                        or not alt.winfo_ismapped()):
+                    aux.grid_remove()
         except Exception:
-            try:
-                button.grid_remove()
-            except Exception:
-                pass
+            pass
 
     def _refresh_preset_cards(self) -> None:
         cards = getattr(self, "preset_cards", None)
@@ -724,7 +739,8 @@ class OnlineMixin:
 
         pending = self.online_pending.pop(name, "")
         if pending == "sync" and error is None:
-            self.open_sync_dialog(name)
+            # 一路走到一键同步：这里再弹「要更新哪些」就又绕回去了
+            self._sync_now(name)
         elif pending == "publish" and error is None:
             self.open_publish_dialog(name)
         elif pending == "source":
@@ -1088,9 +1104,12 @@ class OnlineMixin:
         fb_pwd_var = StringVar(value=fallback.get("password") or "")
 
         url_field = FormField(
-            page, "分享链接", textvariable=url_var,
+            page, "分享链接" if not self.is_developer else "分享链接（玩家用）",
+            textvariable=url_var,
             placeholder="https://xxx.lanzoul.com/b0123456",
-            hint="玩家同步靠它；开发者发布成功后会自动填上")
+            hint=("玩家同步靠它；开发者可以留空，发布成功后会自己填上"
+                  if not self.is_developer
+                  else "开发者不需要填，发布后自动生成"))
         url_field.frame.pack(fill=X)
 
         pwd_field = FormField(
@@ -1100,9 +1119,9 @@ class OnlineMixin:
 
         if self.is_developer:
             path_field = FormField(
-                page, "云端路径（开发者）", textvariable=path_var,
-                placeholder="/PulsesSwap/预设名",
-                hint="发布时按这个路径建目录")
+                page, "云端路径（发布用，必填）", textvariable=path_var,
+                placeholder="test 或 /PulsesSwap/预设名",
+                hint="网盘里的文件夹路径；写 test 就传到根目录的 test 里，不存在会自动建")
             path_field.frame.pack(fill=X, pady=(PAD_TIGHT, 0))
         else:
             path_field = None
@@ -1732,7 +1751,16 @@ class OnlineMixin:
         def update(done, total, index, count, entry_name):
             try:
                 ratio = (done / total) if total else 0.0
-                bar.set(max(0.0, min(1.0, ratio)))
+                target = max(0.0, min(1.0, ratio))
+                start = float(bar.get())
+                if abs(target - start) > 0.001:
+                    def frame(e, _raw, a=start, b=target):
+                        try:
+                            bar.set(a + (b - a) * e)
+                        except Exception:
+                            pass
+                    # 补间过去，别一格一格跳
+                    tween(bar, "progress", 200, frame, easing=ease_out_cubic)
                 now = time.time()
                 elapsed = max(0.001, now - state["last_time"])
                 if elapsed >= 0.4:

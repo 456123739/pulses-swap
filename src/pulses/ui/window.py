@@ -181,7 +181,7 @@ class WindowMixin:
         self.sb_status_label = make_label(session_card, text="未加载",
                                            fg=C_ERROR, font_size=FS_TINY)
         self.sb_status_label.pack(anchor=W, padx=PAD_CARD_X, pady=(PAD_TIGHT, 0))
-        self.sb_preset_label = make_label(session_card, text="无",
+        self.sb_preset_label = make_label(session_card, text="预设 · 无",
                                            fg=C_ACCENT, font_size=FS_TINY)
         self.sb_preset_label.pack(anchor=W, padx=PAD_CARD_X,
                                    pady=(PAD_MICRO, PAD_GAP))

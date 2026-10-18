@@ -151,7 +151,7 @@ class HomePageMixin:
                 None,
                 ("数据库位置", self.open_preset_manager if self.db_ready else None),
             ])
-        self.pack_more_btn.pack(side=RIGHT)
+        # 不 pack：鼠标移进这张卡才浮出来（见 _hover_reveal）
 
         # 绑定 DND 到拖入框和提示文字
         if HAS_DND:
@@ -241,10 +241,14 @@ class HomePageMixin:
                 ("打开数据库文件夹", self.open_preset_manager
                  if self.db_ready else None),
             ])
-        self.preset_more_btn.pack(side=RIGHT)
+        # 不 pack：hover 才出现
         self.loading_label = make_label(preset_btn_frame, text="", fg=C_ACCENT,
                                         font_size=FS_TINY)
         self.loading_label.pack(side=RIGHT, padx=PAD_TIGHT)
+
+        # 两个卡头的「更多」常态隐藏，hover 才出现；枪包列表那个常驻
+        self._hover_reveal(pack_group, self.pack_more_btn)
+        self._hover_reveal(preset_group, self.preset_more_btn)
 
         # ---------- Step 3 · 预设详情（横条，放在右列顶部） ----------
         info_group = ctk.CTkFrame(right_panel, fg_color=C_CARD_BG,
@@ -306,20 +310,56 @@ class HomePageMixin:
         self.source_btn.pack(side=LEFT)
 
         # ---------- 主操作 ----------
-        # 平时只有「一键替换」。云端有更新时，上面再浮出一颗「同步 N 项」——
-        # 不需要的时候完全不占地方，也不会一进界面就摆一排同步按钮。
-        self.sync_btn = make_button(right_panel, "同步更新",
-                                     command=self._sync_current_preset,
-                                     accent=False, height=38,
-                                     font_size=FS_SMALL)
-        self.sync_btn.grid(row=1, column=0, sticky="ew", pady=(0, PAD_TIGHT))
-        self.sync_btn.grid_remove()
+        # 玩家：一键替换。开发者：发布到云端（外加一颗次要的一键替换）。
+        # 身份不同动作本来就不同，只换颜色的话一眼看不出自己在哪个身份。
+        self.aux_row = ctk.CTkFrame(right_panel, fg_color="transparent")
+        self.aux_row.grid(row=1, column=0, sticky="ew", pady=(0, PAD_TIGHT))
+        self.aux_row.grid_remove()
 
-        self.apply_btn = make_button(right_panel, "一键替换",
+        self.sync_btn = make_button(self.aux_row, "同步更新",
+                                     command=self._sync_current_preset,
+                                     accent=False, height=36,
+                                     font_size=FS_SMALL)
+        self.sync_btn.pack(side=LEFT, fill=X, expand=True)
+        self.sync_btn.pack_forget()
+
+        self.apply_alt_btn = make_button(self.aux_row, "一键替换",
+                                          command=self.apply_preset,
+                                          state="disabled", accent=False,
+                                          height=36, font_size=FS_SMALL)
+        self.apply_alt_btn.pack(side=LEFT, fill=X, expand=True,
+                                padx=(PAD_TIGHT, 0))
+        self.apply_alt_btn.pack_forget()
+
+        self.action_row = ctk.CTkFrame(right_panel, fg_color="transparent")
+        self.action_row.grid(row=2, column=0, sticky="ew", pady=(0, PAD_GAP))
+        self.action_row.grid_columnconfigure(0, weight=1)
+
+        # 进度条就贴在主操作下面：替换 / 同步时能立刻看到，不用去窗口最底下找
+        self.inline_progress = ctk.CTkProgressBar(
+            self.action_row, height=6, corner_radius=R_PROGRESS,
+            fg_color=C_PANEL_ALT_BG, progress_color=C_ACCENT)
+        self.inline_progress.set(0)
+        self.inline_progress.grid(row=1, column=0, sticky="ew",
+                                  pady=(PAD_TIGHT, 0))
+        self.inline_progress.grid_remove()
+        self.inline_label = make_label(self.action_row, text="",
+                                        fg=C_TEXT_SECONDARY, font_size=FS_TINY)
+        self.inline_label.grid(row=2, column=0, sticky="w", pady=(PAD_MICRO, 0))
+        self.inline_label.grid_remove()
+
+        self.apply_btn = make_button(self.action_row, "一键替换",
                                       command=self.apply_preset,
                                       state="disabled", accent=True,
                                       height=44, font_size=FS_SUBHEAD)
-        self.apply_btn.grid(row=2, column=0, sticky="ew", pady=(0, PAD_GAP))
+        self.apply_btn.grid(row=0, column=0, sticky="ew")
+
+        self.publish_btn = make_button(self.action_row, "发布到云端",
+                                        command=self._publish_current,
+                                        state="disabled", accent=True,
+                                        height=44, font_size=FS_SUBHEAD)
+        self.publish_btn.grid(row=0, column=0, sticky="ew")
+        self.publish_btn.grid_remove()
 
         # ---------- 枪包列表 ----------
         gunpack_group = ctk.CTkFrame(right_panel, fg_color=C_CARD_BG,
@@ -381,6 +421,74 @@ class HomePageMixin:
         self.home_log_text.grid(row=5, column=0, sticky="ew", pady=(PAD_XS, 0))
 
         return page
+
+    def _hover_reveal(self, host, button, delay_ms=160):
+        """卡头按钮常态隐藏，鼠标进入这张卡才浮出（不参与布局，不会顶动行）。"""
+        state = {"job": None}
+
+        def _inside():
+            try:
+                px, py = host.winfo_pointerxy()
+                rx, ry = host.winfo_rootx(), host.winfo_rooty()
+                return (rx <= px <= rx + host.winfo_width()
+                        and ry <= py <= ry + host.winfo_height())
+            except Exception:
+                return False
+
+        def _show(_event=None):
+            if state["job"] is not None:
+                try:
+                    self.root.after_cancel(state["job"])
+                except Exception:
+                    pass
+                state["job"] = None
+            try:
+                button.place(relx=1.0, rely=0.5, anchor="e", x=-6)
+            except Exception:
+                pass
+
+        def _maybe_hide(_event=None):
+            def _hide():
+                state["job"] = None
+                if not _inside():
+                    try:
+                        button.place_forget()
+                    except Exception:
+                        pass
+            try:
+                state["job"] = self.root.after(delay_ms, _hide)
+            except Exception:
+                pass
+
+        for seq, fn in (("<Enter>", _show), ("<Leave>", _maybe_hide)):
+            try:
+                host.bind(seq, fn, add="+")
+            except Exception:
+                pass
+
+    def _publish_current(self):
+        name = getattr(self, "current_selected_preset", None)
+        if name:
+            self.open_publish_dialog(name)
+
+    def _apply_role_actions(self):
+        """身份决定主操作：玩家「一键替换」，开发者「发布到云端」。"""
+        dev = bool(getattr(self, "is_developer", False))
+        try:
+            if dev:
+                self.apply_btn.grid_remove()
+                self.publish_btn.grid()
+                self.apply_alt_btn.pack(side=LEFT, fill=X, expand=True,
+                                        padx=(PAD_TIGHT, 0))
+                self.aux_row.grid()
+            else:
+                self.publish_btn.grid_remove()
+                self.apply_btn.grid()
+                self.apply_alt_btn.pack_forget()
+                if not self.sync_btn.winfo_ismapped():
+                    self.aux_row.grid_remove()
+        except Exception:
+            pass
 
     def _sync_current_preset(self):
         name = getattr(self, "current_selected_preset", None)

@@ -65,6 +65,7 @@ class TransferMixin:
 
     # ==================== 导出 ====================
     def show_progress(self, current, total, message=""):
+        self._inline_progress(current, total, message)
         if total > 0:
             pct = current / total
             ui_call(self.root, lambda: self._animate_progress(pct))
@@ -88,15 +89,52 @@ class TransferMixin:
         frame(0.0, 0.0)
         tween(self.progress_bar, "value", 170, frame, easing=ease_out_cubic)
 
+    def _inline_progress(self, current, total, message=""):
+        """主操作下面那条细进度：替换 / 同步都喂它。"""
+        bar = getattr(self, "inline_progress", None)
+        label = getattr(self, "inline_label", None)
+        if bar is None:
+            return
+        ratio = (float(current) / float(total)) if total else 0.0
+        ratio = max(0.0, min(1.0, ratio))
+        try:
+            if not bar.winfo_ismapped():
+                bar.grid()
+                if label is not None:
+                    label.grid()
+            bar.set(ratio)
+            if label is not None:
+                text = message or f"{current}/{total}"
+                label.configure(text=text)
+        except Exception:
+            pass
+
     def hide_progress(self):
         ui_call(self.root, lambda: self.progress_bar.pack_forget())
+        for name in ("inline_progress", "inline_label"):
+            widget = getattr(self, name, None)
+            if widget is not None:
+                try:
+                    widget.grid_remove()
+                except Exception:
+                    pass
         ui_call(self.root, lambda: self.progress_label.pack_forget())
         ui_call(self.root, lambda: setattr(self, "_progress_value", 0.0))
         ui_call(self.root, lambda: self.root.update_idletasks())
 
     def set_busy_state(self, busy, operation=""):
+        def _set_state(name, state):
+            widget = getattr(self, name, None)
+            if widget is not None:
+                try:
+                    widget.configure(state=state)
+                except Exception:
+                    pass
+
         if busy:
             self.is_applying = True
+            _set_state("publish_btn", "disabled")
+            _set_state("apply_alt_btn", "disabled")
             self.apply_btn.configure(state="disabled", text=f"{operation}中...")
             self.create_preset_btn.configure(state="disabled")
             self.select_pack_btn.configure(state="disabled")
@@ -105,6 +143,8 @@ class TransferMixin:
         else:
             self.is_applying = False
             self.apply_btn.configure(state="normal", text="一键替换")
+            _set_state("publish_btn", "normal")
+            _set_state("apply_alt_btn", "normal")
             self.create_preset_btn.configure(state="normal")
             self.select_pack_btn.configure(state="normal")
             self.save_version_btn.configure(state="normal")

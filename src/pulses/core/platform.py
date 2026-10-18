@@ -402,8 +402,10 @@ ROLE_THEME = {
         "window": "#F2F3F5", "input": "#F4F6F7",
     },
     "developer": {
-        "accent": "#5C6E96", "accent_hover": "#4C5C80",
-        "accent_pressed": "#3E4C6B", "accent_soft": "#DDE3EF",
+        # 比 #5C6E96 再压深一档：软底上的小字才够 4.5:1，
+        # 白字压在实心按钮上也不会发灰
+        "accent": "#4E5F84", "accent_hover": "#42506F",
+        "accent_pressed": "#35415A", "accent_soft": "#E6EBF4",
         "window": "#F2F3F7", "input": "#F4F5F9",
     },
 }
