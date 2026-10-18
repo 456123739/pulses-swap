@@ -385,7 +385,7 @@ class HomePageMixin:
     def _sync_current_preset(self):
         name = getattr(self, "current_selected_preset", None)
         if name:
-            self.open_sync_dialog(name)
+            self._sync_now(name)
 
     # ==================== 当前预设的两个入口 ====================
     def _open_current_detail(self):

@@ -322,6 +322,12 @@ class OverlayCard(_OverlayCardBase):
         if self._revealed or self._closed:
             return
         self._revealed = True
+        if getattr(config, "UI_ROLE", "player") == "developer":
+            # 弹窗是后建的，不走主窗口那次重刷，这里单独上一遍开发者配色
+            try:
+                theme_widgets(self.card, "player", "developer")
+            except Exception:
+                pass
         try:
             self.mask.place(relx=0.0, rely=0.0, relwidth=1.0, relheight=1.0)
             self.mask.lift()

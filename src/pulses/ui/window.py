@@ -356,11 +356,17 @@ class WindowMixin:
             pass
 
     def request_exit(self):
-        """界面内的退出入口（与窗口关闭按钮同一套语义）。"""
+        """界面内的退出入口（与窗口关闭按钮同一套语义）。
+
+        正在更新 / 替换时**直接拒绝退出**：写到一半被 kill 会留下半成品，
+        下次打开还得修。忙时不弹确认框，只提示，避免用户手快点了「是」。
+        """
         if self.is_applying:
-            if not ask_yes_no("操作进行中",
-                    "正在操作中，确定要退出吗？\n\n程序将在任务完成后自动退出。"):
-                return
+            try:
+                self.toast("正在处理，完成后再退出", "warning")
+            except Exception:
+                pass
+            return
         self._stop_watcher()
         try:
             self.root.quit()

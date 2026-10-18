@@ -82,6 +82,20 @@ class DatabaseMixin:
 
         if db_path:
             self.log_manager.log(f"数据库位置失效: {db_path}", 'WARNING')
+
+        # 首次启动：直接把默认库建好，不弹「请你选择数据库」——
+        # 新用户根本不知道数据库该放哪，问一次只会卡住他。
+        # 需要换位置时，主界面「更多 → 数据库位置」里随时能改。
+        try:
+            if DatabaseLocator.init_database(DEFAULT_DB_DIR):
+                DatabaseLocator.save_db_path(DEFAULT_DB_DIR)
+                self.log_manager.log(
+                    f"已自动创建数据库：{DEFAULT_DB_DIR}", 'SUCCESS')
+                self._use_database(DEFAULT_DB_DIR)
+                return
+        except Exception as exc:
+            self.log_manager.log(f"自动创建数据库失败：{exc}", 'WARNING')
+
         self.log_manager.log("未检测到数据库，请选择定位或新建", 'GUIDE')
         dialog = DatabaseLocatorDialog(self.root)
         result = dialog.show()
@@ -97,6 +111,14 @@ class DatabaseMixin:
     def _use_database(self, db_path: Path):
         self.db_path = Path(db_path)
         self.settings.bind_database(db_path)
+        # 上次是开发者身份的话，界面直接用开发者配色起来
+        try:
+            role = getattr(self.settings, "role", "player")
+            config.UI_ROLE = role
+            if role == "developer":
+                theme_widgets(self.root, "player", "developer")
+        except Exception:
+            pass
         self.recent_manager = RecentPacksManager(db_path / ".global.json")
         self.db_ready = True
         self.update_recent_list()

@@ -50,3 +50,6 @@ ANIMATIONS_ENABLED = True
 
 
 # 主题令牌通过 config 聚合导出，这里只放会变的东西。
+
+# 当前界面身份：'player' / 'developer'。对话框创建时读它来决定要不要上开发者配色。
+UI_ROLE = "player"

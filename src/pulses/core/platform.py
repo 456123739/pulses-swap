@@ -390,3 +390,107 @@ def set_app_user_model_id() -> None:
 # `from ..utils import *` 不会带出下划线开头的名字，app.main() 里要用这两个，
 # 所以显式给一份公开别名（曾经因为漏了这一步，双击 exe 直接 NameError 起不来）。
 apply_opaque_window = _apply_opaque_window
+
+
+# ==================== 身份配色（玩家 / 开发者）====================
+# 只换「强调色系 + 页面底」，卡片仍然是白的，所以切身份不会整屏变色，
+# 但一眼能看出现在是谁的界面。
+ROLE_THEME = {
+    "player": {
+        "accent": "#5BA89A", "accent_hover": "#4A9285",
+        "accent_pressed": "#3D7A6E", "accent_soft": "#D6E8E4",
+        "window": "#F2F3F5", "input": "#F4F6F7",
+    },
+    "developer": {
+        "accent": "#5C6E96", "accent_hover": "#4C5C80",
+        "accent_pressed": "#3E4C6B", "accent_soft": "#DDE3EF",
+        "window": "#F2F3F7", "input": "#F4F5F9",
+    },
+}
+
+_SWAP_PROPS = ("fg_color", "text_color", "border_color", "hover_color",
+               "progress_color", "button_color", "selected_color",
+               "text_color_disabled")
+
+
+def _channel_map(mapping):
+    """把 (旧值, 新值) 直接做成小写查找表。"""
+    return {str(old).lower(): str(new) for old, new in mapping.items()}
+
+
+def role_color_map(previous: str, target: str) -> dict:
+    a = ROLE_THEME.get(previous) or ROLE_THEME["player"]
+    b = ROLE_THEME.get(target) or ROLE_THEME["player"]
+    return _channel_map({
+        a["accent"]: b["accent"],
+        a["accent_hover"]: b["accent_hover"],
+        a["accent_pressed"]: b["accent_pressed"],
+        a["accent_soft"]: b["accent_soft"],
+        a["window"]: b["window"],
+        a["input"]: b["input"],
+    })
+
+
+def theme_widgets(widget, previous: str, target: str) -> int:
+    """widget 可以是单个控件，也可以是控件列表/元组（页面不在 winfo_children 里）。"""
+    if isinstance(widget, (list, tuple, set)):
+        return sum(theme_widgets(w, previous, target) for w in widget)
+    """把一棵控件树里「玩家配色」换成目标身份配色，返回改了几个。
+
+    CTk 控件在创建时就把颜色烘进画布，换身份只能重刷一遍。逐控件改属性
+    比重建整棵界面安全得多，也不会丢状态。
+    """
+    mapping = role_color_map(previous, target)
+    if not mapping or previous == target:
+        return 0
+    touched = 0
+    stack = [widget]
+    while stack:
+        node = stack.pop()
+        try:
+            stack.extend(node.winfo_children())
+        except Exception:
+            pass
+        # AnimatedButton 内部记着三态颜色，不一起改的话 hover 会跳回旧色
+        for attr in ("_base_color", "_hover_target", "_press_color", "_current"):
+            try:
+                value = getattr(node, attr, None)
+                if isinstance(value, str) and value.lower() in mapping:
+                    setattr(node, attr, mapping[value.lower()])
+                    touched += 1
+            except Exception:
+                pass
+        # 注意：CTk 控件的 keys() 返回的是内部画布的选项，不含 fg_color 等，
+        # 不能用 "prop in keys()" 判断，直接 cget 试探（读不到就跳过）
+        changed = {}
+        for prop in _SWAP_PROPS:
+            try:
+                value = node.cget(prop)
+            except Exception:
+                continue
+            if isinstance(value, str) and value.lower() in mapping:
+                changed[prop] = mapping[value.lower()]
+        if changed:
+            try:
+                node.configure(**changed)
+                touched += 1
+            except Exception:
+                pass
+        # 自绘分段控件：内部缓存了颜色，需要同步
+        if hasattr(node, "_pill_color"):
+            for attr, key in (("_pill_color", "accent_soft"),
+                              ("_hover_color", "accent_soft"),
+                              ("_text_color", "text_main"),
+                              ("_active_text_color", "accent"),
+                              ("_bg", "card")):
+                try:
+                    value = getattr(node, attr, None)
+                    if isinstance(value, str) and value.lower() in mapping:
+                        setattr(node, attr, mapping[value.lower()])
+                except Exception:
+                    pass
+            try:
+                node.select(node.current(), animate=False)
+            except Exception:
+                pass
+    return touched

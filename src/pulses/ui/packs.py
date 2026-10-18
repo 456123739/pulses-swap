@@ -448,7 +448,8 @@ class PacksMixin:
         """卡片右侧按钮：更新 / 发布 / 绑定 / 检查。"""
         self.on_preset_selected(name)
         if kind == "sync":
-            self.open_sync_dialog(name)
+            # 玩家：点了就更新，不弹选择框
+            self._sync_now(name)
         elif kind == "publish":
             self.open_publish_dialog(name)
         elif kind == "source":
@@ -456,7 +457,7 @@ class PacksMixin:
         elif kind == "check":
             self._online_check(name)
         else:
-            self.open_sync_dialog(name)
+            self._sync_now(name)
 
     def show_preset_context_menu(self, name, event=None):
         if not self.preset_manager or self.loading_presets:
@@ -482,9 +483,10 @@ class PacksMixin:
                              command=lambda: self.open_sync_dialog(name))
         menu.add_command(label="云端来源…",
                          command=lambda: self.open_source_dialog(name))
-        menu.add_separator()
-        menu.add_command(label="迁移预设…",
-                         command=lambda: self.migrate_preset(name))
+        if self.is_developer:
+            menu.add_separator()
+            menu.add_command(label="迁移预设…",
+                             command=lambda: self.migrate_preset(name))
         menu.add_separator()
         menu.add_command(label="重命名", command=lambda: self.rename_preset(name))
         menu.add_separator()

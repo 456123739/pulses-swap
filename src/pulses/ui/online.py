@@ -186,12 +186,27 @@ class OnlineMixin:
         两套界面的动作语义不同（下载 vs 上传），旧计划必须作废重算。
         """
         new_role = "developer" if str(role).startswith("dev") else "player"
-        changed = new_role != getattr(self.settings, "role", "player")
+        previous = getattr(self.settings, "role", "player")
+        changed = new_role != previous
         self.settings.role = new_role
         try:
             self.settings.save()
         except Exception:
             pass
+        if changed:
+            # 换身份要整窗换配色（玩家青绿 / 开发者石板蓝），并重建设置页的
+            # 数据库分区——里面的管理项只对开发者开放
+            config.UI_ROLE = new_role
+            try:
+                roots = [self.root]
+                # 页面挂在 Canvas 的 window item 里，winfo_children 走不到，
+                # 必须把每个页面 frame 也一起刷
+                roots.extend(p for p in getattr(self, "pages", {}).values()
+                             if p is not None)
+                theme_widgets(roots, previous, new_role)
+            except Exception:
+                pass
+            self._rebuild_settings_role_dependent()
         if changed:
             self.online_states = {}
             self._online_recheck.clear()
@@ -207,6 +222,22 @@ class OnlineMixin:
             if names:
                 self.online_queue = names
                 self._pump_online_queue()
+
+    def _rebuild_settings_role_dependent(self) -> None:
+        """身份变了：设置页里的「数据库管理」只对开发者显示，整块重建。"""
+        page = getattr(self, "settings_page", None)
+        if page is None:
+            return
+        tab = getattr(page, "tabs", {}).get("database")
+        if tab is None:
+            return
+        try:
+            for child in tab.winfo_children():
+                child.destroy()
+            page._build_database(tab)
+            page.reload()
+        except Exception:
+            pass
 
     def _update_identity_ui(self) -> None:
         """侧边栏的身份徽标 + 按钮文字。"""
@@ -1003,16 +1034,13 @@ class OnlineMixin:
         actions.pack(fill=X, pady=(PAD_TIGHT, 0))
         make_button(actions, "检查更新",
                     command=lambda: self._online_check(name)).pack(side=LEFT)
-        make_button(actions, "诊断",
-                    command=lambda: self.open_diagnose_dialog(name)).pack(
-            side=LEFT, padx=(PAD_TIGHT, 0))
         if self.is_developer:
+            # 诊断 / 重扫差异是排障用的，玩家不需要考虑
+            make_button(actions, "诊断",
+                        command=lambda: self.open_diagnose_dialog(name)).pack(
+                side=LEFT, padx=(PAD_TIGHT, 0))
             make_button(actions, "扫描差异",
                         command=lambda: self._online_check(name),
-                        accent=True).pack(side=LEFT, padx=(PAD_TIGHT, 0))
-        else:
-            make_button(actions, "同步…",
-                        command=lambda: self.open_sync_dialog(name),
                         accent=True).pack(side=LEFT, padx=(PAD_TIGHT, 0))
         return page
 
@@ -1305,6 +1333,33 @@ class OnlineMixin:
     # ==================================================================
     # 同步
     # ==================================================================
+    def _sync_now(self, name: str) -> None:
+        """玩家点「更新」= 直接同步，不再弹「要更新哪些」的选择框。
+
+        勾选策略放在设置里（同步时是否清理本地多余），默认只拉需要的东西；
+        单个文件的取舍对普通玩家没有意义，问一次就是多一次操作。
+        """
+        if self.online is None:
+            return
+        state = self._online_state(name)
+        plan = state.get("plan")
+        if plan is None:
+            self._online_check(name, pending="sync")
+            self.toast("正在检查更新…", "info")
+            return
+        if getattr(plan, "blocked", None):
+            show_warning("无法更新", plan.blocked[0])
+            return
+        if not plan.has_changes:
+            self.toast("已经是最新版本", "success")
+            return
+        clean = bool(getattr(self.settings, "online_sync_clean", False))
+        selection = online_diff.selection_of(plan, include_deletes=clean)
+        if not selection:
+            self.toast("没有需要下载的内容", "info")
+            return
+        self._run_sync(name, plan, selection)
+
     def open_sync_dialog(self, name: str):
         if self.online is None:
             show_warning("在线功能不可用", "在线模块没有加载成功。")

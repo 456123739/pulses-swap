@@ -240,7 +240,20 @@ class SettingsPage:
             active_text_color=C_ACCENT, font_size=FS_BODY, bold_active=True,
             text_anchor="w", text_pad=16, duration_ms=240,
             height=px(2 * (H_NAV + PAD_XS) + 12))
-        self.online_auto_seg.pack(fill=X, padx=PAD_TIGHT, pady=PAD_TIGHT)
+        self.online_auto_seg.pack(fill=X, padx=PAD_TIGHT, pady=(PAD_TIGHT, PAD_XS))
+
+        # 「更新时要不要顺手删掉本地多余枪包」——以前这是在同步弹窗里逐个勾的，
+        # 现在同步一键完成，取舍放这里一次性定好。
+        self.online_clean_seg = CanvasSegmented(
+            online_card, [("off", "多余枪包：保留"), ("on", "多余枪包：同步时删除")],
+            command=self._on_online_clean_selected, orientation="vertical",
+            item_height=H_NAV, pad=6, gap=PAD_XS, radius=R_CONTROL,
+            bg_color=C_CARD_BG, pill_color=C_ACCENT_SOFT,
+            hover_color=C_ACCENT_SOFT, text_color=C_TEXT_MAIN,
+            active_text_color=C_ACCENT, font_size=FS_BODY, bold_active=True,
+            text_anchor="w", text_pad=16, duration_ms=240,
+            height=px(2 * (H_NAV + PAD_XS) + 12))
+        self.online_clean_seg.pack(fill=X, padx=PAD_TIGHT, pady=(0, PAD_TIGHT))
 
         cache_row = ctk.CTkFrame(online_card, fg_color="transparent")
         cache_row.pack(fill=X, padx=PAD_TIGHT, pady=(0, PAD_TIGHT))
@@ -249,6 +262,13 @@ class SettingsPage:
         self.online_cache_label = make_label(
             cache_row, text="", fg=C_TEXT_MUTED, font_size=FS_TINY)
         self.online_cache_label.pack(side=LEFT, padx=PAD_TIGHT)
+
+    def _on_online_clean_selected(self, key):
+        self.app.settings.online_sync_clean = (key == "on")
+        try:
+            self.app.settings.save()
+        except Exception:
+            pass
 
     def _on_online_auto_selected(self, key):
         self.app.settings.online_auto_check = (key == "on")
@@ -309,29 +329,35 @@ class SettingsPage:
         self.db_path_label.configure(wraplength=620, justify=LEFT, anchor=W)
         self.db_path_label.pack(anchor=W, padx=PAD_CARD_X, pady=PAD_CARD_Y)
 
-        make_label(tab, text="数据库管理", fg=C_ACCENT,
-                    font_size=FS_SUBHEAD, bold=True).pack(
-                        anchor=W, pady=(0, PAD_TIGHT))
+        # 数据库管理只给开发者：玩家不需要合并库、适配旧版、强制校验这些概念
+        developer = bool(getattr(self.app, "is_developer", False))
+        if developer:
+            make_label(tab, text="数据库管理", fg=C_ACCENT,
+                        font_size=FS_SUBHEAD, bold=True).pack(
+                            anchor=W, pady=(0, PAD_TIGHT))
         db_mgr_card = ctk.CTkFrame(tab, fg_color=C_CARD_BG, corner_radius=R_CARD,
                                     border_width=0)
         db_mgr_card.pack(fill=X, pady=(0, PAD_DIALOG))
 
-        btn_row1 = ctk.CTkFrame(db_mgr_card, fg_color="transparent")
-        btn_row1.pack(fill=X, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
-        make_button(btn_row1, "切换数据库", command=self.on_switch_db).pack(
-            side=LEFT, padx=(0, PAD_TIGHT))
-        make_button(btn_row1, "合并数据库", command=self.on_merge_db).pack(
-            side=LEFT, padx=PAD_TIGHT)
-        make_button(btn_row1, "适配旧版数据库", command=self.on_migrate_legacy).pack(
-            side=LEFT, padx=PAD_TIGHT)
-
         btn_row2 = ctk.CTkFrame(db_mgr_card, fg_color="transparent")
-        btn_row2.pack(fill=X, padx=PAD_CARD_X, pady=(0, PAD_TIGHT))
+        btn_row2.pack(fill=X, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
         make_button(btn_row2, "打开数据库文件夹", command=self.on_open_db).pack(
             side=LEFT, padx=(0, PAD_TIGHT))
-        make_button(btn_row2, "强制更新校验数据",
-                     command=self.app.force_update_validation).pack(
-            side=LEFT, padx=PAD_TIGHT)
+        if developer:
+            make_button(btn_row2, "强制更新校验数据",
+                         command=self.app.force_update_validation).pack(
+                side=LEFT, padx=PAD_TIGHT)
+
+        if developer:
+            btn_row1 = ctk.CTkFrame(db_mgr_card, fg_color="transparent")
+            btn_row1.pack(fill=X, padx=PAD_CARD_X, pady=(0, PAD_TIGHT))
+            make_button(btn_row1, "切换数据库", command=self.on_switch_db).pack(
+                side=LEFT, padx=(0, PAD_TIGHT))
+            make_button(btn_row1, "合并数据库", command=self.on_merge_db).pack(
+                side=LEFT, padx=PAD_TIGHT)
+            make_button(btn_row1, "适配旧版数据库",
+                         command=self.on_migrate_legacy).pack(
+                side=LEFT, padx=PAD_TIGHT)
         make_label(db_mgr_card, text="", font_size=FS_TINY).pack(
                 anchor=W, padx=PAD_CARD_X, pady=(0, PAD_TIGHT))
 
@@ -385,6 +411,10 @@ class SettingsPage:
                              (getattr(self, "online_auto_seg", None),
                               "on" if getattr(self.settings,
                                               "online_auto_check", True)
+                              else "off"),
+                             (getattr(self, "online_clean_seg", None),
+                              "on" if getattr(self.settings,
+                                              "online_sync_clean", False)
                               else "off")):
                 if seg is not None and seg.current() != key:
                     seg.select(key, animate=False)

@@ -62,6 +62,8 @@ class AppSettings:
         self.animations = True
         self.role = "player"
         self.online_auto_check = True
+        # 同步时要不要顺手删掉本地多余枪包（默认不删，删了不可逆）
+        self.online_sync_clean = False
         self._settings_file: Path | None = None
 
     def bind_database(self, db_path: Path):
@@ -79,6 +81,8 @@ class AppSettings:
                 self.animations = bool(data.get('animations', True))
                 self.online_auto_check = bool(
                     data.get('online_auto_check', True))
+                self.online_sync_clean = bool(
+                    data.get('online_sync_clean', False))
             except Exception:
                 pass
 
@@ -91,7 +95,8 @@ class AppSettings:
                 json.dump({'storage_mode': self.storage_mode,
                            'role': self.role,
                            'animations': self.animations,
-                           'online_auto_check': self.online_auto_check},
+                           'online_auto_check': self.online_auto_check,
+                           'online_sync_clean': self.online_sync_clean},
                           f, indent=2, ensure_ascii=False)
             return True
         except Exception as e:
