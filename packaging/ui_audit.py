@@ -11,6 +11,7 @@
   G. 收尾检查：无残留遮罩、无残留浮层、无挂起补间、焦点未丢失
 """
 import importlib.util
+import sys
 import time
 import traceback
 import zipfile
@@ -72,9 +73,22 @@ fd.asksaveasfilename = lambda *a, **k: str(EXPORT / "out.fgcpack")
 # 自绘输入框是**阻塞**的（card.wait）：按钮遍历到这里会卡住，
 # 测试里给个固定返回，别让它挡路
 ps.ask_text = lambda *a, **k: "自动测试"
-for _mod in (ps.pages, ps.dialogs, ps.widget):
-    if hasattr(_mod, "ask_text"):
-        _mod.ask_text = ps.ask_text
+# 拆分后每个模块都是 from ..dialogs import * 的快照：只改 ps 上的名字没用，
+# 得把已经加载的 pulses.* 模块里的同名引用全部换掉，否则点到「新建」
+# 会弹真正的阻塞输入框，遍历就停在那儿了。
+for _mod in list(sys.modules.values()):
+    _name = getattr(_mod, "__name__", "")
+    if not (_name.startswith("pulses") or _name.startswith("online")):
+        continue
+    for _attr in ("show_info", "show_warning", "show_error", "ask_yes_no",
+                  "ask_ok_cancel", "show_message", "ask_text"):
+        if hasattr(_mod, _attr):
+            try:
+                setattr(_mod, _attr,
+                        ps.ask_text if _attr == "ask_text"
+                        else (lambda *a, **k: None))
+            except Exception:
+                pass
 fd.askopenfilename = lambda *a, **k: ""
 fd.askdirectory = lambda *a, **k: str(PACK)
 ps.os.startfile = lambda *a, **k: None

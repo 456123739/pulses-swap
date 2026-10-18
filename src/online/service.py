@@ -14,13 +14,14 @@ import base64
 import json
 import os
 import shutil
+import threading
 import time
 from dataclasses import dataclass, field
 
 from . import diff, hashing, manifest as manifest_mod, paths, trash, updater
 from .downloader import Downloader
-from .errors import (AuthError, CancelledError, ManifestError, OnlineError,
-                     SourceError)
+from .errors import (AuthError, CancelledError, ManifestError, NetworkError,
+                     OnlineError, SourceError)
 from .provider_lanzou import MANIFEST_NAME, LanzouShare
 from .provider_lanzou_account import LanzouAccount
 from .publisher import PublishResult, Publisher
@@ -96,8 +97,28 @@ def _unmask(text: str) -> str:
         return ""
 
 
+def mask_account(name: str) -> str:
+    """给界面看的账号：中间打码，够认人又不用把完整账号写在屏幕上。"""
+    text = str(name or "").strip()
+    if not text:
+        return ""
+    if "@" in text:
+        user, _, domain = text.partition("@")
+        keep = user[:2] if len(user) > 3 else user[:1]
+        return f"{keep}***@{domain}"
+    if text.isdigit() and len(text) >= 7:
+        return f"{text[:3]}****{text[-4:]}"
+    if len(text) <= 4:
+        return text[0] + "***"
+    return f"{text[:2]}***{text[-2:]}"
+
+
 class AccountStore:
-    """account.json：开发者认证信息（只在本机）。"""
+    """account.json：开发者认证信息（只在本机）。
+
+    ``uid`` 是蓝奏的会话 ID（ylogin cookie），不是账号，别拿去登录或显示；
+    ``username`` 才是登录用的手机号 / 邮箱。
+    """
 
     VERSION = 1
 
@@ -116,6 +137,18 @@ class AccountStore:
             return
         if isinstance(data, dict) and data.get("version") == self.VERSION:
             self.data = data
+            self._migrate()
+
+    def _migrate(self) -> None:
+        """旧版本把会话 ID 当成昵称存了下来 —— 那不是账号，清掉。"""
+        uid = str(self.data.get("uid") or "")
+        nickname = str(self.data.get("nickname") or "")
+        if nickname and nickname == uid:
+            self.data.pop("nickname", None)
+        if not str(self.data.get("username") or "").strip():
+            self.data.pop("username", None)
+        if not str(self.data.get("nickname") or "").strip():
+            self.data.pop("nickname", None)
 
     def save(self) -> None:
         os.makedirs(os.path.dirname(os.path.abspath(self.path)) or ".",
@@ -130,15 +163,30 @@ class AccountStore:
         return str(self.data.get("uid") or "")
 
     @property
+    def username(self) -> str:
+        """登录用的账号（手机号 / 邮箱）。旧版本没有这一项。"""
+        return str(self.data.get("username") or "")
+
+    @property
     def nickname(self) -> str:
-        return str(self.data.get("nickname") or self.uid)
+        return str(self.data.get("nickname") or "")
+
+    @property
+    def label(self) -> str:
+        """界面上显示的账号：有登录名就用打码后的登录名。"""
+        for value in (self.username, self.nickname):
+            if str(value or "").strip():
+                return mask_account(value)
+        return ""
 
     def password(self) -> str:
         return _unmask(self.data.get("secret") or "")
 
-    def set(self, uid: str, password: str, nickname: str = "") -> None:
+    def set(self, uid: str, password: str, nickname: str = "",
+            username: str = "") -> None:
         self.data = {"version": self.VERSION, "uid": str(uid),
-                     "nickname": str(nickname or uid),
+                     "username": str(username or ""),
+                     "nickname": str(nickname or ""),
                      "secret": _mask(password)}
         self.save()
 
@@ -329,6 +377,39 @@ class OnlineService:
                                 detail=str(exc)) from exc
         return manifest_mod.normalize(data)
 
+    def _fetch_manifest_bounded(self, share: LanzouShare,
+                                timeout: float = 25.0) -> dict:
+        """读分享里的 manifest，最多等 timeout 秒。
+
+        网盘抽风时「解析分享页 → 轮询直链」这条重试链能卡好几分钟，
+        界面上就是「一直在检查、连不上」。到点直接放弃，让调用方退回缓存。
+        """
+        box: dict = {}
+
+        def work():
+            try:
+                box["data"] = self._fetch_manifest(share)
+            except OnlineError as exc:
+                box["error"] = exc
+            except Exception as exc:                    # noqa: BLE001
+                box["error"] = exc
+
+        worker = threading.Thread(target=work, daemon=True,
+                                  name="manifest-read")
+        worker.start()
+        worker.join(max(3.0, float(timeout)))
+        if worker.is_alive():
+            raise NetworkError(f"读取云端内容超过 {int(timeout)} 秒",
+                               hint="网络不太顺，稍后再试。", retryable=True)
+        if "data" in box:
+            return box["data"]
+        error = box.get("error")
+        if isinstance(error, OnlineError):
+            raise error
+        if error is not None:
+            raise NetworkError(f"读取云端内容失败：{error}")
+        raise NetworkError("读取云端内容失败")
+
     def _save_cloud_manifest(self, preset: str, data: dict) -> None:
         try:
             manifest_mod.save(data, paths.cloud_manifest_path(self.db_path, preset))
@@ -419,14 +500,29 @@ class OnlineService:
     # ------------------------------------------------------------------
     def check(self, ref: PresetRef, *, role: str = "player",
               allow_cache: bool = True,
-              max_file_size: int = diff.DEFAULT_MAX_FILE) -> diff.Plan:
+              max_file_size: int = diff.DEFAULT_MAX_FILE,
+              on_phase=None) -> diff.Plan:
+        def phase(text: str) -> None:
+            if on_phase is not None:
+                try:
+                    on_phase(text)
+                except Exception:                       # noqa: BLE001
+                    pass
+
         cloud = None
         offline = False
         source_error = ""
         last_error: OnlineError | None = None
+        phase("连接云端…")
+        # 主链接 + 备用链接一共只给 45 秒：别在一个源上吊死
+        deadline = time.monotonic() + 45.0
         for share in self._share_candidates(ref.name):
+            remaining = deadline - time.monotonic()
+            if remaining < 4:
+                break
             try:
-                cloud = self._fetch_manifest(share)
+                cloud = self._fetch_manifest_bounded(
+                    share, timeout=min(25.0, remaining))
                 self._mark_active(ref.name, share.share_url)
                 self._save_cloud_manifest(ref.name, cloud)
                 self._touch_source(ref.name, cloud)
@@ -444,6 +540,7 @@ class OnlineService:
             self._log(f"云端不可用，改用上次缓存：{source_error}", "WARNING")
 
         cloud = self._sanitize_cloud(cloud)
+        phase("扫描本地文件…")
         local = self.scan(ref)
         plan = diff.compare(local, cloud, role=role,
                             app_version=self.app_version,
@@ -741,7 +838,9 @@ class OnlineService:
     # ------------------------------------------------------------------
     def account_info(self) -> dict:
         return {"uid": self.accounts.uid,
+                "username": self.accounts.username,
                 "nickname": self.accounts.nickname,
+                "label": self.accounts.label,
                 "saved": bool(self.accounts.uid)}
 
     def has_account(self) -> bool:
@@ -755,11 +854,15 @@ class OnlineService:
         folders = account.list_folders(-1)          # 顺手验证 cookie 真的能用
         self._account = account
         if remember:
-            self.accounts.set(account.uid or username, password)
-        self._log(f"蓝奏账号已登录（{account.uid or username}，"
+            # 记住的是登录名（手机号/邮箱）：会话 ID 没法用来重新登录
+            self.accounts.set(account.uid or "", password,
+                              nickname=account.nickname or "",
+                              username=username)
+        self._log(f"蓝奏账号已登录（{mask_account(username) or '已认证'}，"
                   f"{len(folders)} 个根目录）", "SUCCESS")
-        return {"uid": account.uid or username,
-                "nickname": self.accounts.nickname,
+        return {"uid": account.uid or "",
+                "username": username,
+                "label": self.accounts.label,
                 "folders": len(folders)}
 
     def logout(self, *, forget: bool = True) -> None:
@@ -775,14 +878,19 @@ class OnlineService:
         password = self.accounts.password()
         if not password:
             return False
-        try:
-            account = LanzouAccount(base=self.account_base)
-            account.login(self.accounts.uid, password)
-            self._account = account
-            return True
-        except OnlineError as exc:
-            self._log(f"自动登录失败：{exc}", "WARNING")
-            return False
+        # 新格式用登录名（手机号/邮箱）。旧格式只有会话 ID —— 那不是账号，
+        # 但有些网盘也认，就当兜底试一次，失败了再让人重新登录。
+        candidates = [self.accounts.username] if self.accounts.username \
+            else [self.accounts.uid]
+        for username in candidates:
+            try:
+                account = LanzouAccount(base=self.account_base)
+                account.login(username, password)
+                self._account = account
+                return True
+            except OnlineError as exc:
+                self._log(f"自动登录失败：{exc}", "WARNING")
+        return False
 
     def _require_account(self) -> LanzouAccount:
         if self._account is None or not self._account.logged_in:
@@ -822,19 +930,27 @@ class OnlineService:
         取不到就退回上次缓存——发布器会先删同名文件，所以即使缓存旧了也不会
         传重复文件，只是多做几次删除。
         """
+        cached = self.load_cloud_manifest(preset)
+
         # 先看文件夹里到底有没有东西：新建的空文件夹根本不需要去抓分享页，
         # 抓了会走一遍「解析分享页 + 轮询直链」的重试链，表现就是一直"检查中"。
         try:
             files = account.list_files(folder)
         except OnlineError as exc:
+            # 账号接口都不通的时候，分享页那条路只会更慢（分钟级）。
+            # 直接收敛到缓存/空，界面立刻有结论。
             self._log(f"列云端文件失败：{exc}", "WARNING")
-            files = None
-        if files is not None:
-            names = {str(f.get("name") or "").lower() for f in files}
-            if not names or MANIFEST_NAME.lower() not in names:
-                # 空目录，或只有半成品（没 manifest）→ 视为云端为空，
-                # 让发布把本地全量传上去
-                return manifest_mod.empty_manifest(preset)
+            if cached is not None:
+                self._log("改用上次缓存的云端 manifest 进行比对", "WARNING")
+                return cached
+            self._log("云端文件列表取不到，先按云端为空处理", "WARNING")
+            return manifest_mod.empty_manifest(preset)
+
+        names = {str(f.get("name") or "").lower() for f in files}
+        if not names or MANIFEST_NAME.lower() not in names:
+            # 空目录，或只有半成品（没 manifest）→ 视为云端为空，
+            # 让发布把本地全量传上去
+            return manifest_mod.empty_manifest(preset)
 
         record = self.sources.get(preset)
         share_url = str(record.get("share_url") or "")
@@ -854,24 +970,49 @@ class OnlineService:
             try:
                 reader = LanzouShare(share_url, share_password, log=self.log,
                                      sleep=self.sleep)
-                data = self._fetch_manifest(reader)
+                data = self._fetch_manifest_bounded(reader)
                 self._save_cloud_manifest(preset, data)
                 return data
             except OnlineError as exc:
                 self._log(f"读取云端 manifest 失败：{exc}", "WARNING")
 
-        cached = self.load_cloud_manifest(preset)
         if cached is not None:
             self._log("使用上次缓存的云端 manifest 进行比对", "WARNING")
             return cached
         return manifest_mod.empty_manifest(preset)
 
-    def publish_plan(self, ref: PresetRef) -> diff.Plan:
+    def test_cloud_path(self, cloud_path: str) -> dict:
+        """测试云端路径：连得上、文件夹建得出来、里面有几个文件。
+
+        开发者只填云端路径（没有分享链接）时，「测试连接」走这条。
+        """
+        account = self._require_account()
+        path = str(cloud_path or "").strip()
+        if not path:
+            raise SourceError("还没有填云端路径", hint="例如 test")
+        folder = account.ensure_path(path)
+        files = account.list_files(folder)
+        names = {str(f.get("name") or "").lower() for f in files}
+        self._log(f"云端路径可用：{path}（{len(files)} 个文件）", "SUCCESS")
+        return {"path": path, "files": len(files),
+                "has_manifest": MANIFEST_NAME.lower() in names}
+
+    def publish_plan(self, ref: PresetRef, *, on_phase=None) -> diff.Plan:
         """开发者侧：扫描本地 + 读云端 → 差异计划。"""
+        def phase(text: str) -> None:
+            if on_phase is not None:
+                try:
+                    on_phase(text)
+                except Exception:                       # noqa: BLE001
+                    pass
+
+        phase("连接云端…")
         account = self._require_account()
         folder = self._folder_of(ref.name, account)
+        phase("读取云端…")
         cloud = self._cloud_manifest_for_publish(ref.name, account, folder)
         cloud = self._sanitize_cloud(cloud)
+        phase("扫描本地文件…")
         local = self.scan(ref)
         plan = diff.compare(local, cloud, role="developer",
                             app_version=self.app_version)

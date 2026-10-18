@@ -175,6 +175,10 @@ class OnlineMixin:
     def _on_account_restored(self, ok: bool):
         if not ok and self.settings.role == "developer":
             self.log_manager.log("开发者身份已恢复，但账号需要重新认证", 'WARNING')
+            try:
+                self.toast("开发者账号需要重新登录一次", "warning")
+            except Exception:
+                pass
         self._update_identity_ui()
 
     # ==================================================================
@@ -248,19 +252,30 @@ class OnlineMixin:
             pass
 
     def _update_identity_ui(self) -> None:
-        """侧边栏的身份徽标 + 按钮文字。"""
+        """侧边栏的身份徽标 + 账号（打码）+ 按钮文字。"""
+        account = ""
         try:
             if self.is_developer:
-                nickname = "开发者"
+                self.identity_badge.configure(text="开发者",
+                                                text_color=C_ACCENT)
                 if self.online is not None:
-                    info = self.online.account_info()
-                    if info.get("nickname"):
-                        nickname = f"开发者 · {info['nickname']}"
-                self.identity_badge.configure(text=nickname, text_color=C_ACCENT)
-                self.identity_btn.configure(text="切换身份")
+                    account = str(self.online.account_info().get("label") or "")
             else:
-                self.identity_badge.configure(text="玩家", text_color=C_TEXT_SECONDARY)
-                self.identity_btn.configure(text="切换身份")
+                self.identity_badge.configure(text="玩家",
+                                                text_color=C_TEXT_SECONDARY)
+            self.identity_btn.configure(text="切换身份")
+        except Exception:
+            pass
+        # 账号单独占一行：侧边栏只有 200px，塞进徽标会挤成省略号
+        try:
+            label = getattr(self, "identity_account", None)
+            if label is not None:
+                if account:
+                    label.configure(text=account, text_color=C_TEXT_MUTED)
+                    label.pack(anchor=W, padx=PAD_CARD_X,
+                               pady=(0, PAD_GAP))
+                else:
+                    label.pack_forget()
         except Exception:
             pass
         try:
@@ -304,7 +319,10 @@ class OnlineMixin:
 
         info = self.online.account_info()
         saved = bool(info.get("saved"))
-        uid_var = StringVar(value=info.get("uid") or "")
+        # 账号框填的是登录名（手机号/邮箱）。旧版本存的是蓝奏的会话 ID，
+        # 那个数字不是账号，不能填进来，更不能拿去登录。
+        username = str(info.get("username") or "")
+        uid_var = StringVar(value=username)
         pwd_var = StringVar(value="")
         remember_var = BooleanVar(value=True)
 
@@ -314,7 +332,7 @@ class OnlineMixin:
         uid_field = FormField(
             form, "蓝奏账号", textvariable=uid_var,
             placeholder="手机号 / 邮箱",
-            hint="上次登录的账号，换号直接改这里" if saved else "")
+            hint="上次登录的账号，换号直接改这里" if username else "")
         uid_field.frame.pack(fill=X)
 
         pwd_field = FormField(
@@ -423,25 +441,6 @@ class OnlineMixin:
 
         threading.Thread(target=worker, daemon=True).start()
 
-        # 网络卡住时线程可能长期不返回：兜一层超时，别让卡片永远停在「检查中」
-        def _timeout():
-            if name not in self.online_checking:
-                return
-            self.online_checking.discard(name)
-            state = self.online_states.setdefault(name, {})
-            if state.get("phase") == "checking":
-                state["phase"] = "error"
-                state["error"] = "检查超时（网络太慢，稍后再试）"
-                state["plan"] = None
-                state["checked_at"] = time.time()
-                self.log_manager.log(f"检查更新超时（{name}）", 'WARNING')
-                self._refresh_preset_cards()
-
-        try:
-            self.root.after(45000, _timeout)
-        except Exception:
-            pass
-
     def _on_developer_login(self, card, error, on_fail=None):
         if error is not None:
             # 有表单就留在表单里报错，别把人填的内容一起关掉
@@ -472,9 +471,13 @@ class OnlineMixin:
         card = make_card(self, None, width=460)
         card.add_title("开发者")
         info = self.online.account_info()
-        account = info.get("nickname") or info.get("uid") or "未认证"
-        card.add_text(f"当前账号：{account}", fg=C_TEXT_MAIN,
-                      font_size=FS_SMALL)
+        account = str(info.get("label") or "")
+        if account:
+            card.add_text(f"已认证账号：{account}", fg=C_TEXT_MAIN,
+                          font_size=FS_SMALL)
+        else:
+            card.add_text("已认证（本机保存了登录状态）", fg=C_TEXT_MAIN,
+                          font_size=FS_SMALL)
         card.add_text("切回玩家后，开发者入口会隐藏，认证信息保留在本机。",
                       fg=C_TEXT_SECONDARY, font_size=FS_TINY)
 
@@ -548,6 +551,24 @@ class OnlineMixin:
         self._preset_size_cache[name] = measured
         return measured
 
+    def _check_summary(self, name: str) -> str:
+        """检查完成后的简短结论（来源页里显示）。"""
+        state = self._online_state(name)
+        plan = state.get("plan")
+        if plan is None or online_diff is None:
+            return ""
+        try:
+            if self.is_developer:
+                pending = (plan.count_of(online_diff.UPLOAD)
+                           + plan.count_of(online_diff.DELETE_CLOUD))
+                return ("云端已是最新" if not pending
+                        else f"有 {pending} 项待发布")
+            updates = (plan.count_of(online_diff.DOWNLOAD)
+                       + plan.count_of(online_diff.REPAIR))
+            return "已是最新" if not updates else f"有 {updates} 个更新"
+        except Exception:
+            return ""
+
     def _preset_card_data(self, name: str) -> dict:
         info = (self.preset_manager.presets.get(name) if self.preset_manager
                 else {}) or {}
@@ -571,7 +592,8 @@ class OnlineMixin:
             or (self.is_developer and self.online.cloud_path_of(name))))
 
         if phase == "checking":
-            data.update(status="检查中…", status_color=C_ACCENT,
+            data.update(status=str(state.get("phase_text") or "检查中…"),
+                        status_color=C_ACCENT,
                         dot_color=DOT_IDLE, action="", action_kind="")
             return data
 
@@ -723,6 +745,7 @@ class OnlineMixin:
             self.online_pending[name] = pending
         state = self.online_states.setdefault(name, {})
         state["phase"] = "checking"
+        state["phase_text"] = "连接云端…"
         state["error"] = ""
         self._refresh_preset_cards()
 
@@ -730,12 +753,16 @@ class OnlineMixin:
         service = self.online
         developer = self.is_developer
 
+        def on_phase(text):
+            # 工作线程里回调：只做数据标记，界面刷新切回主线程
+            ui_call(self.root, self._check_phase, name, str(text))
+
         def worker():
             try:
                 if developer:
-                    plan = service.publish_plan(ref)
+                    plan = service.publish_plan(ref, on_phase=on_phase)
                 else:
-                    plan = service.check(ref)
+                    plan = service.check(ref, on_phase=on_phase)
                 ui_call(self.root, self._on_check_done, name, plan, None)
             except OnlineError as exc:
                 ui_call(self.root, self._on_check_done, name, None, exc)
@@ -745,9 +772,40 @@ class OnlineMixin:
 
         threading.Thread(target=worker, daemon=True).start()
 
+        # 网络卡住时线程可能长期不返回：兜一层超时，别让卡片永远停在「检查中」
+        def _timeout():
+            if name not in self.online_checking:
+                return
+            self.online_checking.discard(name)
+            # 超时就把这次挂起的动作一起取消：否则用户下次随便点一下检查，
+            # 迟到的结果会顺手把「发布」也执行了
+            self.online_pending.pop(name, None)
+            state = self.online_states.setdefault(name, {})
+            if state.get("phase") == "checking":
+                state["phase"] = "error"
+                state["error"] = "检查超时（网络太慢或文件太多，稍后再试）"
+                state["plan"] = None
+                state["checked_at"] = time.time()
+                self.log_manager.log(f"检查更新超时（{name}）", 'WARNING')
+                self._refresh_preset_cards()
+
+        try:
+            self.root.after(90000, _timeout)
+        except Exception:
+            pass
+
+    def _check_phase(self, name: str, text: str) -> None:
+        """检查过程中的阶段提示（连接云端 / 读取云端 / 扫描本地）。"""
+        if name not in self.online_checking:
+            return
+        state = self.online_states.setdefault(name, {})
+        state["phase_text"] = text
+        self._refresh_preset_cards()
+
     def _on_check_done(self, name, plan, error):
         self.online_checking.discard(name)
         state = self.online_states.setdefault(name, {})
+        state.pop("phase_text", None)
         state["checked_at"] = time.time()
         if error is not None:
             state["phase"] = "error"
@@ -1250,6 +1308,51 @@ class OnlineMixin:
         status = make_label(page, text=" ", fg=C_TEXT_MUTED, font_size=FS_TINY)
         status.pack(anchor=W, pady=(PAD_TIGHT, 0))
 
+        # 保存后检查是在后台跑的：这张页自己盯着状态，别让"正在检查"一直挂着
+        shown = {"key": None}
+
+        def watch():
+            try:
+                if not status.winfo_exists():
+                    return
+            except Exception:
+                return
+            try:
+                st = self._online_state(name)
+                phase = str(st.get("phase") or "")
+                if phase:
+                    key = (phase, id(st.get("plan")),
+                           str(st.get("phase_text") or ""))
+                    if key != shown["key"]:
+                        shown["key"] = key
+                        if phase == "checking":
+                            status.configure(
+                                text=str(st.get("phase_text") or "检查中…"),
+                                text_color=C_ACCENT)
+                        elif phase == "error":
+                            status.configure(
+                                text=f"连接失败：{st.get('error') or '未知原因'}",
+                                text_color=C_ERROR)
+                        elif phase == "ready":
+                            summary = self._check_summary(name)
+                            if summary:
+                                status.configure(
+                                    text=summary,
+                                    text_color=C_SUCCESS
+                                    if summary.startswith(("云端", "已"))
+                                    else C_WARNING)
+            except Exception:
+                pass
+            try:
+                status.after(700, watch)
+            except Exception:
+                pass
+
+        try:
+            status.after(700, watch)
+        except Exception:
+            pass
+
         actions = ctk.CTkFrame(page, fg_color="transparent")
         actions.pack(fill=X)
 
@@ -1289,8 +1392,11 @@ class OnlineMixin:
             if state["busy"]:
                 return "break"
             url = url_var.get().strip()
+            path = path_var.get().strip() if path_field else ""
             url_field.ok()
-            if not url:
+            # 开发者只需要云端路径：没有分享链接时测「文件夹连不连得上」
+            cloud_only = bool(self.is_developer and path and not url)
+            if not url and not cloud_only:
                 url_field.focus()
                 url_field.error("先填分享链接")
                 return "break"
@@ -1300,6 +1406,16 @@ class OnlineMixin:
                 set_busy(False)
                 if error is not None:
                     status.configure(text=str(error), text_color=C_ERROR)
+                    return
+                if info.get("path"):
+                    text = (f"连接成功 · {info['path']} · "
+                            f"{info['files']} 个文件")
+                    if not info.get("has_manifest"):
+                        text += " · 还没有发布内容"
+                    status.configure(text=text,
+                                     text_color=C_SUCCESS if info.get("has_manifest")
+                                     else C_INFO)
+                    self.log_manager.log(text, 'INFO')
                     return
                 if info.get("manifest_ok"):
                     text = (f"连接成功 · {info['count']} 个文件 · "
@@ -1316,7 +1432,10 @@ class OnlineMixin:
 
             def worker():
                 try:
-                    info = self.online.test_source(url, pwd_var.get())
+                    if cloud_only:
+                        info = self.online.test_cloud_path(path)
+                    else:
+                        info = self.online.test_source(url, pwd_var.get())
                     ui_call(self.root, done, info, None)
                 except OnlineError as exc:
                     ui_call(self.root, done, None, exc)

@@ -1,6 +1,7 @@
 """发布 → 分享 → 玩家同步 的完整闭环（两个本地模拟服务对接）。"""
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
@@ -58,12 +59,47 @@ class PublishLoopTest(unittest.TestCase):
         info = self._login()
         self.assertEqual(info["uid"], "123456")
         self.assertTrue(self.dev.has_account())
+        # 记住的是登录名，不是会话 ID；界面上显示打码后的登录名
+        self.assertEqual(self.dev.accounts.username, "123456")
+        self.assertEqual(self.dev.account_info()["label"], "12***56")
 
         # 新实例用记住的凭据静默登录
         again = OnlineService(self.dev_db, app_version="2.4.16",
                               account_base=self.account_server.base)
         self.assertTrue(again.has_account())
         self.assertTrue(again.restore_account())
+        self.assertEqual(again.account_info()["label"], "12***56")
+
+    def test_account_secret_not_plaintext(self):
+        self._login()
+        raw = (Path(self.dev_db) / ".online" / "account.json").read_text(
+            encoding="utf-8")
+        data = json.loads(raw)
+        self.assertNotEqual(data.get("secret"), "secret")
+
+    def test_legacy_account_file_is_cleaned(self):
+        """旧版本把蓝奏会话 ID 当昵称存：读出来要丢掉，不能当账号显示。"""
+        path = Path(self.dev_db) / ".online" / "account.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            "version": 1, "uid": "4654636", "nickname": "4654636",
+            "secret": "x"}), encoding="utf-8")
+        legacy = OnlineService(self.dev_db, app_version="2.4.16",
+                               account_base=self.account_server.base)
+        info = legacy.account_info()
+        self.assertEqual(info["username"], "")
+        self.assertEqual(info["label"], "")
+        self.assertEqual(info["nickname"], "")
+
+    def test_test_cloud_path_creates_and_lists(self):
+        self._login()
+        info = self.dev.test_cloud_path("test")
+        self.assertEqual(info["path"], "test")
+        self.assertEqual(info["files"], 0)
+        self.assertFalse(info["has_manifest"])
+        # 再来一次走的是"已存在"分支，不该重复建目录
+        again = self.dev.test_cloud_path("test")
+        self.assertEqual(again["files"], 0)
 
     def test_login_failure(self):
         with self.assertRaises(AuthError):

@@ -1,4 +1,4 @@
-# Pulses Swap 交接文档（v2.5.3）
+# Pulses Swap 交接文档（v2.5.4）
 
 > 给接手的人 / AI 看的：这个软件被拆成了哪些文件、每个文件干什么、
 > 数据怎么流动、改哪里、怎么跑测试、怎么打包。
@@ -12,7 +12,7 @@
 一键把某组枪包换进游戏的 `tacz` 目录；同时把预设发布到**蓝奏云**，
 玩家绑定分享链接后可以增量同步。
 
-- 版本：`2.5.3`（`src/pulses/core/paths.py` 里的 `VERSION`）
+- 版本：`2.5.4`（`src/pulses/core/paths.py` 里的 `VERSION`）
 - 入口：`src/main.py` → `pulses.ui.app.main()`
 - 依赖：`customtkinter` `tkinterdnd2` `watchdog` `Pillow`（见 `requirements.txt`）
 - 不依赖任何第三方网络库（HTTP 全用标准库 `urllib`）
@@ -428,3 +428,20 @@ export DISPLAY=:99          # weston headless + Xwayland
 12. **输入框一律用 `make_entry()` / `FormField`**：右键菜单（剪切/复制/粘贴/全选/清空）、
     聚焦描边、校验变红都在里面，自己 `ctk.CTkEntry(...)` 会漏掉这些。
     校验报错要**先 `focus()` 再 `error()`** —— 聚焦事件是排队投递的，顺序反了红色会被盖掉。
+13. **CTk 的 `place()` 不接受 `width/height`**（会抛 `ValueError`，被 `except`
+    吞掉后就是"浮层没出现/位置不对"）。正确姿势：先 `place(x=…, y=…, relx=…)`
+    落点，再 `place_configure(width=…, height=…)` 改尺寸。
+    「最近」下拉就踩过这个坑：它挂在 26px 高的按钮行里，靠 `relx/rely` 定位
+    失败后落在 `(0,0)`、把「最近」按钮整个盖住 —— 于是**再也点不到按钮去收起**。
+    现在浮层挂在整页（`self.home_page`）上，按按钮行的 root 坐标算位置，
+    点外面 / 点按钮 / 切页面 / 换整合包都会 `place_forget()`。
+14. **`ylogin` 是会话 ID，不是账号**。旧版 `account.json` 把它当昵称存，
+    界面上就是"开发者 · 4654636"（用户会以为登错号），自动登录时还会拿它当
+    用户名去 POST。现在：`uid` 只用来判断"有没有登录过"，`username` 存真正的
+    登录名（手机号/邮箱），界面只显示 `mask_account()` 打码后的结果；
+    旧文件读出来会丢掉那个纯数字昵称。**别再把 uid 显示或当账号用。**
+15. **网盘读取必须有时间上限**。分享页解析 + 直链轮询的重试链在网盘抽风时能卡
+    好几分钟，界面表现就是"一直在检查、连不上"。现在 `_fetch_manifest_bounded()`
+    用工作线程 + `join(timeout)` 兜住（源 25s、总计 45s），账号接口列目录失败时
+    直接退回缓存/空、不再绕分享页；界面侧 `_online_check` 有 90s 看门狗，
+    并把阶段（连接云端 / 读取云端 / 扫描本地）打到卡片和来源页上。

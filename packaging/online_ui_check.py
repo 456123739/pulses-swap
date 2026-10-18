@@ -133,12 +133,21 @@ def main() -> int:
     check(True, "身份框构建成功")
     _close_top_card(root)
     app.settings.role = "developer"
+    app.online.accounts.set("4654636", "secret", username="18651999816")
     app._update_identity_ui()
     pump(root, 150)
-    check(app.identity_badge.cget("text").startswith("开发者"),
-          "身份徽标已切换")
+    check(app.identity_badge.cget("text") == "开发者",
+          f"身份徽标：{app.identity_badge.cget('text')}")
+    check(app.identity_account.winfo_ismapped() == 1
+          and app.identity_account.cget("text") == "186****9816",
+          f"账号行显示打码手机号：{app.identity_account.cget('text')}")
+    check("4654636" not in app.identity_badge.cget("text"),
+          "会话 ID 不出现在徽标里")
     app.settings.role = "player"
     app._update_identity_ui()
+    pump(root, 120)
+    check(app.identity_account.winfo_ismapped() == 0,
+          "玩家身份不显示账号行")
 
     print("\n[5] 来源框")
     name = list(app.preset_manager.presets)[0]
@@ -146,6 +155,27 @@ def main() -> int:
     pump(root, 250)
     check(True, "来源框构建成功")
     _close_top_card(root)
+
+    print("\n[5b] 来源页：只填云端路径也能测试连接")
+    app.settings.role = "developer"
+    app._update_identity_ui()
+    app.online.set_cloud_path(name, "test")
+    app.online.test_cloud_path = lambda path: {
+        "path": path, "files": 2, "has_manifest": False}
+    app.open_preset_detail(name, tab="source")
+    pump(root, 300)
+    card = ps.dialogs._OVERLAY_STACK[-1]
+    test_btn = _find_by_text(card.card, "测试连接")
+    check(test_btn is not None, "来源页有「测试连接」")
+    if test_btn is not None:
+        test_btn.invoke()
+        pump(root, 600)
+        texts = [_text(w) for w in _walk(card.card) if _text(w)]
+        check(any("test" in t and "2 个文件" in t for t in texts),
+              f"只填云端路径时能测通：{texts[:2]}")
+    _close_top_card(root)
+    app.settings.role = "player"
+    app._update_identity_ui()
 
     print("\n[6] 检查更新（无网络 → 失败分支）")
     app.online.bind(name, "https://example.invalid/b000", "")
@@ -156,6 +186,15 @@ def main() -> int:
     check(state.get("phase") in ("error", "ready"), f"检查完成：{state.get('phase')}")
     data = app._preset_card_data(name)
     check(bool(data["status"]), f"失败也有状态文案：{data['status'][:24]}")
+
+    print("\n[6b] 检查阶段文案")
+    app.online_states[name] = {"phase": "checking", "phase_text": "读取云端…"}
+    pump(root, 60)
+    data = app._preset_card_data(name)
+    check(data["status"] == "读取云端…", f"卡片显示阶段：{data['status']}")
+    app._on_check_done(name, _fake_plan(), None)
+    pump(root, 60)
+    check("phase_text" not in app._online_state(name), "完成后清掉阶段文案")
 
     print("\n[7] 同步框（有 plan 时）")
     app.online.unbind(name)
@@ -212,6 +251,30 @@ def _fake_plan(role="player"):
                            {"path": "gun_new.zip", "type": "zip", "size": 2048,
                             "sha256": "c" * 64, "packed_size": 2048}]})
     return diff.compare(local, cloud, role=role)
+
+
+def _walk(widget):
+    yield widget
+    try:
+        children = widget.winfo_children()
+    except Exception:
+        return
+    for child in children:
+        yield from _walk(child)
+
+
+def _text(widget):
+    try:
+        return str(widget.cget("text"))
+    except Exception:
+        return ""
+
+
+def _find_by_text(widget, text):
+    for item in _walk(widget):
+        if _text(item) == text:
+            return item
+    return None
 
 
 def _close_top_card(root):

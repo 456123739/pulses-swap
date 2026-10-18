@@ -100,6 +100,12 @@ class PacksMixin:
         self.current_pack_path = pack_path
         self.tacz_path = tacz_path
 
+        if getattr(self, "recent_visible", False):
+            try:
+                self.hide_recent()
+            except Exception:
+                pass
+
         pack_db_path = self.settings.get_db_path(pack_path)
         pack_db_path.mkdir(parents=True, exist_ok=True)
 

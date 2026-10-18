@@ -12,9 +12,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from mock_lanzou import MockLanzou
 from online import diff, hashing, packing, paths
-from online.errors import ManifestError, SourceError
+from online.errors import ManifestError, NetworkError, SourceError
 from online.manifest import normalize
-from online.provider_lanzou import MANIFEST_NAME
+from online.provider_lanzou import MANIFEST_NAME, LanzouShare
 from online.service import OnlineService, PresetRef
 
 
@@ -278,6 +278,84 @@ class ServiceTest(unittest.TestCase):
         notes = self.service.recover_all()
         self.assertFalse(staging.exists())
         self.assertIsInstance(notes, list)
+
+
+class CloudProbeTest(unittest.TestCase):
+    """云端读取不能把界面吊死：超时要收手，列目录失败不绕远路。"""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.db = Path(self.temp.name) / "db"
+        self.service = OnlineService(self.db, app_version="2.5.4")
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def test_fetch_manifest_gives_up_on_timeout(self):
+        import http.server
+        import threading as _threading
+        import time as _time
+
+        class Slow(http.server.BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, *a):
+                pass
+
+            def _hang(self):
+                _time.sleep(6)
+                body = b"{}"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            do_GET = _hang
+            do_POST = _hang
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Slow)
+        server.daemon_threads = True
+        _threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            share = LanzouShare(f"http://127.0.0.1:{server.server_address[1]}/b123")
+            started = _time.monotonic()
+            with self.assertRaises(NetworkError):
+                self.service._fetch_manifest_bounded(share, timeout=1.0)
+            self.assertLess(_time.monotonic() - started, 3.5)
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_list_files_failure_does_not_touch_share_page(self):
+        class BrokenAccount:
+            def list_files(self, folder):
+                raise SourceError("账号接口不通")
+
+            def folder_share(self, folder):
+                raise AssertionError("列目录失败时不该再去抓分享页")
+
+        data = self.service._cloud_manifest_for_publish(
+            "测试预设", BrokenAccount(), 1)
+        self.assertEqual(data.get("files"), [])
+
+    def test_cached_manifest_used_when_list_fails(self):
+        from online import manifest as manifest_mod
+
+        cached = manifest_mod.empty_manifest("测试预设")
+        cached["generation"] = 7
+        self.service._save_cloud_manifest("测试预设", cached)
+
+        class BrokenAccount:
+            def list_files(self, folder):
+                raise SourceError("账号接口不通")
+
+            def folder_share(self, folder):
+                raise AssertionError("不该走分享页")
+
+        data = self.service._cloud_manifest_for_publish(
+            "测试预设", BrokenAccount(), 1)
+        self.assertEqual(data.get("generation"), 7)
 
 
 if __name__ == "__main__":

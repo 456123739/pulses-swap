@@ -163,13 +163,19 @@ class HomePageMixin:
                     pass
 
         # 最近打开：做成「不参与布局」的下拉浮层。
-        # 挂在按钮行下面、用 place 定位 —— place 不影响 pack/grid 的排版，
-        # 所以展开/收起时整页不会重新布局。
-        self.recent_wrap = ctk.CTkFrame(self.pack_btn_row,
-                                         fg_color="transparent", height=1)
+        # 挂在整页上、用 place 定位到按钮行正下方 —— place 不影响 pack/grid
+        # 的排版，所以展开/收起时整页不会重新布局。
+        # 注意：不能挂在按钮行里。按钮行只有 26px 高，Tk 会把超出父窗口的
+        # 子控件裁掉；而且浮层会盖住「最近」按钮本身，点第二次就收不回去了。
+        self.home_page = page
+        self._recent_bind = None
+        self._recent_cfg = None
+        self.recent_wrap = ctk.CTkFrame(page, fg_color="transparent", height=1)
         self.recent_wrap.pack_propagate(False)
+        # 浮层压在白色卡片上：只靠底色分不出来，必须给一圈发丝线
         self.recent_frame = ctk.CTkFrame(self.recent_wrap, fg_color=C_PANEL_BG,
-                                          corner_radius=R_CONTROL, border_width=0)
+                                          corner_radius=R_CONTROL, border_width=1,
+                                          border_color=C_DIVIDER)
         self.recent_listbox = Listbox(self.recent_frame, height=6,
                                        bg=C_PANEL_BG, fg=C_TEXT_MAIN,
                                        selectbackground=C_ACCENT_SOFT,
@@ -631,78 +637,94 @@ class HomePageMixin:
 
     def toggle_recent(self):
         if self.recent_visible:
-            self.recent_visible = False
-            self.recent_toggle_btn.configure(text="▼ 最近")
-            self._animate_recent(1, hide_after=True)
+            self.hide_recent()
         else:
-            self.recent_visible = True
-            self.update_recent_list()
-            self.recent_toggle_btn.configure(text="▲ 最近")
-            self.recent_frame.pack(fill=BOTH, expand=True)
-            try:
-                self.recent_wrap.place(relx=0.0, rely=1.0, relwidth=1.0,
-                                        height=1)
-                self.recent_wrap.lift()
-            except Exception:
-                pass
-            self._animate_recent(self.RECENT_H)
+            self.show_recent()
 
-    def _animate_recent(self, target, hide_after=False):
-        """展开 / 收起：直接落位。
-
-        原来每帧改 place 高度做补间，浮层里的整个 Listbox 会跟着重绘，
-        条目一多就像"卡住"；这里改成一次性设置高度，观感反而更利落。
-        """
+    def show_recent(self):
+        """在按钮行正下方浮出最近列表（不改布局、不遮住按钮行）。"""
+        if not hasattr(self, "recent_wrap"):
+            return
+        self.update_recent_list()
+        self.recent_visible = True
         try:
-            self._recent_height = float(target)
-            self.recent_wrap.place_configure(height=max(1, int(target)))
+            self.recent_frame.pack(fill=BOTH, expand=True)
         except Exception:
             pass
-        if hide_after:
-            try:
-                self.recent_frame.pack_forget()
-            except Exception:
-                pass
-        return
+        try:
+            page = self.home_page
+            row = self.pack_btn_row
+            x = row.winfo_rootx() - page.winfo_rootx()
+            y = row.winfo_rooty() - page.winfo_rooty() + row.winfo_height() + 2
+            width = max(px(180), row.winfo_width())
+            # 只用 place_configure：CTk 的 place() 会把 x/y 再乘一次
+            # widget_scaling（125% 下浮层会跑偏），这里是已经算好的像素坐标
+            self.recent_wrap.place_configure(x=x, y=y, width=width,
+                                             height=self.RECENT_H)
+            self.recent_wrap.lift()
+        except Exception:
+            pass
+        try:
+            self._recent_root_size = (self.root.winfo_width(),
+                                       self.root.winfo_height())
+        except Exception:
+            self._recent_root_size = None
+        self._recent_unbind()
+        self._recent_bind = self.root.bind("<Button-1>",
+                                           self._recent_click_outside,
+                                           add="+")
+        self._recent_cfg = self.root.bind("<Configure>",
+                                          self._recent_window_resize,
+                                          add="+")
 
-        start = float(getattr(self, "_recent_height", 1.0))
-        if start == target:
-            try:
-                self.recent_wrap.configure(height=max(1, int(target)))
-            except Exception:
-                pass
-            if hide_after:
-                self.recent_frame.pack_forget()
+    def hide_recent(self):
+        if not hasattr(self, "recent_wrap"):
             return
+        self.recent_visible = False
+        try:
+            self.recent_frame.pack_forget()
+        except Exception:
+            pass
+        try:
+            self.recent_wrap.place_forget()      # 整个撤下，不留透明遮挡
+        except Exception:
+            pass
+        self._recent_unbind()
 
-        def frame(e, raw):
-            self._recent_height = lerp(start, float(target), e)
-            try:
-                # 只改浮层自己的高度：兄弟控件不动，页面不重排
-                self.recent_wrap.place_configure(height=max(1, int(self._recent_height)))
-            except Exception:
-                pass
-
-        def done():
-            self._recent_height = float(target)
-            try:
-                self.recent_wrap.place_configure(height=max(1, int(target)))
-            except Exception:
-                pass
-            if hide_after:
+    def _recent_unbind(self) -> None:
+        """撤掉外面点 / 窗口变化这两个全局绑定（重复开合时不会叠加）。"""
+        for attr, sequence in (("_recent_bind", "<Button-1>"),
+                               ("_recent_cfg", "<Configure>")):
+            funcid = getattr(self, attr, None)
+            if funcid:
                 try:
-                    self.recent_frame.pack_forget()
+                    self.root.unbind(sequence, funcid)
                 except Exception:
                     pass
-                try:
-                    self.recent_wrap.place_forget()   # 完全撤下，不占位
-                except Exception:
-                    pass
+                setattr(self, attr, None)
 
-        frame(0.0, 0.0)
-        # 展开/收起用弹簧：末端轻轻过冲一点再落定，手感更"活"
-        tween(self.recent_wrap, "height", 240, frame, done,
-              easing=ease_out_spring)
+    def _recent_click_outside(self, event=None):
+        """点面板外面就收起；点「最近」按钮本身交给按钮自己 toggle。"""
+        widget = getattr(event, "widget", None)
+        while widget is not None:
+            if widget in (self.recent_wrap, self.recent_toggle_btn):
+                return
+            widget = getattr(widget, "master", None)
+        self.hide_recent()
+
+    def _recent_window_resize(self, event=None):
+        # 窗口尺寸变了，浮层的位置就不准了：先收起，别让它悬在半空。
+        # 只看根窗口自己的 Configure，而且尺寸真的变了才收 —— place 浮层本身
+        # 也会带出一串 Configure，别被它们误伤。
+        if event is not None and getattr(event, "widget", None) is not self.root:
+            return
+        try:
+            size = (self.root.winfo_width(), self.root.winfo_height())
+        except Exception:
+            size = None
+        if size is not None and size == getattr(self, "_recent_root_size", None):
+            return
+        self.hide_recent()
 
     def update_recent_list(self):
         if not hasattr(self, 'recent_listbox'):
@@ -732,4 +754,5 @@ class HomePageMixin:
         if not Path(path).exists():
             show_error("错误", f"路径不存在: {path}")
             return
+        self.hide_recent()
         self.load_pack(Path(path))

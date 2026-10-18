@@ -200,6 +200,11 @@ class WindowMixin:
                                               command=self.open_identity_dialog)
         self.identity_btn.pack(side=RIGHT)
 
+        # 登录账号只以「打码」的形式出现；没有就整行不占位置
+        self.identity_account = make_label(session_card, text="",
+                                            fg=C_TEXT_MUTED,
+                                            font_size=FS_TINY)
+
         # ===== 右侧内容列：页面区 + 全局状态条（进度条） =====
         content_col = ctk.CTkFrame(main_frame, fg_color="transparent")
         content_col.grid(row=0, column=1, sticky="nsew")
@@ -284,6 +289,11 @@ class WindowMixin:
         """
         if name not in self.pages or name == self.active_page:
             return
+        if getattr(self, "recent_visible", False):
+            try:
+                self.hide_recent()
+            except Exception:
+                pass
         cancel_tween(self.stack.canvas, "entrance")
         previous = self.active_page
         direction = 1
