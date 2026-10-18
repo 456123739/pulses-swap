@@ -36,7 +36,14 @@ class FakeDwm:
 # 拆分后各模块 `from .config import *` 会留下 IS_WINDOWS 快照，逐个打补丁
 ps.config.IS_WINDOWS = True
 ps.IS_WINDOWS = True
-for _m in (ps.utils, ps.app, ps.dialogs):
+import importlib as _il
+_mods = [ps.utils, ps.app, ps.dialogs]
+for _name in ("pulses.core.platform", "pulses.ui.window", "pulses.ui.app"):
+    try:
+        _mods.append(_il.import_module(_name))
+    except Exception:
+        pass
+for _m in _mods:
     _m.IS_WINDOWS = True
 ps.ctypes.windll = types.SimpleNamespace(
     dwmapi=FakeDwm(),

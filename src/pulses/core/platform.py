@@ -170,3 +170,126 @@ def sync_ui_scale(root_widget) -> float:
 def px(value):
     """设计稿像素 → 当前缩放下的像素（只给 tk.Canvas / grid minsize 用）。"""
     return int(round(float(value) * config.UI_SCALE))
+
+
+# ==================== 程序入口 ====================
+def apply_window_icon(window) -> None:
+    """设置窗口/任务栏/Alt-Tab 图标。任一方式失败都不影响启动。"""
+    # 1) Windows：iconbitmap(default=...) 最稳，同时作用于后续所有 toplevel
+    try:
+        ico = resource_path("icon.ico")
+        if IS_WINDOWS and ico.exists():
+            window.iconbitmap(default=str(ico))
+    except Exception:
+        pass
+    # 2) 跨平台：iconphoto。PhotoImage 必须挂在对象上保留引用，
+    #    否则被 GC 回收后图标会消失。
+    try:
+        png = resource_path("icon.png")
+        if png.exists():
+            img = PhotoImage(file=str(png))
+            window.iconphoto(True, img)
+            window._pulses_icon_ref = img
+    except Exception:
+        pass
+
+
+# Windows 任务栏按钮的图标不取窗口图标，而是取进程 AppUserModelID 对应的图标
+# （快捷方式图标 / exe 内嵌图标）。不显式设置时任务栏会退回 Tk 默认羽毛图标。
+# 取值与 installer.iss 的 publisher 命名保持一致。
+APP_USER_MODEL_ID = "Pulses0Studio.PulsesSwap"
+
+
+def make_window_opaque(window) -> bool:
+    """把窗口设成完全不透明（禁用 Win11 的 Mica / Acrylic 背景材质）。
+
+    必须能反复调用：窗口失焦、弹出子窗口、切换主题时 DWM 会**重新评估**
+    窗口材质，Mica 会自己回来 —— 这正是「一有弹窗在前面，主窗口就变
+    半透明」的成因。所以除了启动时，还要在焦点/映射变化时补一次。
+    """
+    if not IS_WINDOWS:
+        return False
+    try:
+        window.attributes("-alpha", 1.0)
+    except Exception:
+        pass
+    try:
+        window.attributes("-transparentcolor", "")
+    except Exception:
+        pass
+    try:
+        hwnd = (ctypes.windll.user32.GetParent(window.winfo_id())
+                or window.winfo_id())
+        _apply_opaque_window(hwnd)
+        return True
+    except Exception:
+        return False
+
+
+def refresh_window_opacity(root) -> int:
+    """给主窗口与所有子窗口重新上一次「不透明」，返回处理了几个窗口。"""
+    if not IS_WINDOWS:
+        return 0
+    count = 0
+    if make_window_opaque(root):
+        count += 1
+    try:
+        for child in root.winfo_children():
+            try:
+                if child.winfo_class() == "Toplevel":
+                    if make_window_opaque(child):
+                        count += 1
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return count
+
+
+def _apply_opaque_window(hwnd) -> None:
+    """把 Win11 窗口设成完全不透明（禁用 Mica / Acrylic 背景材质）。
+
+    关键在 DWMWA_SYSTEMBACKDROP_TYPE(38)：值 0 是「自动」，系统会自己挑
+    Mica/Acrylic —— 那就是壁纸透进来的原因；必须显式设成 1(DWMSBT_NONE)。
+    """
+    if not IS_WINDOWS:
+        return
+    try:
+        none_backdrop = ctypes.c_int(1)      # DWMSBT_NONE
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd, 38, ctypes.byref(none_backdrop), ctypes.sizeof(none_backdrop))
+    except Exception:
+        pass
+    try:
+        # Win11 早期版本用未公开的 DWMWA_MICA_EFFECT(1029)，关掉它兜底
+        mica_off = ctypes.c_int(0)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd, 1029, ctypes.byref(mica_off), ctypes.sizeof(mica_off))
+    except Exception:
+        pass
+    try:
+        light_titlebar = ctypes.c_int(0)     # 浅色标题栏（与主题一致）
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd, 20, ctypes.byref(light_titlebar),
+            ctypes.sizeof(light_titlebar))
+    except Exception:
+        pass
+    try:
+        # 33 = DWMWA_WINDOW_CORNER_PREFERENCE：按设计令牌给窗口圆角
+        corner = ctypes.c_int(DWM_CORNER_PREF)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd, 33, ctypes.byref(corner), ctypes.sizeof(corner))
+    except Exception:
+        pass
+
+
+def _set_app_user_model_id() -> None:
+    """设置进程 AppUserModelID。必须在任何 Tk 窗口创建之前调用，否则不生效。"""
+    if not IS_WINDOWS:
+        # ctypes.windll 只在 Windows 上存在，非 Windows 直接短路，避免 AttributeError
+        return
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            APP_USER_MODEL_ID)
+    except Exception:
+        pass

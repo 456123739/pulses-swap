@@ -20,7 +20,8 @@ from pathlib import Path as _Path
 
 _sys.path.insert(0, str(_Path(__file__).resolve().parent))
 
-from pulses import config, utils, animation, widget, dialogs, managers, pages, app  # noqa: E402
+from pulses import config, utils, animation, widget, dialogs, managers, pages
+from pulses.ui import app  # noqa: E402
 
 # 顺序：先找能力最全的层，再往下沉
 _LAYERS = (app, pages, managers, dialogs, widget, animation, utils, config)
