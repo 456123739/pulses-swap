@@ -331,35 +331,35 @@ class HomePageMixin:
                                 padx=(PAD_TIGHT, 0))
         self.apply_alt_btn.pack_forget()
 
-        self.action_row = ctk.CTkFrame(right_panel, fg_color="transparent")
+        # 高度固定：44(按钮) + 24(进度条带) —— 进度出现/消失都不改布局，
+        # 否则下面的枪包列表和日志会整体往下跳 31px。
+        self.action_row = ctk.CTkFrame(right_panel, fg_color="transparent",
+                                        height=44 + 24)
+        self.action_row.grid_propagate(False)
         self.action_row.grid(row=2, column=0, sticky="ew", pady=(0, PAD_GAP))
-        self.action_row.grid_columnconfigure(0, weight=1)
-
-        # 进度条就贴在主操作下面：替换 / 同步时能立刻看到，不用去窗口最底下找
-        self.inline_progress = ctk.CTkProgressBar(
-            self.action_row, height=6, corner_radius=R_PROGRESS,
-            fg_color=C_PANEL_ALT_BG, progress_color=C_ACCENT)
-        self.inline_progress.set(0)
-        self.inline_progress.grid(row=1, column=0, sticky="ew",
-                                  pady=(PAD_TIGHT, 0))
-        self.inline_progress.grid_remove()
-        self.inline_label = make_label(self.action_row, text="",
-                                        fg=C_TEXT_SECONDARY, font_size=FS_TINY)
-        self.inline_label.grid(row=2, column=0, sticky="w", pady=(PAD_MICRO, 0))
-        self.inline_label.grid_remove()
 
         self.apply_btn = make_button(self.action_row, "一键替换",
                                       command=self.apply_preset,
                                       state="disabled", accent=True,
                                       height=44, font_size=FS_SUBHEAD)
-        self.apply_btn.grid(row=0, column=0, sticky="ew")
+        self.apply_btn.place(relx=0.0, rely=0.0, relwidth=1.0)
 
         self.publish_btn = make_button(self.action_row, "发布到云端",
                                         command=self._publish_current,
                                         state="disabled", accent=True,
                                         height=44, font_size=FS_SUBHEAD)
-        self.publish_btn.grid(row=0, column=0, sticky="ew")
-        self.publish_btn.grid_remove()
+        self.publish_btn.place(relx=0.0, rely=0.0, relwidth=1.0)
+        self.publish_btn.place_forget()
+
+        # 进度条占的是预留带，不挤任何人
+        self.inline_progress = ctk.CTkProgressBar(
+            self.action_row, height=6, corner_radius=R_PROGRESS,
+            fg_color=C_PANEL_ALT_BG, progress_color=C_ACCENT)
+        self.inline_progress.set(0)
+        self.inline_label = make_label(self.action_row, text="",
+                                        fg=C_TEXT_SECONDARY, font_size=FS_TINY)
+
+
 
         # ---------- 枪包列表 ----------
         gunpack_group = ctk.CTkFrame(right_panel, fg_color=C_CARD_BG,
@@ -468,22 +468,26 @@ class HomePageMixin:
 
     def _publish_current(self):
         name = getattr(self, "current_selected_preset", None)
-        if name:
+        if not name:
+            return
+        if bool(getattr(self.settings, "online_publish_preview", False)):
             self.open_publish_dialog(name)
+        else:
+            self._publish_now(name)
 
     def _apply_role_actions(self):
         """身份决定主操作：玩家「一键替换」，开发者「发布到云端」。"""
         dev = bool(getattr(self, "is_developer", False))
         try:
             if dev:
-                self.apply_btn.grid_remove()
-                self.publish_btn.grid()
+                self.apply_btn.place_forget()
+                self.publish_btn.place(relx=0.0, rely=0.0, relwidth=1.0)
                 self.apply_alt_btn.pack(side=LEFT, fill=X, expand=True,
                                         padx=(PAD_TIGHT, 0))
                 self.aux_row.grid()
             else:
-                self.publish_btn.grid_remove()
-                self.apply_btn.grid()
+                self.publish_btn.place_forget()
+                self.apply_btn.place(relx=0.0, rely=0.0, relwidth=1.0)
                 self.apply_alt_btn.pack_forget()
                 if not self.sync_btn.winfo_ismapped():
                     self.aux_row.grid_remove()

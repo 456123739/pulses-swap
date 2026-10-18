@@ -99,9 +99,9 @@ class TransferMixin:
         ratio = max(0.0, min(1.0, ratio))
         try:
             if not bar.winfo_ismapped():
-                bar.grid()
+                bar.place(relx=0.0, rely=1.0, y=-16, relwidth=0.62, anchor="sw")
                 if label is not None:
-                    label.grid()
+                    label.place(relx=1.0, rely=1.0, y=-20, anchor="se")
             bar.set(ratio)
             if label is not None:
                 text = message or f"{current}/{total}"
@@ -115,7 +115,7 @@ class TransferMixin:
             widget = getattr(self, name, None)
             if widget is not None:
                 try:
-                    widget.grid_remove()
+                    widget.place_forget()
                 except Exception:
                     pass
         ui_call(self.root, lambda: self.progress_label.pack_forget())

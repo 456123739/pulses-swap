@@ -64,6 +64,8 @@ class AppSettings:
         self.online_auto_check = True
         # 同步时要不要顺手删掉本地多余枪包（默认不删，删了不可逆）
         self.online_sync_clean = False
+        # 开发者发布前要不要先看差异清单（默认直接发）
+        self.online_publish_preview = False
         self._settings_file: Path | None = None
 
     def bind_database(self, db_path: Path):
@@ -83,6 +85,8 @@ class AppSettings:
                     data.get('online_auto_check', True))
                 self.online_sync_clean = bool(
                     data.get('online_sync_clean', False))
+                self.online_publish_preview = bool(
+                    data.get('online_publish_preview', False))
             except Exception:
                 pass
 
@@ -96,7 +100,8 @@ class AppSettings:
                            'role': self.role,
                            'animations': self.animations,
                            'online_auto_check': self.online_auto_check,
-                           'online_sync_clean': self.online_sync_clean},
+                           'online_sync_clean': self.online_sync_clean,
+                           'online_publish_preview': self.online_publish_preview},
                           f, indent=2, ensure_ascii=False)
             return True
         except Exception as e:

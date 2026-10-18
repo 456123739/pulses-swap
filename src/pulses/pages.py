@@ -253,7 +253,18 @@ class SettingsPage:
             active_text_color=C_ACCENT, font_size=FS_BODY, bold_active=True,
             text_anchor="w", text_pad=16, duration_ms=240,
             height=px(2 * (H_NAV + PAD_XS) + 12))
-        self.online_clean_seg.pack(fill=X, padx=PAD_TIGHT, pady=(0, PAD_TIGHT))
+        self.online_clean_seg.pack(fill=X, padx=PAD_TIGHT, pady=(0, PAD_XS))
+
+        self.online_preview_seg = CanvasSegmented(
+            online_card, [("off", "发布：直接发"), ("on", "发布：先看差异")],
+            command=self._on_online_preview_selected, orientation="vertical",
+            item_height=H_NAV, pad=6, gap=PAD_XS, radius=R_CONTROL,
+            bg_color=C_CARD_BG, pill_color=C_ACCENT_SOFT,
+            hover_color=C_ACCENT_SOFT, text_color=C_TEXT_MAIN,
+            active_text_color=C_ACCENT, font_size=FS_BODY, bold_active=True,
+            text_anchor="w", text_pad=16, duration_ms=240,
+            height=px(2 * (H_NAV + PAD_XS) + 12))
+        self.online_preview_seg.pack(fill=X, padx=PAD_TIGHT, pady=(0, PAD_TIGHT))
 
         cache_row = ctk.CTkFrame(online_card, fg_color="transparent")
         cache_row.pack(fill=X, padx=PAD_TIGHT, pady=(0, PAD_TIGHT))
@@ -262,6 +273,13 @@ class SettingsPage:
         self.online_cache_label = make_label(
             cache_row, text="", fg=C_TEXT_MUTED, font_size=FS_TINY)
         self.online_cache_label.pack(side=LEFT, padx=PAD_TIGHT)
+
+    def _on_online_preview_selected(self, key):
+        self.app.settings.online_publish_preview = (key == "on")
+        try:
+            self.app.settings.save()
+        except Exception:
+            pass
 
     def _on_online_clean_selected(self, key):
         self.app.settings.online_sync_clean = (key == "on")
@@ -415,6 +433,10 @@ class SettingsPage:
                              (getattr(self, "online_clean_seg", None),
                               "on" if getattr(self.settings,
                                               "online_sync_clean", False)
+                              else "off"),
+                             (getattr(self, "online_preview_seg", None),
+                              "on" if getattr(self.settings,
+                                              "online_publish_preview", False)
                               else "off")):
                 if seg is not None and seg.current() != key:
                     seg.select(key, animate=False)

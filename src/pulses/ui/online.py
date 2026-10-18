@@ -742,7 +742,10 @@ class OnlineMixin:
             # 一路走到一键同步：这里再弹「要更新哪些」就又绕回去了
             self._sync_now(name)
         elif pending == "publish" and error is None:
-            self.open_publish_dialog(name)
+            if bool(getattr(self.settings, "online_publish_preview", False)):
+                self.open_publish_dialog(name)
+            else:
+                self._publish_now(name)
         elif pending == "source":
             self.open_source_dialog(name)
         self._pump_online_queue()
@@ -1524,6 +1527,29 @@ class OnlineMixin:
     # ==================================================================
     # 发布
     # ==================================================================
+    def _publish_now(self, name: str) -> None:
+        """开发者点「发布到云端」= 直接发，不再弹差异清单。
+
+        要逐项确认可以在设置里打开「发布前预览」。
+        """
+        if self.online is None:
+            return
+        state = self._online_state(name)
+        plan = state.get("plan")
+        if plan is None:
+            self._online_check(name, pending="publish")
+            self.toast("正在检查云端…", "info")
+            return
+        if getattr(plan, "blocked", None):
+            show_warning("无法发布", plan.blocked[0])
+            return
+        selection = online_diff.selection_of(plan, include_deletes=True)
+        if not plan.has_changes or not selection:
+            self.toast("云端已是最新", "success")
+            return
+        version = datetime.now().strftime("v%Y.%m.%d")
+        self._run_publish(name, plan, selection, version, "")
+
     def open_publish_dialog(self, name: str):
         if self.online is None:
             show_warning("在线功能不可用", "在线模块没有加载成功。")
