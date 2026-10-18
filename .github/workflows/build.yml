@@ -228,8 +228,7 @@ jobs:
   # ───────────────────────── 发布 Release ─────────────────────────
   release:
     needs: [windows, macos, linux]
-    # 任一平台失败也要把成功的产物发出来（macOS 构建尚未在真机验证）
-    if: startsWith(github.ref, 'refs/tags/v') && !cancelled()
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

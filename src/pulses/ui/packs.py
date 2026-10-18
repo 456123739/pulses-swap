@@ -104,9 +104,9 @@ class PacksMixin:
         pack_db_path.mkdir(parents=True, exist_ok=True)
 
         self.pack_path_label.configure(text=str(pack_path), text_color=C_SUCCESS)
-        self.pack_status_label.configure(text="状态: 已加载", text_color=C_SUCCESS)
+        self.pack_status_label.configure(text="已加载", text_color=C_SUCCESS)
         self._update_sidebar_status()
-        self.pack_name_label.configure(text="当前预设: 无", text_color=C_ACCENT)
+        self.pack_name_label.configure(text="当前预设：无", text_color=C_ACCENT)
 
         self.preset_manager = PresetManager(pack_db_path, self.log_manager,
                                              tacz_path, pack_name=pack_path.name)
@@ -263,7 +263,7 @@ class PacksMixin:
             with open(dp / 'index.json', 'w', encoding='utf-8') as f:
                 json.dump(index_data, f, indent=2, ensure_ascii=False)
             self.preset_manager.save_cache()
-            self.pack_name_label.configure(text="当前预设: default")
+            self.pack_name_label.configure(text="当前预设：default")
             self.log_manager.log("默认预设创建成功", 'SUCCESS')
 
     def close_pack(self):
@@ -280,8 +280,8 @@ class PacksMixin:
         self.preset_manager = None
         self.current_selected_preset = None
         self.pack_path_label.configure(text="未选择", text_color=C_TEXT_SECONDARY)
-        self.pack_status_label.configure(text="状态: 未加载", text_color=C_ERROR)
-        self.pack_name_label.configure(text="当前预设: 无", text_color=C_ACCENT)
+        self.pack_status_label.configure(text="未加载", text_color=C_ERROR)
+        self.pack_name_label.configure(text="当前预设：无", text_color=C_ACCENT)
         self.preset_cards.set_items([])
         self.gunpack_listbox.delete(0, END)
         self.preset_name_label.configure(text="未选择")
@@ -349,11 +349,17 @@ class PacksMixin:
                       else "未选择"))
         except Exception:
             pass
-        for src, dst in ((self.pack_status_label, self.sb_status_label),
-                         (self.pack_name_label, self.sb_preset_label)):
+        for src, dst, prefix in ((self.pack_status_label, self.sb_status_label, ""),
+                                 (self.pack_name_label, self.sb_preset_label,
+                                  "当前预设：")):
             try:
-                dst.configure(text=src.cget("text"),
-                              text_color=src.cget("text_color"))
+                text = str(src.cget("text"))
+                if prefix:
+                    for cand in (prefix, prefix.replace("：", ": ")):
+                        if text.startswith(cand):
+                            text = text[len(cand):]
+                            break
+                dst.configure(text=text, text_color=src.cget("text_color"))
             except Exception:
                 pass
 
@@ -366,9 +372,9 @@ class PacksMixin:
         self._refresh_preset_cards()
         if self.preset_manager.current_preset:
             self.pack_name_label.configure(
-                text=f"当前预设: {self.preset_manager.current_preset}")
+                text=f"当前预设：{self.preset_manager.current_preset}")
         else:
-            self.pack_name_label.configure(text="当前预设: 无")
+            self.pack_name_label.configure(text="当前预设：无")
         if self.current_selected_preset:
             self.preset_cards.select(self.current_selected_preset,
                                      notify=False)

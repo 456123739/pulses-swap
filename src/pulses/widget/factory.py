@@ -63,8 +63,9 @@ def make_button(parent, text, command=None, width=None, state="normal",
         text=text, command=command,
         text_color=C_TEXT_INVERSE if accent else C_ACCENT,
         border_width=0, corner_radius=R_CONTROL,
-        font=(config.FONT_FAMILY, font_size or FS_BODY),
-        height=height or H_CONTROL, state=state)
+        # 按钮文字统一加粗：小字号下不加粗会显得发灰、不够"可点"
+        font=(config.FONT_FAMILY, font_size or FS_BODY, "bold"),
+        height=height or H_CONTROL, state=state, anchor="center")
     if width is not None:
         kwargs['width'] = width
     if accent:
@@ -96,18 +97,27 @@ def make_section_header(parent, index, title, subtitle=""):
     return row
 
 
-def make_menu_button(parent, text="⋯", items=None, width=30):
+def make_menu_button(parent, text=None, items=None, width=None, as_text=False):
     """把次要操作收进一个「⋯」弹出菜单，别在主界面铺一排按钮。
 
     items 传**函数**而不是列表：菜单在每次点开时才求值，
     这样切换玩家/开发者身份后，菜单里的项能立刻跟着变。
     项为 (文字, 回调)，回调为 None 表示这一条当前不可用；None 表示分隔线。
     """
-    button = ctk.CTkButton(
-        parent, text=text, width=width, height=H_CONTROL - 6,
-        fg_color="transparent", hover_color=C_PANEL_ALT_BG,
-        text_color=C_TEXT_MUTED, corner_radius=R_CONTROL - 6,
-        border_width=0, font=(config.FONT_FAMILY, FS_BODY))
+    if as_text:
+        # 卡头用「更多」文字按钮：和卡片里的「⋯」区分开，
+        # 一处是「这一行预设的操作」，一处是「这一块区域的整理动作」
+        button = ctk.CTkButton(
+            parent, text=text or "更多", width=1, height=H_CONTROL - 6,
+            fg_color="transparent", hover_color=C_PANEL_ALT_BG,
+            text_color=C_ACCENT, corner_radius=R_CONTROL - 6,
+            border_width=0, font=(config.FONT_FAMILY, FS_SMALL, "bold"))
+    else:
+        button = ctk.CTkButton(
+            parent, text=text or "⋯", width=width or 30, height=H_CONTROL - 6,
+            fg_color="transparent", hover_color=C_PANEL_ALT_BG,
+            text_color=C_TEXT_MUTED, corner_radius=R_CONTROL - 6,
+            border_width=0, font=(config.FONT_FAMILY, FS_BODY, "bold"))
 
     def popup():
         try:
@@ -148,8 +158,8 @@ def make_text_button(parent, text, command=None, state="normal", color=None,
         parent, text=text, command=command, width=1, height=H_CONTROL - 6,
         fg_color="transparent", hover_color=C_PANEL_ALT_BG,
         text_color=color or C_ACCENT, corner_radius=R_CONTROL - 6,
-        border_width=0, state=state,
-        font=(config.FONT_FAMILY, FS_SMALL, "bold" if bold else "normal"))
+        border_width=0, state=state, anchor="center",
+        font=(config.FONT_FAMILY, FS_SMALL, "bold"))
 
 
 def make_entry(parent, textvariable=None, placeholder="", width=None):
@@ -382,7 +392,7 @@ class FormField:
                 self._hint_row, text="显示", width=36, height=16,
                 fg_color="transparent", hover_color=C_PANEL_ALT_BG,
                 text_color=C_TEXT_MUTED, corner_radius=4,
-                font=(config.FONT_FAMILY, FS_TINY),
+                font=(config.FONT_FAMILY, FS_TINY, "bold"),
                 command=self.toggle_password)
             self._toggle.pack(side=RIGHT)
         self._hint_row.bind("<Configure>", self._on_hint_resize, add="+")

@@ -113,15 +113,39 @@ class TransferMixin:
                 self.apply_btn.configure(state="disabled")
 
     # ==================== 枪包列表 ====================
+    def _sync_gunpack_empty(self):
+        """枪包列表为空时显示空状态，别留一块空灰底。"""
+        box = getattr(self, "gunpack_empty", None)
+        if box is None:
+            return
+        try:
+            empty = self.gunpack_listbox.size() == 0
+            if empty:
+                self.gunpack_listbox.pack_forget()
+                self.gunpack_scroll.pack_forget()
+                if not box.winfo_ismapped():
+                    box.pack(fill=BOTH, expand=True)
+            else:
+                box.pack_forget()
+                if not self.gunpack_listbox.winfo_ismapped():
+                    self.gunpack_listbox.pack(side=LEFT, fill=BOTH, expand=True,
+                                              padx=(PAD_INNER, 0), pady=PAD_INNER)
+                    self.gunpack_scroll.pack(side=RIGHT, fill=Y,
+                                             padx=(2, PAD_XS), pady=PAD_INNER)
+        except Exception:
+            pass
+
     def refresh_gunpacks(self, use_cache: bool = False):
         if not self.preset_manager or not self.current_selected_preset or self.loading_presets:
             self.gunpack_listbox.delete(0, END)
             self.gunpack_count_label.configure(text="共 0 个枪包")
+            self._sync_gunpack_empty()
             return
         preset_name = self.current_selected_preset
         if preset_name not in self.preset_manager.presets:
             self.gunpack_listbox.delete(0, END)
             self.gunpack_count_label.configure(text="共 0 个枪包")
+            self._sync_gunpack_empty()
             return
 
         self.gunpack_listbox.delete(0, END)
@@ -153,9 +177,10 @@ class TransferMixin:
             indexed = conv
 
         if not current and not indexed:
-            self.gunpack_listbox.insert(END, "(此预设暂无枪包)")
-            self.gunpack_listbox.itemconfig(0, fg=C_STATUS_EMPTY)
+            # 空列表交给空状态组件，不再塞一行灰字
+            self.gunpack_listbox.delete(0, END)
             self.gunpack_count_label.configure(text="共 0 个枪包")
+            self._sync_gunpack_empty()
             return
 
         cur_names = set(current.keys())
@@ -200,6 +225,7 @@ class TransferMixin:
         else:
             self.gunpack_count_label.configure(
                 text=f"共 {total} 个枪包 (来自 {location})")
+        self._sync_gunpack_empty()
 
         if missing or extra or modified:
             lines = [f"预设 '{preset_name}' 校验结果 (从{location}读取):"]

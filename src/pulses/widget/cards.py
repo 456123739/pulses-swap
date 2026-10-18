@@ -312,10 +312,12 @@ class PresetCard(ctk.CTkFrame):
             font=(config.FONT_FAMILY, FS_TINY))
         self.meta_label.grid(row=1, column=0, sticky="ew", pady=(1, 0))
 
+        # 状态行是「唯一需要用户行动」的信息，不再排在最后又最小：
+        # 字号抬到 FS_SMALL，有动作时再加粗
         self.status_label = ctk.CTkLabel(
             text_box, text="", anchor="w", justify="left",
             text_color=C_TEXT_SECONDARY,
-            font=(config.FONT_FAMILY, FS_TINY))
+            font=(config.FONT_FAMILY, FS_SMALL))
         self.status_label.grid(row=2, column=0, sticky="ew", pady=(1, 0))
 
         actions = ctk.CTkFrame(self, fg_color="transparent")
@@ -326,7 +328,7 @@ class PresetCard(ctk.CTkFrame):
             actions, C_ACCENT, C_ACCENT_HOVER, press_color=C_ACCENT_PRESSED,
             text="更新", width=60, height=26, corner_radius=R_CONTROL,
             border_width=0, text_color=C_TEXT_INVERSE,
-            font=(config.FONT_FAMILY, FS_TINY), command=self._fire_action)
+            font=(config.FONT_FAMILY, FS_TINY, "bold"), command=self._fire_action)
         self.action_btn.pack(side="left")
         self.action_btn.pack_forget()
 
@@ -335,7 +337,7 @@ class PresetCard(ctk.CTkFrame):
             press_color=lerp_color(C_ACCENT_SOFT, C_ACCENT, 0.45),
             text="⋯", width=26, height=26, corner_radius=R_CONTROL,
             border_width=0, text_color=C_TEXT_MUTED,
-            font=(config.FONT_FAMILY, FS_SMALL), command=self._fire_menu)
+            font=(config.FONT_FAMILY, FS_SMALL, "bold"), command=self._fire_menu)
         self.menu_btn.pack(side="left", padx=(4, 0))
 
         self.badge = ctk.CTkLabel(
@@ -402,8 +404,11 @@ class PresetCard(ctk.CTkFrame):
         self._fit_last = -1
         self._fit_texts()
 
+        actionable = bool(str(data.get("action") or "").strip())
         self.status_label.configure(
-            text_color=data.get("status_color") or C_TEXT_SECONDARY)
+            text_color=data.get("status_color") or C_TEXT_SECONDARY,
+            font=(config.FONT_FAMILY, FS_SMALL,
+                  "bold" if actionable else "normal"))
 
         dot_color = data.get("dot_color") or C_TEXT_MUTED
         self.dot.set_color(dot_color)

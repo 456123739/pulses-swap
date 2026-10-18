@@ -118,6 +118,14 @@ class HomePageMixin:
         # 路径显示
         self.pack_path_frame, self.pack_path_label = make_display_box(
             self.pack_drop_area, text="未选择", height=H_CONTROL)
+        # 拖入框本身是填充灰，路径条再用同一个灰就"隐形"了；
+        # 这里抬高一级用白底 + 发丝线，空状态也有明确边界
+        try:
+            self.pack_path_frame.configure(fg_color=C_PANEL_BG,
+                                            border_width=1,
+                                            border_color=C_DIVIDER)
+        except Exception:
+            pass
         self.pack_path_frame.pack(fill=X, padx=PAD_GAP, pady=(0, PAD_TIGHT))
 
         # 按钮行：只留一个实心主操作，其余走扁平文字按钮
@@ -136,7 +144,7 @@ class HomePageMixin:
         # 打开目录 / 关闭整合包 / 数据库位置：低频操作收进「⋯」
         # （菜单每次打开时按当前状态现算，所以不再需要「隐形按钮」来持有可用状态）
         self.pack_more_btn = make_menu_button(
-            pack_btn_row, items=lambda: [
+            pack_btn_row, as_text=True, items=lambda: [
                 ("打开整合包目录", self.open_pack_folder
                  if self.current_pack_path else None),
                 ("关闭整合包", self.close_pack if self.current_pack_path else None),
@@ -227,7 +235,7 @@ class HomePageMixin:
                                                state="disabled")
         self.add_cloud_btn.pack(side=LEFT)
         self.preset_more_btn = make_menu_button(
-            preset_btn_frame, items=lambda: [
+            preset_btn_frame, as_text=True, items=lambda: [
                 ("检查全部更新", self._online_check_all if self.db_ready else None),
                 ("刷新列表", self.refresh_presets if self.db_ready else None),
                 ("打开数据库文件夹", self.open_preset_manager
@@ -268,13 +276,19 @@ class HomePageMixin:
         ver_box.pack(side=LEFT, fill=X, expand=True)
         make_label(ver_box, text="版本", fg=C_TEXT_MUTED,
                    font_size=FS_TINY).pack(side=LEFT)
-        self.version_entry = make_entry(ver_box, width=110)
-        self.version_entry.pack(side=LEFT, padx=(PAD_TIGHT, PAD_XS))
+        self.version_entry = make_entry(ver_box, width=158)
+        self.version_entry.pack(side=LEFT, padx=(PAD_TIGHT, 0))
         self.version_entry.bind('<Return>', lambda e: self.save_version())
-        self.save_version_btn = make_button(ver_box, "保存",
-                                             command=self.save_version,
-                                             state="disabled", width=56)
-        self.save_version_btn.pack(side=LEFT)
+        # 「保存」只属于这个输入框：做成尾随在框内的文字按钮，
+        # 而不是另起一个和「版本」平级的独立按钮
+        self.save_version_btn = make_text_button(ver_box, "保存",
+                                                  command=self.save_version,
+                                                  state="disabled")
+        try:
+            self.save_version_btn.place(in_=self.version_entry, relx=1.0,
+                                        rely=0.5, x=-6, anchor="e")
+        except Exception:
+            self.save_version_btn.pack(side=LEFT, padx=(PAD_XS, 0))
         # 「当前版本」不单独占一行了：状态行已经说明应用情况，
         # 这里留一个不参与布局的标签，兼容 packs.py 里原有的 configure 调用。
         self.preset_version_label = make_label(
@@ -318,7 +332,7 @@ class HomePageMixin:
             gunpack_head, text="共 0 个", fg=C_TEXT_MUTED, font_size=FS_TINY)
         self.gunpack_count_label.pack(side=LEFT, padx=(PAD_GAP, 0))
         self.gunpack_more_btn = make_menu_button(
-            gunpack_head, items=lambda: [
+            gunpack_head, as_text=True, items=lambda: [
                 ("刷新枪包列表", self.refresh_gunpacks
                  if self.current_selected_preset else None),
                 ("全部刷新", self.refresh_all),
@@ -334,6 +348,9 @@ class HomePageMixin:
         gunpack_list_wrap = ctk.CTkFrame(gunpack_content, fg_color=C_INPUT_BG,
                                           corner_radius=R_CONTROL, border_width=0)
         gunpack_list_wrap.pack(fill=BOTH, expand=True)
+        self.gunpack_empty = EmptyState(gunpack_list_wrap, title="还没有枪包",
+                                         hint="先选一个整合包，再选一个预设",
+                                         bg=C_INPUT_BG)
         self.gunpack_listbox = Listbox(gunpack_list_wrap, height=6,
                                         bg=C_INPUT_BG, fg=C_TEXT_MAIN,
                                         selectbackground=C_ACCENT_SOFT,

@@ -161,49 +161,44 @@ class WindowMixin:
             text_anchor="w", text_pad=14, duration_ms=240, height=nav_height)
         self.nav.pack(fill=X, padx=PAD_XS)
 
-        # ===== 侧边栏底部状态卡 =====
-        # 侧边栏有 800+px 高，只有品牌 + 三个导航项会显得空；
-        # 底部钉一张状态卡（整合包 / 状态 / 当前预设），既补留白又是真信息。
-        status_card = ctk.CTkFrame(sidebar, fg_color=C_PANEL_ALT_BG,
-                                    corner_radius=R_CONTROL,
-                                    border_width=BORDER_W,
-                                    border_color=C_BORDER_SOFT)
-        status_card.pack(side=BOTTOM, fill=X, padx=PAD_XS,
-                          pady=(PAD_GAP, PAD_CARD_Y))
-        attach_hover_glow(status_card)
-        make_label(status_card, text="当前整合包", fg=C_TEXT_MUTED,
+        # ===== 侧边栏底部：会话卡（整合包信息 + 身份，合成一块）=====
+        # 原来这里是两块：一块灰底状态卡 + 一块白底身份卡。白栏上放灰卡
+        # 读起来像 disabled；合成一块白底 + 发丝线，少一个盒子也更整。
+        session_card = ctk.CTkFrame(sidebar, fg_color=C_CARD_BG,
+                                     corner_radius=R_CONTROL,
+                                     border_width=1,
+                                     border_color=C_DIVIDER)
+        session_card.pack(side=BOTTOM, fill=X, padx=PAD_XS,
+                           pady=(PAD_GAP, PAD_CARD_Y))
+
+        make_label(session_card, text="当前整合包", fg=C_TEXT_MUTED,
                     font_size=FS_TINY).pack(anchor=W, padx=PAD_CARD_X,
                                              pady=(PAD_CARD_Y, PAD_MICRO))
-        self.sb_pack_label = make_label(status_card, text="未选择",
+        self.sb_pack_label = make_label(session_card, text="未选择",
                                          fg=C_TEXT_MAIN, font_size=FS_SMALL,
                                          bold=True)
         self.sb_pack_label.pack(anchor=W, padx=PAD_CARD_X)
-        self.sb_status_label = make_label(status_card, text="状态: 未加载",
+        self.sb_status_label = make_label(session_card, text="未加载",
                                            fg=C_ERROR, font_size=FS_TINY)
         self.sb_status_label.pack(anchor=W, padx=PAD_CARD_X, pady=(PAD_TIGHT, 0))
-        self.sb_preset_label = make_label(status_card, text="当前预设: 无",
+        self.sb_preset_label = make_label(session_card, text="无",
                                            fg=C_ACCENT, font_size=FS_TINY)
         self.sb_preset_label.pack(anchor=W, padx=PAD_CARD_X,
-                                   pady=(PAD_MICRO, PAD_CARD_Y))
+                                   pady=(PAD_MICRO, PAD_GAP))
 
-        # ===== 身份卡（玩家 / 开发者） =====
-        # pack(side=BOTTOM) 是自下往上叠的：先摆状态卡，身份卡就会在它上面。
-        identity_card = ctk.CTkFrame(sidebar, fg_color=C_CARD_BG,
-                                      corner_radius=R_CONTROL,
-                                      border_width=BORDER_W,
-                                      border_color=C_BORDER_SOFT)
-        identity_card.pack(side=BOTTOM, fill=X, padx=PAD_XS,
-                            pady=(PAD_GAP, PAD_TIGHT))
-        attach_hover_glow(identity_card)
-        self.identity_badge = make_label(identity_card, text="玩家",
+        # 分隔线：上面是「这个包」的信息，下面是「你是谁」
+        ctk.CTkFrame(session_card, fg_color=C_DIVIDER,
+                      height=1).pack(fill=X, padx=PAD_CARD_X)
+
+        identity_row = ctk.CTkFrame(session_card, fg_color="transparent")
+        identity_row.pack(fill=X, padx=PAD_TIGHT, pady=PAD_TIGHT)
+        self.identity_badge = make_label(identity_row, text="玩家",
                                           fg=C_TEXT_SECONDARY,
                                           font_size=FS_SMALL, bold=True)
-        self.identity_badge.pack(anchor=W, padx=PAD_CARD_X,
-                                  pady=(PAD_TIGHT, PAD_MICRO))
-        self.identity_btn = make_button(identity_card, "切换身份",
-                                         command=self.open_identity_dialog,
-                                         width=84)
-        self.identity_btn.pack(fill=X, padx=PAD_TIGHT, pady=(0, PAD_TIGHT))
+        self.identity_badge.pack(side=LEFT, padx=(PAD_XS, 0))
+        self.identity_btn = make_text_button(identity_row, "切换",
+                                              command=self.open_identity_dialog)
+        self.identity_btn.pack(side=RIGHT)
 
         # ===== 右侧内容列：页面区 + 全局状态条（进度条） =====
         content_col = ctk.CTkFrame(main_frame, fg_color="transparent")

@@ -280,7 +280,7 @@ class OnlineMixin:
             opts, text="打开蓝奏云", width=80, height=20,
             fg_color="transparent", hover_color=C_PANEL_ALT_BG,
             text_color=C_TEXT_MUTED, corner_radius=4,
-            font=(config.FONT_FAMILY, FS_TINY),
+            font=(config.FONT_FAMILY, FS_TINY, "bold"),
             command=lambda: open_url("https://www.lanzou.com")).pack(side=RIGHT)
 
         status = make_label(form, text=" ", fg=C_TEXT_MUTED, font_size=FS_TINY)
@@ -1085,7 +1085,7 @@ class OnlineMixin:
             anchor="w", height=22, width=1,
             fg_color="transparent", hover_color=C_PANEL_ALT_BG,
             text_color=C_TEXT_MUTED, corner_radius=4,
-            font=(config.FONT_FAMILY, FS_TINY))
+            font=(config.FONT_FAMILY, FS_TINY, "bold"))
         fb_toggle.pack(fill=X, pady=(PAD_TIGHT, 0))
         fb_box = ctk.CTkFrame(page, fg_color="transparent")
         fb_row = ctk.CTkFrame(fb_box, fg_color="transparent")
