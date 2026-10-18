@@ -50,7 +50,7 @@ from . import config
 from .config import *
 from .utils import *
 from . import config
-from .widgets import *
+from .widget import *
 from .dialogs import *
 from .managers import *
 

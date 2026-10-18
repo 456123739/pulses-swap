@@ -52,7 +52,7 @@ from .utils import *
 from . import config
 from .utils import *
 from .animation import *
-from .widgets import *
+from .widget import *
 from .dialogs import *
 from .managers import *
 from .pages import *
