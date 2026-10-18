@@ -335,9 +335,9 @@ class CloudProbeTest(unittest.TestCase):
             def folder_share(self, folder):
                 raise AssertionError("列目录失败时不该再去抓分享页")
 
-        data = self.service._cloud_manifest_for_publish(
-            "测试预设", BrokenAccount(), 1)
-        self.assertEqual(data.get("files"), [])
+        with self.assertRaises(SourceError):
+            self.service._cloud_manifest_for_publish(
+                "测试预设", BrokenAccount(), 1)
 
     def test_cached_manifest_used_when_list_fails(self):
         from online import manifest as manifest_mod

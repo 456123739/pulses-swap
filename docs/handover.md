@@ -1,4 +1,4 @@
-# Pulses Swap 交接文档（v2.5.4）
+# Pulses Swap 交接文档（v2.5.5）
 
 > 给接手的人 / AI 看的：这个软件被拆成了哪些文件、每个文件干什么、
 > 数据怎么流动、改哪里、怎么跑测试、怎么打包。
@@ -12,7 +12,7 @@
 一键把某组枪包换进游戏的 `tacz` 目录；同时把预设发布到**蓝奏云**，
 玩家绑定分享链接后可以增量同步。
 
-- 版本：`2.5.4`（`src/pulses/core/paths.py` 里的 `VERSION`）
+- 版本：`2.5.5`（`src/pulses/core/paths.py` 里的 `VERSION`）
 - 入口：`src/main.py` → `pulses.ui.app.main()`
 - 依赖：`customtkinter` `tkinterdnd2` `watchdog` `Pillow`（见 `requirements.txt`）
 - 不依赖任何第三方网络库（HTTP 全用标准库 `urllib`）
@@ -443,5 +443,6 @@ export DISPLAY=:99          # weston headless + Xwayland
 15. **网盘读取必须有时间上限**。分享页解析 + 直链轮询的重试链在网盘抽风时能卡
     好几分钟，界面表现就是"一直在检查、连不上"。现在 `_fetch_manifest_bounded()`
     用工作线程 + `join(timeout)` 兜住（源 25s、总计 45s），账号接口列目录失败时
-    直接退回缓存/空、不再绕分享页；界面侧 `_online_check` 有 90s 看门狗，
-    并把阶段（连接云端 / 读取云端 / 扫描本地）打到卡片和来源页上。
+    直接退回缓存（没缓存就明确报错，**不能假装云端为空** —— 否则界面会显示
+    「有 N 项待发布」，用户一发布就是整包重传）；界面侧 `_online_check` 有 90s
+    看门狗，并把阶段（连接云端 / 读取云端 / 扫描本地）打到卡片和来源页上。

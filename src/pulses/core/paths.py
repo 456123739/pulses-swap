@@ -45,7 +45,7 @@ except ImportError:
 
 
 # ==================== 常量定义 ====================
-VERSION = "2.5.4"
+VERSION = "2.5.5"
 AUTHOR = "NimShade"
 PROJECT_NAME = "Pulses Swap"
 

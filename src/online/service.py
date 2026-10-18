@@ -938,13 +938,14 @@ class OnlineService:
             files = account.list_files(folder)
         except OnlineError as exc:
             # 账号接口都不通的时候，分享页那条路只会更慢（分钟级）。
-            # 直接收敛到缓存/空，界面立刻有结论。
+            # 有缓存就用缓存；连缓存都没有就明确报错 —— 不能假装「云端是空的」，
+            # 否则界面会显示「有 N 项待发布」，用户一发布就是整包重传。
             self._log(f"列云端文件失败：{exc}", "WARNING")
             if cached is not None:
                 self._log("改用上次缓存的云端 manifest 进行比对", "WARNING")
                 return cached
-            self._log("云端文件列表取不到，先按云端为空处理", "WARNING")
-            return manifest_mod.empty_manifest(preset)
+            raise SourceError(f"无法读取云端文件夹：{exc}",
+                              hint="检查网络，或确认云端路径还在。") from exc
 
         names = {str(f.get("name") or "").lower() for f in files}
         if not names or MANIFEST_NAME.lower() not in names:
