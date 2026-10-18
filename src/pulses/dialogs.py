@@ -204,10 +204,35 @@ class _OverlayCardBase:
     # ---------- 内容构建 ----------
     def add_title(self, text, fg=None):
         label = make_label(self.body, text=text,
-                            fg=C_ACCENT if fg is None else fg,
+                            fg=C_TEXT_MAIN if fg is None else fg,
                             font_size=FS_SUBHEAD, bold=True)
-        label.pack(anchor=W, pady=(0, PAD_TIGHT))
+        label.pack(anchor=W, pady=(0, 0))
+        # 标题下一条 24x2 的强调色短线：给所有弹窗一个统一的"落款"
+        try:
+            rule = ctk.CTkFrame(self.body, fg_color=C_ACCENT,
+                                corner_radius=1, height=2, width=24)
+            rule.pack(anchor=W, pady=(PAD_MICRO, PAD_TIGHT))
+            rule.pack_propagate(False)
+        except Exception:
+            pass
         return label
+
+    def add_subtitle(self, text, fg=None):
+        """标题下的一行小字：说明当前上下文（比正文小一号、更淡）。"""
+        label = make_label(self.body, text=text,
+                            fg=C_TEXT_MUTED if fg is None else fg,
+                            font_size=FS_SMALL)
+        label.configure(
+            wraplength=max(200, self.width - 2 * PAD_DIALOG - 6),
+            justify=LEFT, anchor=W)
+        label.pack(anchor=W, fill=X, pady=(0, PAD_INNER))
+        return label
+
+    def add_divider(self, pady=(0, PAD_INNER)):
+        """一条发丝分割线（内容分区用）。"""
+        line = ctk.CTkFrame(self.body, fg_color=C_DIVIDER, height=1)
+        line.pack(fill=X, pady=pady)
+        return line
 
     def add_text(self, text, fg=None, font_size=FS_BODY, wrap_extra=6):
         label = make_label(self.body, text=text,
@@ -222,8 +247,14 @@ class _OverlayCardBase:
     def add_buttons(self, buttons, default=None):
         """buttons: [(文字, 返回值, 是否强调色)]；default 为回车触发的返回值。"""
         default_value = buttons[0][1] if default is None else default
+        # 按钮区上方的分割线：内容与操作分开，视觉上更稳
+        try:
+            ctk.CTkFrame(self.body, fg_color=C_DIVIDER, height=1).pack(
+                fill=X, side=BOTTOM, pady=(PAD_DIALOG, PAD_INNER))
+        except Exception:
+            pass
         bar = ctk.CTkFrame(self.body, fg_color="transparent")
-        bar.pack(fill=X, side=BOTTOM, pady=(PAD_DIALOG, 0))
+        bar.pack(fill=X, side=BOTTOM, pady=(0, 0))
         for text, value, accent in reversed(buttons):
             btn = make_button(bar, text,
                                command=lambda v=value: self.close(v),
@@ -264,8 +295,7 @@ class OverlayCard(_OverlayCardBase):
                                   corner_radius=0)
         # height=1 让卡片高度完全由内容决定（CTkFrame 默认 200x200 会撑出空白）
         self.card = ctk.CTkFrame(self.mask, fg_color=C_PANEL_BG,
-                                  corner_radius=R_CARD, border_width=BORDER_W,
-                                  border_color=C_BORDER_SOFT,
+                                  corner_radius=R_CARD, border_width=0,
                                   width=width, height=1)
         self.body = ctk.CTkFrame(self.card, fg_color="transparent")
         self.body.pack(fill=BOTH, expand=True, padx=PAD_DIALOG, pady=PAD_DIALOG)
@@ -303,29 +333,37 @@ class OverlayCard(_OverlayCardBase):
         self._play_entrance()
 
     def _play_entrance(self):
-        """卡片入场：从下方 4.5% 处曲线滑到居中，同时描边从强调色淡回发丝色。"""
+        """卡片入场：从下方 6% 处弹到居中，描边从强调色淡回发丝色。
+
+        用阻尼弹簧而不是三次曲线：末端有约 7% 的过冲再收回，
+        观感是"弹出来"而不是"滑进来"。
+        """
         def frame(e, raw):
             try:
-                self.card.place_configure(rely=lerp(0.545, 0.5, e))
+                self.card.place_configure(rely=lerp(0.56, 0.5, e))
                 self.card.configure(
                     border_color=lerp_color(C_ACCENT_SOFT, C_BORDER_SOFT, e))
             except Exception:
                 pass
 
         frame(0.0, 0.0)
-        tween(self.card, "entrance", 190, frame, easing=ease_out_cubic)
+        tween(self.card, "entrance", 280, frame, easing=ease_out_spring)
 
     def _key_widgets(self):
         return [self.mask, self.card, self.body]
 
     def _is_top(self):
-        return bool(_OVERLAY_STACK) and _OVERLAY_STACK[-1] is self
+        alive = [c for c in _OVERLAY_STACK if not getattr(c, "_closed", False)]
+        return bool(alive) and alive[-1] is self
 
     def _teardown(self):
         self._closed = True
         try:
-            if _OVERLAY_STACK and _OVERLAY_STACK[-1] is self:
-                _OVERLAY_STACK.pop()
+            # 不一定是最上层：下层卡片被程序关掉时（保存失败弹了错误框、随后
+            # 又关掉原卡片），只 pop 栈顶会留下一条「已销毁但还在栈里」的幽灵
+            # 记录 —— 之后 top_card() 拿到死控件，整层遮罩就再也点不动了。
+            if self in _OVERLAY_STACK:
+                _OVERLAY_STACK.remove(self)
         except Exception:
             pass
         try:

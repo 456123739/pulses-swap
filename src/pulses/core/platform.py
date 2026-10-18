@@ -172,6 +172,68 @@ def px(value):
     return int(round(float(value) * config.UI_SCALE))
 
 
+def tk_font(family, size_px, weight=None):
+    """原生 Tk 控件用的字体元组（Listbox / Canvas 文字）。
+
+    Tk 里**正数**字号是「磅」，会被 tk scaling 再乘一次（96dpi 下 1.33，
+    150% 下 2.0），和 CTk 的像素字号完全对不上 —— 表现就是同一个界面里
+    原生控件的字比 CTk 控件大 30%~100%。**负数**字号才是像素，这里统一用负值，
+    并且自己乘 UI_SCALE，和 CTk 控件严格同一套缩放。
+    """
+    size = max(1, int(round(float(size_px) * config.UI_SCALE)))
+    if weight:
+        return (family, -size, weight)
+    return (family, -size)
+
+
+def lock_ctk_scaling(scale) -> float:
+    """锁死 CTk 的缩放，同时**彻底关掉它的 DPI 自动检测**。
+
+    这是 Win11「明明没写半透明，窗口却半透明」的真正根因：
+    customtkinter 的 ScalingTracker.check_dpi_scaling() 每 100ms 轮询一次
+    （scaling_tracker.py:184），一旦判定 DPI 变化就
+        window.attributes("-alpha", 0.15) → 改缩放 → attributes("-alpha", 1)
+    在 Win11 上这套「先透明再还原」会：
+      · 让 DWM 重新评估窗口材质，Mica/亚克力被重新打开（就是壁纸透进来）；
+      · 弹窗/窗口重新映射时误判一次 DPI 变化，主窗口瞬间掉到 15% 不透明度；
+      · 中途只要缩放回调抛一次异常，alpha 就永远停在 0.15（几乎看不见）。
+    我们自己做 DPI 感知（enable_dpi_awareness）+ 自己做缩放，
+    不需要 CTk 这套轮询，直接把它摘掉：alpha 从此只有我们自己写。
+    """
+    try:
+        tracker = ctk.ScalingTracker
+    except Exception:
+        return float(scale or 1.0)
+    scale = max(0.4, float(scale or 1.0))
+    try:
+        tracker.deactivate_automatic_dpi_awareness = True
+    except Exception:
+        pass
+    try:
+        # 置 True：add_widget/add_window 就不会再挂 100ms 轮询
+        tracker.update_loop_running = True
+    except Exception:
+        pass
+    try:
+        # 双保险：即使将来 CTk 改了内部实现，也不会再走到那段 alpha 闪切
+        tracker.check_dpi_scaling = classmethod(lambda cls: None)
+    except Exception:
+        pass
+    try:
+        # 已登记窗口的 DPI 缓存归一成 1.0，之后缩放系数 = 我们显式设的值，
+        # 不会和真实 DPI 再乘一次（那就是双重缩放）
+        for window in list(tracker.window_dpi_scaling_dict):
+            tracker.window_dpi_scaling_dict[window] = 1.0
+    except Exception:
+        pass
+    for setter in (ctk.set_widget_scaling, ctk.set_window_scaling):
+        try:
+            setter(scale)
+        except Exception:
+            pass
+    return scale
+
+
 # ==================== 程序入口 ====================
 def apply_window_icon(window) -> None:
     """设置窗口/任务栏/Alt-Tab 图标。任一方式失败都不影响启动。"""
@@ -246,6 +308,20 @@ def refresh_window_opacity(root) -> int:
     return count
 
 
+def _color_ref(hex_color: str) -> int:
+    """'#RRGGBB' → Win32 COLORREF（0x00BBGGRR）。解析失败返回 -1（调用方跳过）。"""
+    try:
+        text = str(hex_color).lstrip("#")
+        if len(text) != 6:
+            return -1
+        r = int(text[0:2], 16)
+        g = int(text[2:4], 16)
+        b = int(text[4:6], 16)
+        return (b << 16) | (g << 8) | r
+    except Exception:
+        return -1
+
+
 def _apply_opaque_window(hwnd) -> None:
     """把 Win11 窗口设成完全不透明（禁用 Mica / Acrylic 背景材质）。
 
@@ -274,6 +350,21 @@ def _apply_opaque_window(hwnd) -> None:
             ctypes.sizeof(light_titlebar))
     except Exception:
         pass
+    # 标题栏 / 边框 / 标题文字显式上色（Win11 22H2+）。
+    # 不设的话 DWM 会按系统主题给标题栏铺一层带材质的底 —— 那层同样会透出壁纸，
+    # 而且和我们的 #F5F7F8 对不上，看起来像「窗口没画完」。
+    for attr, color in ((35, C_WINDOW_BG),      # DWMWA_CAPTION_COLOR
+                        (36, C_TEXT_MAIN),      # DWMWA_TEXT_COLOR
+                        (34, C_BORDER_SOFT)):   # DWMWA_BORDER_COLOR
+        value = _color_ref(color)
+        if value < 0:
+            continue
+        try:
+            ref = ctypes.c_int(value)
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, attr, ctypes.byref(ref), ctypes.sizeof(ref))
+        except Exception:
+            pass
     try:
         # 33 = DWMWA_WINDOW_CORNER_PREFERENCE：按设计令牌给窗口圆角
         corner = ctypes.c_int(DWM_CORNER_PREF)
@@ -283,7 +374,7 @@ def _apply_opaque_window(hwnd) -> None:
         pass
 
 
-def _set_app_user_model_id() -> None:
+def set_app_user_model_id() -> None:
     """设置进程 AppUserModelID。必须在任何 Tk 窗口创建之前调用，否则不生效。"""
     if not IS_WINDOWS:
         # ctypes.windll 只在 Windows 上存在，非 Windows 直接短路，避免 AttributeError
@@ -293,3 +384,9 @@ def _set_app_user_model_id() -> None:
             APP_USER_MODEL_ID)
     except Exception:
         pass
+
+
+# ==================== 对外别名 ====================
+# `from ..utils import *` 不会带出下划线开头的名字，app.main() 里要用这两个，
+# 所以显式给一份公开别名（曾经因为漏了这一步，双击 exe 直接 NameError 起不来）。
+apply_opaque_window = _apply_opaque_window

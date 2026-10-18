@@ -74,11 +74,7 @@ class MiscMixin:
         msg_label.pack(anchor=W, fill=X, pady=(0, PAD_GAP))
 
         dont_remind_var = BooleanVar(value=False)
-        check = ctk.CTkCheckBox(frame, text="本次启动不再提醒",
-                                variable=dont_remind_var,
-                                text_color=C_TEXT_MAIN, font=(config.FONT_FAMILY, FS_SMALL),
-                                fg_color=C_ACCENT, hover_color=C_ACCENT_HOVER,
-                                border_color=C_BORDER)
+        check = make_checkbox(frame, "本次启动不再提醒", dont_remind_var)
         check.pack(anchor=W, pady=(PAD_XS, PAD_GAP))
         card.register_focusable(check)
 
@@ -88,15 +84,7 @@ class MiscMixin:
         def on_ok():
             card.close('ok')
 
-        def on_export():
-            card.close('export')
-
-        if self.settings.role == "developer":
-            export_btn = make_button(btn_frame, "导出增量更新", command=on_export,
-                                      accent=True)
-            export_btn.pack(side=RIGHT, padx=PAD_XS)
-            card.register_focusable(export_btn)
-        ok_btn = make_button(btn_frame, "确定", command=on_ok)
+        ok_btn = make_button(btn_frame, "知道了", command=on_ok, accent=True)
         ok_btn.pack(side=RIGHT)
         card.register_focusable(ok_btn)
         result = card.wait()
@@ -132,10 +120,9 @@ class MiscMixin:
                        f"  • 新增: {len(changes['added'])} 个\n"
                        f"  • 移除: {len(changes['removed'])} 个\n"
                        f"  • 修改: {len(changes['modified'])} 个\n\n"
-                       f"作为开发者，建议您立即导出增量更新以便分享给其他人。\n\n"
-                       f"是否立即导出？")
-                if self._show_role_dialog("检测到枪包变更", msg) == 'export':
-                    self.export_incremental()
+                       f"作为开发者，可以右键这个预设 → 发布到云端，\n"
+                       f"让其他玩家同步到这次改动。")
+                self._show_role_dialog("检测到枪包变更", msg)
             else:
                 msg = (f"检测到已应用预设 '{preset_name}' 有以下变更:\n\n"
                        f"  • 新增: {len(changes['added'])} 个\n"
@@ -181,26 +168,30 @@ class MiscMixin:
     def show_tutorial(self):
         show_info("使用教程",
             f"{PROJECT_NAME} v{VERSION}\n作者: {AUTHOR}\n\n"
-            "【基础使用】\n"
-            "Step 1 · 拖入整合包根目录（或整合包内任意文件）\n"
-            "Step 2 · 创建预设并放入枪包，或拖入现成 .fgcpack\n"
-            "Step 3 · 填写版本号，点保存\n"
-            "Step 4 · 选择预设，点「一键替换」切换\n\n"
-            "【拖入整合包】\n"
-            "可直接拖入整合包根目录，也可拖入整合包内任意文件，\n"
-            "程序会自动向上查找 tacz 文件夹。\n\n"
-            "【拖入预设包/更新包】\n"
-            "拖入 .fgcpack 或 .fgcupdate 即可自动导入。\n"
-            "遇到同名预设会询问是否替换。\n\n"
+            "【三步就能用】\n"
+            "1. 选整合包：拖入整合包根目录（或包内任意文件）\n"
+            "2. 选预设：点左侧列表里的预设\n"
+            "3. 一键替换：右侧蓝色按钮，把枪包换进 tacz\n\n"
+            "【从云端添加预设】\n"
+            "「＋ 从云端」→ 粘贴发布者给的分享链接和密码。\n"
+            "加进来后会自动检查一次云端内容。\n\n"
+            "【绑定 / 更换链接】\n"
+            "双击预设打开「预设详情」→「来源」页，\n"
+            "链接和密码都能直接在那里改，改完点保存。\n\n"
+            "【检查更新与同步】\n"
+            "绑过链接的预设会自动检查；\n"
+            "卡片上出现「更新」时点它即可同步到最新。\n"
+            "右键预设也有「检查更新 / 同步」两项。\n\n"
+            "【开发者】\n"
+            "身份切到开发者后，右键预设 → 发布到云端，\n"
+            "其他玩家用同一个链接就能同步到你发布的内容。\n\n"
             "【数据库】\n"
-            "默认隔离存储：每个整合包独立预设库\n"
-            "可在设置切换为合并存储（共用预设）\n\n"
+            "默认隔离存储：每个整合包一个独立预设库；\n"
+            "设置 → 常规 可切换为合并存储（多个整合包共用）。\n\n"
             "【迁移预设】\n"
             "右键预设 → 迁移预设…\n\n"
-            "【旧版数据库适配】\n"
-            "设置 → 数据库管理 → 适配旧版数据库\n\n"
-            "【打开TACZ】\n"
-            "枪包列表右上角「打开TACZ」按钮")
+            "【旧版数据库】\n"
+            "设置 → 数据库 → 适配旧版数据库")
 
     def show_about(self):
         # 「关于」已并入设置页的选项卡，不再弹独立信息框

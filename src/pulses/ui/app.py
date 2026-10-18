@@ -67,10 +67,11 @@ from .database import DatabaseMixin
 from .packs import PacksMixin
 from .transfer import TransferMixin
 from .misc import MiscMixin
+from .online import OnlineMixin
 
 
 class PulsesSwapApp(WindowMixin, HomePageMixin, LogPageMixin, DatabaseMixin,
-                    PacksMixin, TransferMixin, MiscMixin):
+                    PacksMixin, TransferMixin, MiscMixin, OnlineMixin):
     """主窗口：行为分散在 ui/ 下的各个 mixin 里，这里只做装配。"""
 
     def __init__(self, root):
@@ -90,6 +91,13 @@ class PulsesSwapApp(WindowMixin, HomePageMixin, LogPageMixin, DatabaseMixin,
         self.root.minsize(WINDOW_MIN_W, WINDOW_MIN_H)
 
         # ==================== Win11 透明修复 ====================
+        # 第一件：锁死 CTk 的缩放并摘掉它的 DPI 轮询 —— 那段代码会为了「掩盖
+        # 重排闪烁」把窗口 alpha 压到 0.15 再还原，在 Win11 上会重新触发 DWM
+        # 材质评估（半透明），异常时还会永久停在 0.15。详见 lock_ctk_scaling。
+        try:
+            lock_ctk_scaling(config.UI_SCALE or 1.0)
+        except Exception:
+            pass
         try:
             self.root.attributes('-alpha', 1.0)
         except Exception:
@@ -134,6 +142,9 @@ class PulsesSwapApp(WindowMixin, HomePageMixin, LogPageMixin, DatabaseMixin,
 
         # worker 线程 → 主线程的投递队列，越早启动越好
         start_ui_pump(self.root)
+        # 在线相关属性先建好（此时还没有整合包，只是占位），
+        # 否则界面上任何入口在 load_pack 之前点到都会 AttributeError
+        self._init_online()
         self.setup_ui()
         self.setup_menu()
 
@@ -143,11 +154,14 @@ class PulsesSwapApp(WindowMixin, HomePageMixin, LogPageMixin, DatabaseMixin,
 
 def main():
     # 第一件事：任务栏图标归属必须在任何窗口存在之前定好
-    _set_app_user_model_id()
+    set_app_user_model_id()
     # 第二件：DPI 感知也要在窗口创建之前声明，否则 Windows 会拉伸位图（字糊）
     detected_scale = enable_dpi_awareness()
     # 第三件：把 Windows 定时器精度提到 1ms，否则补间只有 ~30fps（一卡一卡）
     enable_high_resolution_timer()
+    # 第四件：锁死 CTk 缩放，摘掉它那段会闪 alpha 的 DPI 轮询。
+    # 必须在 CTk() 之前 —— 轮询是第一个控件创建时就挂上的。
+    lock_ctk_scaling(detected_scale)
     if HAS_DND:
         try:
             root = TkinterDnD.Tk()
@@ -194,7 +208,7 @@ def main():
             hwnd = ctypes.windll.user32.GetParent(hwnd_root.winfo_id())
             if not hwnd:
                 hwnd = hwnd_root.winfo_id()
-            _apply_opaque_window(hwnd)
+            apply_opaque_window(hwnd)
         except Exception:
             pass
 

@@ -64,221 +64,6 @@ class TransferMixin:
     """导出 / 导入 / 进度 / 枪包列表 / 应用"""
 
     # ==================== 导出 ====================
-    def export_preset(self):
-        if not self.preset_manager or not self.current_selected_preset or self.loading_presets:
-            show_warning("提示", "请先选择一个预设")
-            return
-        if self.is_applying:
-            show_warning("操作进行中", "请等待当前操作完成")
-            return
-
-        name = self.current_selected_preset
-        info = self.preset_manager.presets.get(name)
-        if not info:
-            return
-
-        if name == "default":
-            show_warning("无法导出",
-                "不允许导出名为 'default' 的预设。\n\n"
-                "请先通过右键菜单「重命名」将该预设改为其他名称，再执行导出。")
-            return
-
-        version = info.get('version', 'v1.0.0')
-        default_fn = generate_export_filename(name, version, False)
-        p = filedialog.asksaveasfilename(
-            title="导出完整预设包", initialfile=default_fn,
-            defaultextension=".fgcpack",
-            filetypes=[("Pulses Swap 完整包", "*.fgcpack")])
-        if not p:
-            return
-        export_path = Path(p)
-
-        self.set_busy_state(True, "导出")
-        self.progress_bar.pack(fill=X, pady=(0, 4))
-        self.progress_label.pack(fill=X, pady=(0, 4))
-        self.progress_bar.set(0)
-        self.progress_label.configure(text="准备导出...")
-
-        def worker():
-            def cb(c, t, m):
-                self.show_progress(c, t, m)
-            try:
-                ok = self.preset_manager.export_preset(name, export_path, cb)
-                ui_call(self.root, self._on_export_finished, ok, export_path)
-            except Exception as e:
-                self.log_manager.log(f"导出错误: {e}", 'ERROR')
-                ui_call(self.root, self._on_export_finished, False, export_path)
-        threading.Thread(target=worker, daemon=True).start()
-
-    def export_incremental(self):
-        if not self.preset_manager or not self.current_selected_preset or self.loading_presets:
-            show_warning("提示", "请先选择一个预设")
-            return
-        if self.is_applying:
-            show_warning("操作进行中", "请等待当前操作完成")
-            return
-        name = self.current_selected_preset
-        info = self.preset_manager.presets.get(name)
-        if not info:
-            return
-        if not info.get('applied', False):
-            show_warning("提示", "只能对已应用的预设导出增量更新")
-            return
-        changes = self.preset_manager.detect_changes(name)
-        total = len(changes['added']) + len(changes['removed']) + len(changes['modified'])
-        if total == 0:
-            show_info("提示", "未检测到任何变更，无需导出")
-            return
-        if not ask_yes_no("确认导出增量包",
-            f"检测到以下变更:\n\n"
-            f"新增: {len(changes['added'])} 个\n"
-            f"移除: {len(changes['removed'])} 个\n"
-            f"修改: {len(changes['modified'])} 个\n\n"
-            f"是否导出增量更新包？\n\n"
-            f"注意：导出后将自动同步校验数据。"):
-            return
-        pack_name = self.current_pack_path.name if self.current_pack_path else "Unknown"
-        version = info.get('version', 'v1.0.0')
-        next_inc = info.get('incremental_count', 0) + 1
-        default_fn = generate_export_filename(pack_name, version, True, next_inc)
-        p = filedialog.asksaveasfilename(
-            title="导出增量更新包", initialfile=default_fn,
-            defaultextension=".fgcupdate",
-            filetypes=[("Pulses Swap 增量更新包", "*.fgcupdate")])
-        if not p:
-            return
-        export_path = Path(p)
-        self.set_busy_state(True, "导出更新")
-        self.progress_bar.pack(fill=X, pady=(0, 4))
-        self.progress_label.pack(fill=X, pady=(0, 4))
-        self.progress_bar.set(0)
-        self.progress_label.configure(text="准备导出...")
-
-        def worker():
-            def cb(c, t, m):
-                self.show_progress(c, t, m)
-            try:
-                ok = self.preset_manager.export_incremental(name, export_path, cb)
-                ui_call(self.root, self._on_export_inc_finished, ok, export_path)
-            except Exception as e:
-                self.log_manager.log(f"导出增量包错误: {e}", 'ERROR')
-                ui_call(self.root, self._on_export_inc_finished, False, export_path)
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _on_export_finished(self, success, export_path):
-        self.hide_progress()
-        self.set_busy_state(False, "")
-        if success:
-            show_info("导出成功", f"预设已导出到:\n{export_path}")
-        else:
-            show_error("导出失败", "预设导出失败，请查看日志")
-        self._update_preset_list()
-
-    def _on_export_inc_finished(self, success, export_path):
-        self.hide_progress()
-        self.set_busy_state(False, "")
-        if success:
-            show_info("导出成功",
-                f"增量更新包已导出到:\n{export_path}\n\n"
-                f"校验数据已自动同步为最新")
-        else:
-            show_error("导出失败", "增量包导出失败，请查看日志")
-        self._update_preset_list()
-        self.refresh_gunpacks(use_cache=False)
-
-    # ==================== 导入 ====================
-    def do_import_preset(self, import_path: Path):
-        self.set_busy_state(True, "导入")
-        self.progress_bar.pack(fill=X, pady=(0, 4))
-        self.progress_label.pack(fill=X, pady=(0, 4))
-        self.progress_bar.set(0)
-        self.progress_label.configure(text="准备导入...")
-
-        def worker():
-            def cb(c, t, m):
-                self.show_progress(c, t, m)
-            try:
-                ok = self.preset_manager.import_preset(import_path, cb)
-                ui_call(self.root, self._on_import_finished, ok, import_path)
-            except Exception as e:
-                self.log_manager.log(f"导入错误: {e}", 'ERROR')
-                ui_call(self.root, self._on_import_finished, False, import_path)
-        threading.Thread(target=worker, daemon=True).start()
-
-    def do_import_incremental(self, import_path: Path):
-        self.set_busy_state(True, "导入更新")
-        self.progress_bar.pack(fill=X, pady=(0, 4))
-        self.progress_label.pack(fill=X, pady=(0, 4))
-        self.progress_bar.set(0)
-        self.progress_label.configure(text="准备导入...")
-
-        def worker():
-            try:
-                ok = self.preset_manager.import_incremental(import_path)
-                ui_call(self.root, self._on_import_inc_finished, ok, import_path)
-            except Exception as e:
-                self.log_manager.log(f"导入增量包错误: {e}", 'ERROR')
-                ui_call(self.root, self._on_import_inc_finished, False, import_path)
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _on_import_finished(self, success, import_path: Path):
-        self.hide_progress()
-        self.set_busy_state(False, "")
-        if not success:
-            show_error("导入失败", "预设导入失败，请查看日志")
-            return
-        self._update_preset_list()
-        self.refresh_gunpacks(use_cache=False)
-        self._update_guide()
-        self._ask_delete_source_package(import_path, "预设导入成功！")
-
-    def _on_import_inc_finished(self, success, import_path: Path):
-        self.hide_progress()
-        self.set_busy_state(False, "")
-        if not success:
-            show_error("更新失败", "增量更新失败，请查看日志")
-            return
-        self.refresh_gunpacks(use_cache=False)
-        self._update_preset_list()
-        self._update_guide()
-        self._ask_delete_source_package(import_path, "增量更新已成功应用！")
-
-    def _ask_delete_source_package(self, import_path: Path, success_msg: str):
-        try:
-            if not import_path.exists():
-                show_info("导入完成", success_msg)
-                return
-            try:
-                size_str = format_size(import_path.stat().st_size)
-            except Exception:
-                size_str = "未知"
-            reply = ask_yes_no(
-                "导入完成",
-                f"{success_msg}\n\n"
-                f"是否删除源压缩包以节省存储空间？\n\n"
-                f"文件: {import_path.name}\n"
-                f"大小: {size_str}\n"
-                f"位置: {import_path.parent}\n\n"
-                f"（会移入回收站，可随时找回）")
-            if not reply:
-                return
-            if move_to_recycle_bin(import_path):
-                self.log_manager.log(
-                    f"已将源压缩包移至回收站: {import_path.name}", 'SUCCESS')
-                return
-            try:
-                import_path.unlink()
-                self.log_manager.log(
-                    f"已删除源压缩包（无法移入回收站）: {import_path.name}", 'SUCCESS')
-            except Exception as e:
-                self.log_manager.log(f"删除源压缩包失败: {e}", 'WARNING')
-                show_warning("警告",
-                    f"删除源压缩包失败，请手动处理。\n\n错误: {e}")
-        except Exception as e:
-            self.log_manager.log(f"处理源压缩包时出错: {e}", 'WARNING')
-            show_info("导入完成", success_msg)
-
-    # ==================== 进度条 ====================
     def show_progress(self, current, total, message=""):
         if total > 0:
             pct = current / total
@@ -313,33 +98,17 @@ class TransferMixin:
         if busy:
             self.is_applying = True
             self.apply_btn.configure(state="disabled", text=f"{operation}中...")
-            self.export_preset_btn.configure(state="disabled")
-            self.export_incremental_btn.configure(state="disabled")
             self.create_preset_btn.configure(state="disabled")
-            self.refresh_preset_btn.configure(state="disabled")
-            self.refresh_gunpack_btn.configure(state="disabled")
             self.select_pack_btn.configure(state="disabled")
-            self.open_pack_btn.configure(state="disabled")
-            self.open_tacz_btn.configure(state="disabled")
             self.save_version_btn.configure(state="disabled")
-            self.open_db_btn.configure(state="disabled")
-            self.close_pack_btn.configure(state="disabled")
-            self.preset_listbox.config(state=DISABLED)
+            self.preset_cards.set_enabled(False)
         else:
             self.is_applying = False
-            self.apply_btn.configure(state="normal", text="Step 4 · 一键替换")
-            self.export_preset_btn.configure(state="normal")
+            self.apply_btn.configure(state="normal", text="一键替换")
             self.create_preset_btn.configure(state="normal")
-            self.refresh_preset_btn.configure(state="normal")
-            self.refresh_gunpack_btn.configure(state="normal")
             self.select_pack_btn.configure(state="normal")
             self.save_version_btn.configure(state="normal")
-            self.open_db_btn.configure(state="normal")
-            self.close_pack_btn.configure(state="normal")
-            if self.current_pack_path:
-                self.open_pack_btn.configure(state="normal")
-                self.open_tacz_btn.configure(state="normal")
-            self.preset_listbox.config(state=NORMAL)
+            self.preset_cards.set_enabled(True)
             if not self.current_selected_preset:
                 self.apply_btn.configure(state="disabled")
 
@@ -448,7 +217,7 @@ class TransferMixin:
                 lines.append(f"  ~ 变更: {len(modified)} 个 ({pv})")
             self.log_manager.log("\n".join(lines), 'WARNING')
         else:
-            self.log_manager.log(f"预设 '{preset_name}' 所有枪包校验通过 ✓ (共 {total} 个)", 'SUCCESS')
+            self.log_manager.log(f"预设 '{preset_name}' 所有枪包校验通过（共 {total} 个）", 'SUCCESS')
 
     # ==================== 预设应用 ====================
     def apply_preset(self):
@@ -496,12 +265,9 @@ class TransferMixin:
             self._update_preset_list()
             self.refresh_gunpacks(use_cache=False)
             if self.preset_manager and self.preset_manager.current_preset:
-                for i in range(self.preset_listbox.size()):
-                    if (preset_name_of(self.preset_listbox.get(i))
-                            == self.preset_manager.current_preset):
-                        self.preset_listbox.selection_set(i)
-                        self.on_preset_selected(None)
-                        break
+                applied = self.preset_manager.current_preset
+                self.preset_cards.select(applied, notify=False)
+                self.on_preset_selected(applied)
             self.log_manager.log("预设应用成功！", 'SUCCESS')
         else:
             show_error("错误", "预设应用失败，请查看日志")

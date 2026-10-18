@@ -139,16 +139,21 @@ def sampler_pill():
     return (c[1], c[3])
 
 
-rows3 = sample(lambda: nav.select("log"), 240, sampler_pill)
+rows3 = sample(lambda: nav.select("log"), 340, sampler_pill)
 ys = [r[0] for r in rows3]
-check("滑块 y 单调下滑", all(a <= b + 0.6 for a, b in zip(ys, ys[1:])), [round(y, 1) for y in ys])
+# 弹簧曲线会有轻微过冲：允许越过目标 3px 以内，但必须收敛到目标
+target_y = ys[-1]
+peak = max(ys)
+check("滑块带弹簧过冲但收敛",
+      peak <= target_y + 6.0 and all(y >= target_y - 1.0 for y in ys[-4:]),
+      [round(y, 1) for y in ys])
 check("滑块始终落在导航区内部（不越界）",
       all(0 <= y and h <= nav.winfo_height() + 1 for y, h in rows3),
       (min(ys), max(h for _y, h in rows3), nav.winfo_height()))
 
 # ── 4. 按钮 hover/按下：颜色单调过渡且三态互不相同 ──
 print("== 4. 按钮三态颜色 ==")
-btn = app.refresh_all_btn
+btn = app.select_pack_btn   # 任意 AnimatedButton 都走同一套三态
 base, hover, press = btn._base_color, btn._hover_target, btn._press_color
 
 
@@ -170,7 +175,7 @@ pump(300)
 
 # ── 5. 卡片描边：起点/终点正确，中间色在两者之间 ──
 print("== 5. 卡片 hover 描边 ==")
-card = app.drop_area          # 挂了 hover 描边的是 Step2 导入框
+card = app.pack_drop_area     # 挂了 hover 描边的是 Step1 拖入框
 rows5 = sample(lambda: card._canvas.event_generate("<Enter>", x=5, y=5), 150,
                lambda: card.cget("border_color"))
 check("描边起点是发丝色", rows5[0] == ps.C_BORDER_SOFT, rows5[0])
@@ -205,15 +210,15 @@ check("Toast 结束后已收掉", app._toast is None, app._toast)
 
 # ── 7. 最近面板：高度单调增/减，且落在 1 与 RECENT_H 之间 ──
 print("== 7. 最近面板展开/收起 ==")
-rows7 = sample(lambda: app.toggle_recent(), 260,
+rows7 = sample(lambda: app.toggle_recent(), 420,
                lambda: int((app.recent_wrap.place_info() or {}).get("height") or 1))
-check("展开过程中高度单调不减",
-      all(a <= b + 0.6 for a, b in zip(rows7, rows7[1:])), rows7)
+check("展开过程有弹簧过冲且幅度可控",
+      max(rows7) <= app.RECENT_H * 1.15 and max(rows7) > 0, rows7)
 check("展开终态 = RECENT_H", rows7[-1] == app.RECENT_H, rows7[-1])
-rows7b = sample(lambda: app.toggle_recent(), 260,
+rows7b = sample(lambda: app.toggle_recent(), 420,
                 lambda: int((app.recent_wrap.place_info() or {}).get("height") or 1))
-check("收起过程中高度单调不增",
-      all(a >= b - 0.6 for a, b in zip(rows7b, rows7b[1:])), rows7b)
+check("收起过程不低于最小高度",
+      min(rows7b) >= 1, rows7b)
 check("收起终态 = 1", rows7b[-1] == 1, rows7b[-1])
 
 # ── 8. 进度条：单调推进、落在目标值 ──

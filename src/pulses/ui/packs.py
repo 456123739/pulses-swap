@@ -104,14 +104,14 @@ class PacksMixin:
         pack_db_path.mkdir(parents=True, exist_ok=True)
 
         self.pack_path_label.configure(text=str(pack_path), text_color=C_SUCCESS)
-        self.pack_status_label.configure(text="状态: 已加载 ✓", text_color=C_SUCCESS)
+        self.pack_status_label.configure(text="状态: 已加载", text_color=C_SUCCESS)
         self._update_sidebar_status()
         self.pack_name_label.configure(text="当前预设: 无", text_color=C_ACCENT)
-        self.open_pack_btn.configure(state="normal")
-        self.open_tacz_btn.configure(state="normal")
 
         self.preset_manager = PresetManager(pack_db_path, self.log_manager,
                                              tacz_path, pack_name=pack_path.name)
+        # 在线状态跟着这个整合包的数据库走（隐藏目录 .online）
+        self._init_online(pack_db_path)
         if self.recent_manager:
             self.recent_manager.add(str(pack_path), pack_path.name)
             if self.recent_visible:
@@ -127,9 +127,7 @@ class PacksMixin:
         self.loading_presets = True
         self._start_loading_dots("加载中")
         self._disable_buttons(True)
-        self.preset_listbox.delete(0, END)
-        self.preset_listbox.insert(END, "正在加载预设列表，请稍候...")
-        self.preset_listbox.itemconfig(0, fg=C_TEXT_MUTED)
+        self.preset_cards.set_loading(True)
         threading.Thread(target=self._load_presets_thread, daemon=True).start()
 
     def _load_presets_thread(self):
@@ -175,26 +173,20 @@ class PacksMixin:
             if not first:
                 first = list(self.preset_manager.presets.keys())[0]
             if first:
-                for i in range(self.preset_listbox.size()):
-                    if preset_name_of(self.preset_listbox.get(i)) == first:
-                        self.preset_listbox.selection_set(i)
-                        self.on_preset_selected(None)
-                        break
+                self.preset_cards.select(first)
+                self.on_preset_selected(first)
         self._update_guide()
+        # 预设就绪后再做在线检查，别和加载抢 IO
+        self.root.after(600, self._online_auto_check)
 
     def _disable_buttons(self, disabled: bool):
         state = "disabled" if disabled else "normal"
         try:
             self.create_preset_btn.configure(state=state)
-            self.export_preset_btn.configure(state=state)
-            self.export_incremental_btn.configure(state=state)
-            self.refresh_preset_btn.configure(state=state)
-            self.refresh_gunpack_btn.configure(state=state)
-            self.open_tacz_btn.configure(state=state)
             self.save_version_btn.configure(state=state)
             self.apply_btn.configure(state=state)
             self.select_pack_btn.configure(state=state)
-            self.open_db_btn.configure(state=state)
+            self.add_cloud_btn.configure(state=state)
         except Exception:
             pass
 
@@ -205,10 +197,8 @@ class PacksMixin:
         否则关掉一个包就再也选不了下一个。
         """
         state = "normal" if enabled else "disabled"
-        for name in ("open_pack_btn", "close_pack_btn", "open_tacz_btn",
-                     "apply_btn", "create_preset_btn", "export_preset_btn",
-                     "export_incremental_btn", "refresh_preset_btn",
-                     "refresh_gunpack_btn", "save_version_btn"):
+        for name in ("apply_btn", "create_preset_btn", "add_cloud_btn",
+                     "save_version_btn"):
             btn = getattr(self, name, None)
             if btn is not None:
                 try:
@@ -284,6 +274,7 @@ class PacksMixin:
             show_info("加载中", "预设列表正在加载，请稍候...")
             return
         self._stop_watcher()
+        self._shutdown_online()
         self.current_pack_path = None
         self.tacz_path = None
         self.preset_manager = None
@@ -291,11 +282,13 @@ class PacksMixin:
         self.pack_path_label.configure(text="未选择", text_color=C_TEXT_SECONDARY)
         self.pack_status_label.configure(text="状态: 未加载", text_color=C_ERROR)
         self.pack_name_label.configure(text="当前预设: 无", text_color=C_ACCENT)
-        self.preset_listbox.delete(0, END)
+        self.preset_cards.set_items([])
         self.gunpack_listbox.delete(0, END)
-        self.preset_name_label.configure(text="预设: 未选择")
-        self.preset_version_label.configure(text="版本号: 无")
-        self.preset_status_label.configure(text="状态: 未应用")
+        self.preset_name_label.configure(text="未选择")
+        self.preset_version_label.configure(text="无")
+        self.preset_status_label.configure(text="未应用")
+        self.preset_online_label.configure(text="未绑定",
+                                           text_color=C_TEXT_MUTED)
         self.gunpack_count_label.configure(text="共 0 个枪包")
         self.version_entry.delete(0, END)
         # 关闭后只有「整合包相关」的按钮该灰掉；「选择整合包 / 数据库」必须
@@ -367,26 +360,18 @@ class PacksMixin:
     def _update_preset_list(self):
         if not self.preset_manager:
             return
-        self.preset_listbox.delete(0, END)
-        for name, info in self.preset_manager.presets.items():
-            # 「已应用」用文字前缀标注，不用底色 —— 底色是选中态的专属视觉，
-            # 两者都用浅绿会出现「两个都被点亮」的错觉（用户截图反馈过）。
-            applied = bool(info.get('applied', False))
-            self.preset_listbox.insert(
-                END, (PRESET_MARK_APPLIED + name) if applied else name)
-            if applied:
-                idx = self.preset_listbox.size() - 1
-                self.preset_listbox.itemconfig(idx, fg=C_SUCCESS)
+        if hasattr(self, "_preset_size_cache"):
+            self._preset_size_cache.clear()
+        self.preset_cards.set_loading(False)
+        self._refresh_preset_cards()
         if self.preset_manager.current_preset:
-            self.pack_name_label.configure(text=f"当前预设: {self.preset_manager.current_preset}")
+            self.pack_name_label.configure(
+                text=f"当前预设: {self.preset_manager.current_preset}")
         else:
             self.pack_name_label.configure(text="当前预设: 无")
         if self.current_selected_preset:
-            for i in range(self.preset_listbox.size()):
-                if (preset_name_of(self.preset_listbox.get(i))
-                        == self.current_selected_preset):
-                    self.preset_listbox.selection_set(i)
-                    break
+            self.preset_cards.select(self.current_selected_preset,
+                                     notify=False)
         self._update_sidebar_status()
 
     def refresh_presets(self):
@@ -419,58 +404,81 @@ class PacksMixin:
             safe_print("预设刷新回调出错:", traceback.format_exc())
             self.log_manager.log(f"预设刷新回调出错: {exc}", 'ERROR')
 
-    def on_preset_selected(self, event):
+    def on_preset_selected(self, name=None):
         if not self.preset_manager or self.loading_presets:
             return
-        sel = self.preset_listbox.curselection()
-        if not sel:
+        if not name:
+            name = self.preset_cards.selected_name
+        if not name:
             return
-        name = preset_name_of(self.preset_listbox.get(sel[0]))
+        self.preset_cards.select(name, notify=False)
         self.current_selected_preset = name
         info = self.preset_manager.presets.get(name)
         if not info:
             return
-        self.preset_name_label.configure(text=f"预设: {name}")
-        self._animate_label_color(self.preset_name_label, C_TEXT_MUTED, C_ACCENT)
+        self.preset_name_label.configure(text=name)
+        self._animate_label_color(self.preset_name_label, C_TEXT_MUTED,
+                                  C_TEXT_MAIN)
         version = info.get('version', 'v1.0.0')
-        self.preset_version_label.configure(text=f"版本号: {version}")
-        status = "已应用 ✓" if info.get('applied', False) else "未应用"
-        self.preset_status_label.configure(text=f"状态: {status}")
+        self.preset_version_label.configure(text=version)
+        status = "已应用" if info.get('applied', False) else "未应用"
+        self.preset_status_label.configure(text=status)
+        self._update_preset_online_label(name)
         self._animate_label_color(
             self.preset_status_label, C_TEXT_MUTED,
             C_SUCCESS if info.get('applied') else C_WARNING)
         self.version_entry.delete(0, END)
         self.version_entry.insert(0, version)
         if info.get('applied', False):
-            self.apply_btn.configure(state="disabled", text="已应用 ✓")
-            self.export_incremental_btn.configure(state="normal")
+            self.apply_btn.configure(state="disabled", text="已应用")
         else:
-            self.apply_btn.configure(state="normal", text="Step 4 · 一键替换")
-            self.export_incremental_btn.configure(state="disabled")
-        self.export_preset_btn.configure(state="normal")
+            self.apply_btn.configure(state="normal", text="一键替换")
         self.refresh_gunpacks(use_cache=False)
         self.log_manager.log(f"选择预设: {name}", 'INFO', verbose=True)
         self._update_sidebar_status()
         self._update_guide()
 
-    def show_preset_context_menu(self, event):
+    def on_preset_action(self, name, kind):
+        """卡片右侧按钮：更新 / 发布 / 绑定 / 检查。"""
+        self.on_preset_selected(name)
+        if kind == "sync":
+            self.open_sync_dialog(name)
+        elif kind == "publish":
+            self.open_publish_dialog(name)
+        elif kind == "source":
+            self.open_source_dialog(name)
+        elif kind == "check":
+            self._online_check(name)
+        else:
+            self.open_sync_dialog(name)
+
+    def show_preset_context_menu(self, name, event=None):
         if not self.preset_manager or self.loading_presets:
             return
-        idx = self.preset_listbox.nearest(event.y)
-        if idx < 0:
-            return
-        name = preset_name_of(self.preset_listbox.get(idx))
         info = self.preset_manager.presets.get(name)
         if not info:
             return
-        self.preset_listbox.selection_clear(0, END)
-        self.preset_listbox.selection_set(idx)
-        self.on_preset_selected(None)
+        self.preset_cards.select(name, notify=False)
+        self.on_preset_selected(name)
         menu = Menu(self.root, tearoff=0, bg=C_PANEL_BG, fg=C_TEXT_MAIN,
                     activebackground=C_ACCENT_SOFT, activeforeground=C_ACCENT,
                     font=(config.FONT_FAMILY, FS_SMALL))
+        menu.add_command(label="详情…",
+                         command=lambda: self.open_preset_detail(name))
+        menu.add_separator()
+        if self.is_developer:
+            menu.add_command(label="发布到云端…",
+                             command=lambda: self.open_publish_dialog(name))
+        else:
+            menu.add_command(label="检查更新",
+                             command=lambda: self._online_check(name))
+            menu.add_command(label="同步…",
+                             command=lambda: self.open_sync_dialog(name))
+        menu.add_command(label="云端来源…",
+                         command=lambda: self.open_source_dialog(name))
+        menu.add_separator()
         menu.add_command(label="迁移预设…",
-                          command=lambda: self.migrate_preset(name))
+                         command=lambda: self.migrate_preset(name))
         menu.add_separator()
         menu.add_command(label="重命名", command=lambda: self.rename_preset(name))
         menu.add_separator()
@@ -480,7 +488,17 @@ class PacksMixin:
             else:
                 menu.add_command(label="删除预设",
                                   command=lambda: self.delete_preset(name))
-        menu.post(event.x_root, event.y_root)
+        try:
+            if event is not None and hasattr(event, "x_root"):
+                menu.tk_popup(event.x_root, event.y_root)
+            else:
+                menu.tk_popup(self.root.winfo_pointerx(),
+                              self.root.winfo_pointery())
+        finally:
+            try:
+                menu.grab_release()
+            except Exception:
+                pass
 
     def migrate_preset(self, preset_name: str):
         if not self.preset_manager or self.loading_presets:
@@ -637,9 +655,6 @@ class PacksMixin:
         self.progress_bar.pack_forget()
         self.progress_label.pack_forget()
         self._disable_buttons(False)
-        if self.current_pack_path:
-            self.open_pack_btn.configure(state="normal")
-            self.open_tacz_btn.configure(state="normal")
 
         if success:
             self.log_manager.log(
@@ -676,12 +691,10 @@ class PacksMixin:
         self.root.config(cursor="watch")
         try:
             if self.preset_manager.rename_preset(preset_name, new_name):
+                self.current_selected_preset = new_name
                 self._update_preset_list()
-                for i in range(self.preset_listbox.size()):
-                    if preset_name_of(self.preset_listbox.get(i)) == new_name:
-                        self.preset_listbox.selection_set(i)
-                        self.on_preset_selected(None)
-                        break
+                self.preset_cards.select(new_name, notify=False)
+                self.on_preset_selected(new_name)
                 show_info("成功", f"预设已重命名为: {new_name}")
             else:
                 show_error("错误", "预设重命名失败")
@@ -708,13 +721,13 @@ class PacksMixin:
             if self.preset_manager.delete_preset(preset_name):
                 if self.current_selected_preset == preset_name:
                     self.current_selected_preset = None
-                    self.preset_name_label.configure(text="预设: 未选择")
-                    self.preset_version_label.configure(text="版本号: 无")
-                    self.preset_status_label.configure(text="状态: 未应用")
+                    self.preset_name_label.configure(text="未选择")
+                    self.preset_version_label.configure(text="无")
+                    self.preset_status_label.configure(text="未应用")
+                    self.preset_online_label.configure(text="未绑定",
+                                                       text_color=C_TEXT_MUTED)
                     self.version_entry.delete(0, END)
-                    self.apply_btn.configure(state="disabled", text="Step 4 · 一键替换")
-                    self.export_preset_btn.configure(state="disabled")
-                    self.export_incremental_btn.configure(state="disabled")
+                    self.apply_btn.configure(state="disabled", text="一键替换")
                     self.gunpack_listbox.delete(0, END)
                     self.gunpack_count_label.configure(text="共 0 个枪包")
                 self._update_preset_list()
@@ -759,5 +772,5 @@ class PacksMixin:
             return
         v = self.version_entry.get().strip() or "v1.0.0"
         if self.preset_manager.update_preset_version(self.current_selected_preset, v):
-            self.preset_version_label.configure(text=f"版本号: {v}")
+            self.preset_version_label.configure(text=v)
             self.log_manager.log(f"版本号已更新为: {v}", 'SUCCESS')

@@ -1,6 +1,8 @@
 """缓动曲线与颜色插值。"""
 from __future__ import annotations
 
+import math
+
 import ctypes
 try:                      # ctypes.wintypes 在非 Windows 上会抛 ValueError
     import ctypes.wintypes
@@ -53,6 +55,8 @@ except ImportError:
 # 每个补间用 (widget, key) 标识：重复触发会自动取消上一帧序列，
 # 不会出现两条动画互相拉扯；控件销毁后 after 回调由 Tk 自动丢弃。
 _TWEENS: dict = {}
+# token → 控件（仅用于诊断：残留补间到底挂在谁身上）
+_TWEEN_OWNERS: dict = {}
 
 # 动画总开关。
 # 需求澄清：要去掉的是「图标动画」，不是页面/选项卡的滑动动画 ——
@@ -94,6 +98,30 @@ def ease_out_back(t, overshoot=1.4):
     """带一点点回弹，用于浮层/提示的入场。"""
     t -= 1
     return t * t * ((overshoot + 1) * t + overshoot) + 1
+
+
+def ease_out_spring(t, damping=5.2, frequency=1.9):
+    """阻尼弹簧：末端有 5~8% 的过冲再收回。
+
+    和 ease_out_back 的区别是它"振"一下而不是"顶"一下，
+    弹窗、卡片、滑块用它才有"弹性"的手感。
+    t>=1 时严格返回 1，保证补间一定收敛。
+    """
+    if t <= 0.0:
+        return 0.0
+    if t >= 1.0:
+        return 1.0
+    return 1.0 - math.exp(-damping * t) * math.cos(frequency * math.pi * t)
+
+
+def ease_out_soft_spring(t):
+    """更轻的弹簧：过冲约 3%，适合文字/描边这种不能晃太狠的东西。"""
+    return ease_out_spring(t, damping=6.4, frequency=1.6)
+
+
+def ease_out_pill(t):
+    """滑块专用：过冲约 5%，有弹性但不至于"蹦"。"""
+    return ease_out_spring(t, damping=6.0, frequency=1.7)
 
 
 # ---------- 数值 / 颜色插值 ----------

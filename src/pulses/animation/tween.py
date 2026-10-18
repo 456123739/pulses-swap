@@ -46,10 +46,12 @@ except ImportError:
 from .. import config
 from ..config import *
 from .easing import *
-from .easing import _TWEENS
+from .easing import _TWEENS, _TWEEN_OWNERS
 
 def cancel_tween(widget, key):
-    job = _TWEENS.pop((id(widget), key), None)
+    token = (id(widget), key)
+    job = _TWEENS.pop(token, None)
+    _TWEEN_OWNERS.pop(token, None)
     if job is not None:
         try:
             widget.after_cancel(job)
@@ -60,6 +62,36 @@ def cancel_tween(widget, key):
 def cancel_all_tweens(widget):
     for token in [k for k in _TWEENS if k[0] == id(widget)]:
         cancel_tween(widget, token[1])
+
+
+def _install_destroy_guard(widget):
+    """控件被销毁时把它的补间一起清掉。
+
+    否则 _TWEENS 里会留下一个指向已销毁控件的 token：Tk 已经取消了 after
+    任务，那条补间永远不会再推进，也就永远不会被移除（长跑必漏）。
+
+    注意不能用 event.widget 判断：CustomTkinter 的 bind() 是绑在内部 Canvas 上的，
+    事件里的 widget 是那个 Canvas 而不是被补间的控件，所以这里闭包捕获 widget。
+    """
+    if getattr(widget, "_tween_destroy_guard", False):
+        return
+    token_prefix = id(widget)
+
+    def _cleanup(_event=None):
+        for token in [k for k in _TWEENS if k[0] == token_prefix]:
+            job = _TWEENS.pop(token, None)
+            _TWEEN_OWNERS.pop(token, None)
+            if job not in (None, -1):
+                try:
+                    widget.after_cancel(job)
+                except Exception:
+                    pass
+
+    try:
+        widget.bind("<Destroy>", _cleanup, add="+")
+        widget._tween_destroy_guard = True
+    except Exception:
+        pass
 
 
 _FPS_LOG = {"interval": None, "total_ms": 0.0, "frames": 0}
@@ -110,6 +142,7 @@ def tween(widget, key, duration_ms, on_frame, on_done=None,
             except Exception:
                 pass
         return
+    _install_destroy_guard(widget)
     interval = max(1, int(round(1000.0 / max(1, fps))))
     duration_ms = max(1, int(duration_ms))
     max_frames = int(duration_ms / interval) + 3
@@ -135,6 +168,7 @@ def tween(widget, key, duration_ms, on_frame, on_done=None,
             pass
         if raw >= 1.0:
             _TWEENS.pop(token, None)
+            _TWEEN_OWNERS.pop(token, None)
             if on_done is not None:
                 try:
                     on_done()
@@ -148,10 +182,12 @@ def tween(widget, key, duration_ms, on_frame, on_done=None,
 
     # 先占位再排期：万一宿主把 after 做成同步回调，step 里的守卫也能认出自己
     _TWEENS[token] = -1
+    _TWEEN_OWNERS[token] = widget
     try:
         job = widget.after(interval, step)
     except Exception:
         _TWEENS.pop(token, None)
+        _TWEEN_OWNERS.pop(token, None)
         return
     if token in _TWEENS:
         _TWEENS[token] = job

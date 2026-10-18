@@ -90,7 +90,7 @@ class SettingsPage:
             item_height=H_CONTROL, pad=8, gap=6, radius=R_CONTROL,
             bg_color=C_CARD_BG, pill_color=C_ACCENT, hover_color=C_ACCENT_SOFT,
             text_color=C_TEXT_SECONDARY, active_text_color=C_TEXT_INVERSE,
-            font_size=FS_SMALL, bold_active=True, text_anchor="center",
+            font_size=FS_BODY, bold_active=True, text_anchor="center",
             duration_ms=240)
         self.tab_bar.pack(fill=BOTH, expand=True, padx=PAD_XS, pady=PAD_XS)
 
@@ -114,8 +114,7 @@ class SettingsPage:
         # ===== 底部按钮条：自动保存状态 + 恢复默认 =====
         self.btn_bar = ctk.CTkFrame(self.frame, fg_color=C_CARD_BG,
                                      corner_radius=R_CARD, height=H_BTN_BAR,
-                                     border_width=BORDER_W,
-                                     border_color=C_BORDER_SOFT)
+                                     border_width=0)
         self.btn_bar.pack(fill=X, pady=(PAD_GAP, 0))
         self.btn_bar.pack_propagate(False)
         make_button(self.btn_bar, "恢复默认", command=self._reset_defaults,
@@ -174,7 +173,7 @@ class SettingsPage:
                     font_size=FS_SUBHEAD, bold=True).pack(
                         anchor=W, pady=(PAD_TIGHT, PAD_TIGHT))
         mode_card = ctk.CTkFrame(tab, fg_color=C_CARD_BG, corner_radius=R_CARD,
-                                  border_width=BORDER_W, border_color=C_BORDER_SOFT)
+                                  border_width=0)
         mode_card.pack(fill=X, pady=(0, PAD_DIALOG))
         attach_hover_glow(mode_card)
         self.mode_seg = CanvasSegmented(
@@ -192,7 +191,7 @@ class SettingsPage:
                     font_size=FS_SUBHEAD, bold=True).pack(
                         anchor=W, pady=(0, PAD_TIGHT))
         anim_card = ctk.CTkFrame(tab, fg_color=C_CARD_BG, corner_radius=R_CARD,
-                                  border_width=BORDER_W, border_color=C_BORDER_SOFT)
+                                  border_width=0)
         anim_card.pack(fill=X, pady=(0, PAD_DIALOG))
         attach_hover_glow(anim_card)
         self.anim_seg = CanvasSegmented(
@@ -210,7 +209,7 @@ class SettingsPage:
                     font_size=FS_SUBHEAD, bold=True).pack(
                         anchor=W, pady=(0, PAD_TIGHT))
         role_card = ctk.CTkFrame(tab, fg_color=C_CARD_BG, corner_radius=R_CARD,
-                                  border_width=BORDER_W, border_color=C_BORDER_SOFT)
+                                  border_width=0)
         role_card.pack(fill=X, pady=(0, PAD_DIALOG))
         attach_hover_glow(role_card)
         self.role_seg = CanvasSegmented(
@@ -223,6 +222,59 @@ class SettingsPage:
             text_anchor="w", text_pad=16, duration_ms=380,
             height=px(2 * (H_NAV + PAD_XS) + 12))
         self.role_seg.pack(fill=X, padx=PAD_TIGHT, pady=PAD_TIGHT)
+
+        # ===== 在线同步 =====
+        make_label(tab, text="在线同步", fg=C_ACCENT,
+                    font_size=FS_SUBHEAD, bold=True).pack(
+                        anchor=W, pady=(0, PAD_TIGHT))
+        online_card = ctk.CTkFrame(tab, fg_color=C_CARD_BG, corner_radius=R_CARD,
+                                    border_width=0)
+        online_card.pack(fill=X, pady=(0, PAD_DIALOG))
+        attach_hover_glow(online_card)
+        self.online_auto_seg = CanvasSegmented(
+            online_card, [("on", "启动时检查更新"), ("off", "不自动检查")],
+            command=self._on_online_auto_selected, orientation="vertical",
+            item_height=H_NAV, pad=6, gap=PAD_XS, radius=R_CONTROL,
+            bg_color=C_CARD_BG, pill_color=C_ACCENT_SOFT,
+            hover_color=C_ACCENT_SOFT, text_color=C_TEXT_MAIN,
+            active_text_color=C_ACCENT, font_size=FS_BODY, bold_active=True,
+            text_anchor="w", text_pad=16, duration_ms=240,
+            height=px(2 * (H_NAV + PAD_XS) + 12))
+        self.online_auto_seg.pack(fill=X, padx=PAD_TIGHT, pady=PAD_TIGHT)
+
+        cache_row = ctk.CTkFrame(online_card, fg_color="transparent")
+        cache_row.pack(fill=X, padx=PAD_TIGHT, pady=(0, PAD_TIGHT))
+        make_button(cache_row, "清理缓存", command=self._clean_online_cache,
+                    width=88).pack(side=LEFT)
+        self.online_cache_label = make_label(
+            cache_row, text="", fg=C_TEXT_MUTED, font_size=FS_TINY)
+        self.online_cache_label.pack(side=LEFT, padx=PAD_TIGHT)
+
+    def _on_online_auto_selected(self, key):
+        self.app.settings.online_auto_check = (key == "on")
+        try:
+            self.app.settings.save()
+        except Exception:
+            pass
+
+    def _refresh_online_cache_label(self):
+        label = getattr(self, "online_cache_label", None)
+        if label is None:
+            return
+        service = getattr(self.app, "online", None)
+        if service is None:
+            label.configure(text="在线模块未启用")
+            return
+        size = service.cache_size()
+        label.configure(text=f"当前缓存 {format_size(size)}")
+
+    def _clean_online_cache(self):
+        service = getattr(self.app, "online", None)
+        if service is None:
+            return
+        freed = service.clear_caches()
+        self.app.toast(f"已清理 {format_size(freed)}", "success")
+        self._refresh_online_cache_label()
 
     def _on_anim_selected(self, key):
         """动画开关：关掉后所有补间一帧到位（逻辑不变，只是不逐帧画）。"""
@@ -250,7 +302,7 @@ class SettingsPage:
                     font_size=FS_SUBHEAD, bold=True).pack(
                         anchor=W, pady=(PAD_TIGHT, PAD_TIGHT))
         db_card = ctk.CTkFrame(tab, fg_color=C_CARD_BG, corner_radius=R_CARD,
-                                border_width=BORDER_W, border_color=C_BORDER_SOFT)
+                                border_width=0)
         db_card.pack(fill=X, pady=(0, PAD_DIALOG))
         self.db_path_label = make_label(db_card, text="", fg=C_TEXT_MAIN,
                                         font_size=FS_SMALL)
@@ -261,7 +313,7 @@ class SettingsPage:
                     font_size=FS_SUBHEAD, bold=True).pack(
                         anchor=W, pady=(0, PAD_TIGHT))
         db_mgr_card = ctk.CTkFrame(tab, fg_color=C_CARD_BG, corner_radius=R_CARD,
-                                    border_width=BORDER_W, border_color=C_BORDER_SOFT)
+                                    border_width=0)
         db_mgr_card.pack(fill=X, pady=(0, PAD_DIALOG))
 
         btn_row1 = ctk.CTkFrame(db_mgr_card, fg_color="transparent")
@@ -293,7 +345,7 @@ class SettingsPage:
                         anchor=W, pady=(0, PAD_DIALOG))
 
         info_card = ctk.CTkFrame(tab, fg_color=C_CARD_BG, corner_radius=R_CARD,
-                                  border_width=BORDER_W, border_color=C_BORDER_SOFT)
+                                  border_width=0)
         info_card.pack(fill=X, pady=(0, PAD_DIALOG))
         attach_hover_glow(info_card)
         self.about_db_label = make_label(info_card, text="", fg=C_TEXT_MAIN,
@@ -329,12 +381,17 @@ class SettingsPage:
                              (getattr(self, "role_seg", None),
                               self.settings.role),
                              (getattr(self, "anim_seg", None),
-                              "on" if config.ANIMATIONS_ENABLED else "off")):
+                              "on" if config.ANIMATIONS_ENABLED else "off"),
+                             (getattr(self, "online_auto_seg", None),
+                              "on" if getattr(self.settings,
+                                              "online_auto_check", True)
+                              else "off")):
                 if seg is not None and seg.current() != key:
                     seg.select(key, animate=False)
         except Exception:
             pass
         self._update_db_labels()
+        self._refresh_online_cache_label()
         self._loading = False
 
     def _update_db_labels(self):
@@ -447,7 +504,7 @@ class SettingsPage:
     def _flash_saved(self):
         """自动保存回显：先亮一下，再曲线淡回提示色。"""
         try:
-            self.saved_label.configure(text="✓ 已自动保存",
+            self.saved_label.configure(text="已自动保存",
                                         text_color=C_SUCCESS)
         except Exception:
             return

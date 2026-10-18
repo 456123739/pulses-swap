@@ -131,7 +131,15 @@ def clean_state():
         leftovers.append("Toast 未收")
     tweens = [k for k in ps._TWEENS]
     if tweens:
-        leftovers.append(f"补间 {len(tweens)} 条")
+        owners = []
+        for token in tweens[:4]:
+            widget = ps._TWEEN_OWNERS.get(token)
+            try:
+                owners.append(f"{type(widget).__name__}/{widget.winfo_class()}"
+                              f"#{token[1]}")
+            except Exception:
+                owners.append(f"?/{token[1]}")
+        leftovers.append(f"补间 {len(tweens)} 条 {owners}")
     return leftovers
 
 
@@ -160,6 +168,10 @@ for text, btn in btns:
     try:
         btn.invoke()            # CTkButton.invoke() 会执行 command（绕过鼠标门禁）
         pump(260)
+        # 点出来的弹窗要收掉，否则后面的点击全落在遮罩底下（真实用户也会关掉）
+        while ps._OVERLAY_STACK:
+            ps._OVERLAY_STACK[-1].close(False)
+            pump(120)
         clicked += 1
     except Exception:
         errors.append((label, traceback.format_exc().splitlines()[-1]))
@@ -261,24 +273,32 @@ pump(600)
 app.load_pack(PACK)
 check("整合包加载完成", pump_until(lambda: not app.loading_presets, 8000))
 pump(400)
-for name, lb in (("预设", app.preset_listbox), ("枪包", app.gunpack_listbox)):
-    n = lb.size()
-    if n:
-        lb.selection_clear(0, "end")
-        lb.selection_set(0)
-        app.on_preset_selected(None) if name == "预设" else None
-        pump(300)
-        check(f"{name}列表可选中（{n} 项）", bool(lb.curselection()) or name == "枪包",
-              lb.curselection())
-    else:
-        note(f"{name}列表为空，跳过选中")
+preset_names = list(app.preset_manager.presets) if app.preset_manager else []
+if preset_names:
+    first = preset_names[0]
+    app.preset_cards.select(first)
+    app.on_preset_selected(first)
+    pump(300)
+    check(f"预设卡片可选中（{len(preset_names)} 项）",
+          app.preset_cards.selected_name == first,
+          app.preset_cards.selected_name)
+else:
+    note("预设列表为空，跳过选中")
+gun_n = app.gunpack_listbox.size()
+if gun_n:
+    app.gunpack_listbox.selection_clear(0, "end")
+    app.gunpack_listbox.selection_set(0)
+    pump(200)
+    check(f"枪包列表可选中（{gun_n} 项）", bool(app.gunpack_listbox.curselection()))
+else:
+    note("枪包列表为空，跳过选中")
 # 右键菜单
 try:
-    if app.preset_listbox.size():
+    if preset_names:
         class _Ev:
             x = y = 10
             x_root = y_root = 200
-        app.show_preset_context_menu(_Ev())
+        app.show_preset_context_menu(preset_names[0], _Ev())
         pump(200)
         for w in list(ps._OVERLAY_STACK):
             try:
@@ -324,22 +344,9 @@ try:
 except Exception:
     check("未加载整合包时点替换：不崩溃", False,
           traceback.format_exc().splitlines()[-1])
-# E3 无包导出
-try:
-    app.export_preset()
-    pump(500)
-    check("无包导出：不崩溃", True)
-except Exception:
-    check("无包导出：不崩溃", False, traceback.format_exc().splitlines()[-1])
-# E4 导入损坏文件
-try:
-    bad = TMP / "broken.fgcpack"
-    bad.write_bytes(b"not a zip")
-    app.handle_import_file(str(bad))
-    pump(800)
-    check("导入损坏文件：不崩溃", True)
-except Exception:
-    check("导入损坏文件：不崩溃", False, traceback.format_exc().splitlines()[-1])
+# E3 离线导入/导出已随云端同步一起移除，这里确认入口真的没了
+check("离线导出入口已移除", not hasattr(app, "export_preset"))
+check("离线导入入口已移除", not hasattr(app, "handle_import_file"))
 left = clean_state()
 check("错误路径走完后无残留", not left, left)
 
@@ -350,10 +357,14 @@ for w, h, tag in ((ps.WINDOW_MIN_W, ps.WINDOW_MIN_H, "最小"),
     pump(700)
     lp = app.pages["home"].winfo_children()[0]
     cards = [c for c in lp.winfo_children()
-             if type(c).__name__ == "CTkFrame"][:3]
+             if type(c).__name__ == "CTkFrame"][:2]
     need = sum(c.winfo_reqheight() for c in cards)
-    check(f"{tag}尺寸下左列三张卡装得下", need <= lp.winfo_height() + 2,
+    check(f"{tag}尺寸下左列两张卡装得下", need <= lp.winfo_height() + 2,
           (need, lp.winfo_height()))
+    # 预设列表是主界面主角：至少要能完整看到 3 条
+    rows = app.preset_cards.winfo_height() // 96
+    check(f"{tag}尺寸下预设列表能显示 ≥3 条（当前约 {rows} 条）", rows >= 3,
+          app.preset_cards.winfo_height())
     check(f"{tag}尺寸下无控件溢出窗口",
           all(c.winfo_rooty() - root.winfo_rooty() + c.winfo_height()
               <= root.winfo_height() + 2 for c in cards),
@@ -371,7 +382,7 @@ try:
     app._update_preset_list()
     pump(400)
     lp = app.pages["home"].winfo_children()[0]
-    cards = [c for c in lp.winfo_children() if type(c).__name__ == "CTkFrame"][:3]
+    cards = [c for c in lp.winfo_children() if type(c).__name__ == "CTkFrame"][:2]
     need = sum(c.winfo_reqheight() for c in cards)
     check("超长预设名不会撑破左列布局", need <= lp.winfo_height() + 2,
           (need, lp.winfo_height()))

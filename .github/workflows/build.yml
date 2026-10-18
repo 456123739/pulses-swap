@@ -33,6 +33,16 @@ jobs:
       - name: PyInstaller 打包
         run: pyinstaller packaging/pulses_swap.spec --noconfirm --clean
 
+      - name: 检查产物（图标 / 在线模块）
+        shell: pwsh
+        run: |
+          $exe = "dist/PulsesSwap/PulsesSwap.exe"
+          if (-not (Test-Path $exe)) { throw "没有生成 $exe" }
+          foreach ($f in @("icon.ico", "icon.png")) {
+            if (-not (Test-Path "dist/PulsesSwap/_internal/$f")) { throw "打包产物里缺少 $f" }
+          }
+          Write-Host ("exe: {0:N1} MB" -f ((Get-Item $exe).Length / 1MB))
+
       - name: 安装 Inno Setup
         run: choco install innosetup --no-progress -y
 
@@ -45,7 +55,8 @@ jobs:
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             V="${GITHUB_REF#refs/tags/v}"
           else
-            V=$(python -c "import re,pathlib;print(re.search(r'VERSION\s*=\s*\"([^\"]+)\"',pathlib.Path('src/pulses_swap.py').read_text(encoding='utf-8')).group(1))")
+            # VERSION 只在 core/paths.py 里定义一处（拆分后不再是 pulses_swap.py）
+            V=$(python -c "import re,pathlib;print(re.search(r'VERSION\s*=\s*\"([^\"]+)\"',pathlib.Path('src/pulses/core/paths.py').read_text(encoding='utf-8')).group(1))")
           fi
           echo "version=$V" >> $GITHUB_OUTPUT
           echo "版本号: $V"
@@ -89,6 +100,70 @@ jobs:
         with:
           name: PulsesSwap-Portable-Windows
           path: dist/portable/*.zip
+          if-no-files-found: error
+
+  # ───────────────────────── macOS（Intel / Apple Silicon）─────────────────────────
+  # 用户以 Win10/Win11 为主，mac 用户少但确实有，两个架构各出一份，
+  # 否则 Intel Mac 拿到 arm64 包会直接「已损坏，无法打开」。
+  macos:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-13          # Intel
+            arch: x86_64
+          - os: macos-14          # Apple Silicon
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: 语法自检
+        run: python -m py_compile src/pulses_swap.py
+
+      - name: PyInstaller 打包（生成 .app）
+        run: pyinstaller packaging/pulses_swap.spec --noconfirm --clean
+
+      - name: 检查产物（.app / 图标）
+        run: |
+          test -d "dist/PulsesSwap.app" || { echo "没有生成 PulsesSwap.app"; exit 1; }
+          ls -la "dist/PulsesSwap.app/Contents/MacOS"
+          ls -la "dist/PulsesSwap.app/Contents/Resources" | head
+          test -f "dist/PulsesSwap.app/Contents/Resources/icon-windowed.icns" \
+            || echo "警告：.app 里没找到 icns（Dock 图标可能退回默认）"
+
+      - name: 冒烟测试（.app 里的可执行文件能起来）
+        run: |
+          set +e
+          timeout 15 "dist/PulsesSwap.app/Contents/MacOS/PulsesSwap"
+          code=$?
+          # 124 = 被 timeout 掐掉，说明窗口起来了并一直活着，这正是我们要的
+          if [ $code -eq 124 ]; then
+            echo "OK: 打包产物启动成功并持续运行"
+          else
+            echo "FAIL: 打包产物提前退出，exit code = $code"
+            exit 1
+          fi
+
+      - name: 压缩（ditto 保留 .app 的符号链接与权限）
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent "dist/PulsesSwap.app" \
+            "dist/PulsesSwap-macos-${{ matrix.arch }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PulsesSwap-macOS-${{ matrix.arch }}
+          path: dist/PulsesSwap-macos-${{ matrix.arch }}.zip
           if-no-files-found: error
 
   # ───────────────────────── Linux 单文件版 ─────────────────────────
@@ -152,7 +227,7 @@ jobs:
 
   # ───────────────────────── 发布 Release ─────────────────────────
   release:
-    needs: [windows, linux]
+    needs: [windows, macos, linux]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:

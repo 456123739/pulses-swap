@@ -89,10 +89,11 @@ class AnimatedButton(ctk.CTkButton):
         except Exception:
             pass
 
-    def _to(self, target, duration=110):
+    def _to(self, target, duration=110, easing=None):
         if target == self._current:
             return
         start = self._current
+        curve = easing or ease_out_cubic
 
         def frame(e, raw):
             self._current = lerp_color(start, target, e)
@@ -102,8 +103,7 @@ class AnimatedButton(ctk.CTkButton):
                 pass
 
         frame(0.0, 0.0)
-        tween(self, "bg", duration, frame, easing=ease_out_cubic,
-              fps=FPS_COLOR)
+        tween(self, "bg", duration, frame, easing=curve, fps=FPS_COLOR)
 
     # 注意：处理函数一律用 _anim_* 命名，绝不能叫 _on_enter/_on_leave/
     # _on_release —— CTkButton 在 __init__ 里 bind("<ButtonRelease-1>",
@@ -123,10 +123,13 @@ class AnimatedButton(ctk.CTkButton):
     def _anim_press(self, _event=None):
         self._reassert()
         if self._enabled():
+            # 按下要"立刻"沉下去：70ms 内到位，迟滞感就没了
             self._to(self._press_color, 70)
 
     def _anim_release(self, _event=None):
         self._reassert()
         if not self._enabled():
             return
-        self._to(self._hover_target if self._hovering else self._base_color, 120)
+        # 松开回弹：颜色轻微过冲再收回，手指离开时有一点"弹"的感觉
+        self._to(self._hover_target if self._hovering else self._base_color,
+                 200, easing=ease_out_soft_spring)

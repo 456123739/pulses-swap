@@ -64,16 +64,27 @@ class CanvasSegmented(Canvas):
                  hover_color=C_ACCENT_SOFT, text_color=C_TEXT_MAIN,
                  active_text_color=C_ACCENT, font_size=FS_BODY,
                  bold_active=False, text_anchor="w", text_pad=14,
-                 duration_ms=240, hover_ms=110, width=1, height=1):
+                 duration_ms=240, hover_ms=110, width=1, height=None):
         # 自绘控件是原始像素：按 config.UI_SCALE 放大，否则系统 125%/150% 下会和
         # CTk 控件错位（CTk 自己会缩放，Canvas 不会）
         item_height = px(item_height)
         pad, gap, radius = px(pad), px(gap), px(radius)
         text_pad = px(text_pad)
         font_size = max(1, int(round(font_size * config.UI_SCALE)))
+        if height is None:
+            # 不传高度就按内容算一个自然高度。
+            # 原来默认 1：调用方只 pack(fill=X) 时画布就真的只有 1px 高，
+            # 药丸/文字全被裁掉，看起来像「这个弹窗没有选项卡」。
+            if orientation == "vertical":
+                height = (2 * pad + len(items) * item_height
+                          + max(0, len(items) - 1) * gap)
+            else:
+                height = 2 * pad + item_height
+        else:
+            height = px(height) if height > 1 else height
         super().__init__(parent, bg=bg_color, highlightthickness=0, bd=0,
                          width=px(width) if width > 1 else width,
-                         height=px(height) if height > 1 else height)
+                         height=height)
         self._items = [(key, str(text)) for key, text in items]
         self._keys = [key for key, _ in self._items]
         self._command = command
@@ -88,9 +99,11 @@ class CanvasSegmented(Canvas):
         self._text_color = text_color
         self._active_text_color = active_text_color
         # 字体族要在构造时取（apply_font_fallbacks 会就地改写全局名）
-        self._font = (config.FONT_FAMILY, font_size)
-        self._font_active = (config.FONT_FAMILY, font_size,
-                             "bold" if bold_active else "normal")
+        # 用 tk_font()：这是 tk.Canvas 的文字，正数字号会被 Tk 当成「磅」
+        # 再乘一次 tk scaling（100% 下 1.33 倍、150% 下 2 倍），字会明显偏大
+        self._font = tk_font(config.FONT_FAMILY, font_size)
+        self._font_active = tk_font(config.FONT_FAMILY, font_size,
+                                    "bold" if bold_active else "normal")
         self._text_anchor = text_anchor
         self._text_pad = text_pad
         self._duration_ms = duration_ms
@@ -154,7 +167,8 @@ class CanvasSegmented(Canvas):
         else:
             inner = width - 2 * self._pad - (count - 1) * self._gap
             item_w = inner / float(count)
-            y1, y2 = self._pad, height - self._pad
+            # 容器被压得比内边距还小的时候，别算出反过来的矩形
+            y1, y2 = self._pad, max(self._pad + 4, height - self._pad)
             x = self._pad
             for _ in range(count):
                 rects.append((x, y1, x + item_w, y2))
@@ -297,7 +311,7 @@ class CanvasSegmented(Canvas):
 
         frame(0.0, 0.0)      # 立即落到起点，滑块不等待第一帧
         tween(self, "pill", self._duration_ms, frame, done,
-              easing=ease_out_cubic, fps=FPS_MOVE)
+              easing=ease_out_pill, fps=FPS_MOVE)
 
     def _animate_texts(self, previous_key, active_index, animate=True):
         for index, text_id in enumerate(self._text_ids):

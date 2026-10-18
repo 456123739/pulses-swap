@@ -63,13 +63,14 @@ FONT_FAMILY_CN   = "Microsoft YaHei UI"
 FONT_FAMILY      = FONT_FAMILY_CN
 FONT_FAMILY_MONO = "Consolas"
 
-# 字号阶梯（整体上移 1~2pt，拉开层级、避免拥挤）
-FS_TINY    = 11   # 提示 / 说明小字（原 10，用户反馈太小 → +1）
-FS_SMALL   = 12   # 次要信息、单行标签、单选项（原 11）
-FS_BODY    = 13   # 正文与控件默认字号（原 12）
-FS_SUBHEAD = 15   # 卡片小节标题（原 13 粗体）
-FS_TITLE   = 17   # 对话框主标题（原 15 粗体）
-FS_DISPLAY = 21   # 展示型标题（原 19）
+# 字号阶梯（整体再上移 1pt：100% 缩放下 13px 中文偏细，正文用 14 更清晰；
+# 层级差保持 1/1/2/2/4，避免"全都一样大"或"越界变成大标题"）
+FS_TINY    = 12   # 提示 / 说明小字
+FS_SMALL   = 13   # 次要信息、单行标签、单选项
+FS_BODY    = 14   # 正文与控件默认字号
+FS_SUBHEAD = 16   # 卡片小节标题
+FS_TITLE   = 18   # 对话框主标题
+FS_DISPLAY = 22   # 展示型标题
 
 
 def resolve_font_family(stack, fallback):

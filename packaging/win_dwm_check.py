@@ -54,6 +54,8 @@ ps.ctypes.windll = types.SimpleNamespace(
     winmm=types.SimpleNamespace(timeBeginPeriod=lambda v: 0, timeEndPeriod=lambda v: 0))
 
 print("== 1. 下发的 DWM 属性 ==")
+# 与 main() 一致：CTk 之前先把缩放锁死（顺带摘掉 DPI 轮询）
+ps.lock_ctk_scaling(1.0)
 root = ps.ctk.CTk()
 root.geometry("500x400")
 root.update()
@@ -67,8 +69,39 @@ check("DWMWA_SYSTEMBACKDROP_TYPE(38) = 1（DWMSBT_NONE，禁掉 Mica）",
 check("DWMWA_MICA_EFFECT(1029) = 0（旧版 Win11 兜底）", got.get(1029) == 0, got)
 check("DWMWA_USE_IMMERSIVE_DARK_MODE(20) = 0（浅色标题栏）", got.get(20) == 0, got)
 check("DWMWA_WINDOW_CORNER_PREFERENCE(33) = 2（圆角）", got.get(33) == 2, got)
+# 标题栏/边框显式上色：不设的话 Win11 会给标题栏铺一层带材质的底（同样透壁纸）
+check("DWMWA_CAPTION_COLOR(35) = #F5F7F8", got.get(35) == 0xF8F7F5, got.get(35))
+check("DWMWA_BORDER_COLOR(34) = #E3EAEB", got.get(34) == 0xEBEAE3, got.get(34))
+check("DWMWA_TEXT_COLOR(36) = #2C3E3F", got.get(36) == 0x3F3E2C, got.get(36))
 
-print("== 2. 触发路径：失焦 / 弹窗 / 轮询 ==")
+print("== 2. CTk 自己的 DPI 轮询已被摘掉（alpha 闪切的根因） ==")
+tracker = ps.ctk.ScalingTracker
+check("deactivate_automatic_dpi_awareness = True",
+      tracker.deactivate_automatic_dpi_awareness is True)
+check("update_loop_running = True（不会再挂 100ms 轮询）",
+      tracker.update_loop_running is True)
+alpha_calls = []
+_real_attributes = root.attributes
+
+
+def _spy_attributes(*args, **kwargs):
+    if args and args[0] == "-alpha":
+        alpha_calls.append(args)
+    return _real_attributes(*args, **kwargs)
+
+
+root.attributes = _spy_attributes
+tracker.window_dpi_scaling_dict[root] = 2.0      # 伪造「DPI 变了」
+try:
+    tracker.check_dpi_scaling()
+except Exception as exc:                          # pragma: no cover
+    check("check_dpi_scaling 可安全调用", False, exc)
+check("伪造 DPI 变化后没有任何 -alpha 写入（不会闪成 15%）",
+      not alpha_calls, alpha_calls)
+tracker.window_dpi_scaling_dict[root] = 1.0
+root.attributes = _real_attributes
+
+print("== 3. 触发路径：失焦 / 弹窗 / 轮询 ==")
 ps.DatabaseLocatorDialog.show = lambda self: None
 root.destroy()
 root = ps.ctk.CTk()

@@ -1,0 +1,416 @@
+# Pulses Swap 交接文档（v2.5.0）
+
+> 给接手的人 / AI 看的：这个软件被拆成了哪些文件、每个文件干什么、
+> 数据怎么流动、改哪里、怎么跑测试、怎么打包。
+> 阅读顺序建议：本文 §1 → §2 → §4 → 需要时查 §3。
+
+---
+
+## 1. 一句话概括
+
+一个 **Python + customtkinter** 的桌面工具：把 Minecraft 的 TACZ 枪包按「预设」分组，
+一键把某组枪包换进游戏的 `tacz` 目录；同时把预设发布到**蓝奏云**，
+玩家绑定分享链接后可以增量同步。
+
+- 版本：`2.5.0`（`src/pulses/core/paths.py` 里的 `VERSION`）
+- 入口：`src/main.py` → `pulses.ui.app.main()`
+- 依赖：`customtkinter` `tkinterdnd2` `watchdog` `Pillow`（见 `requirements.txt`）
+- 不依赖任何第三方网络库（HTTP 全用标准库 `urllib`）
+
+---
+
+## 2. 目录结构
+
+```
+pulses-swap/
+├── src/
+│   ├── main.py                 入口（3 行，调 pulses.ui.app.main）
+│   ├── pulses_swap.py          兼容壳：老代码 from pulses_swap import * 仍可用
+│   ├── pulses/                 界面 + 本地逻辑
+│   └── online/                 在线同步（不依赖 tkinter，可命令行跑）
+├── packaging/                  打包配置 + 各种验证脚本
+├── tests/                      单元 / 集成测试（130 个）
+├── docs/                       方案、教程、交接文档
+└── requirements.txt
+```
+
+**关键分层原则**
+
+| 层 | 位置 | 是否依赖 tkinter |
+|---|---|---|
+| 主题 / 核心 / 动画 / 控件 | `src/pulses/{theme,core,animation,widget}` | 是 |
+| 界面（页面 / 弹窗 / mixin） | `src/pulses/{ui,pages,dialogs}` | 是 |
+| 在线同步 | `src/online/` | **否**（可在命令行、测试里直接用） |
+
+`online/` 完全不 import tkinter，所以能在无显示环境跑集成测试。
+
+---
+
+## 3. 文件清单（按职责）
+
+### 3.1 入口与兼容层
+
+| 文件 | 行数 | 职责 |
+|---|---|---|
+| `src/main.py` | 24 | 唯一入口，调用 `pulses.ui.app.main()` |
+| `src/pulses_swap.py` | 53 | 兼容壳：模块级 `__getattr__` 转发到 `pulses.*`，读可变全局时优先读 `config` |
+| `src/pulses/__init__.py` | 1 | 空 |
+
+### 3.2 主题与核心（`src/pulses/theme` `src/pulses/core`）
+
+| 文件 | 行数 | 职责 |
+|---|---|---|
+| `theme/palette.py` | 152 | 颜色 / 圆角 / 尺寸 / 间距令牌（`C_*` `R_*` `H_*` `PAD_*` `FS_*`） |
+| `theme/typography.py` | 109 | 字体栈、`resolve_font_family()`、`apply_font_fallbacks()`（结果同步回 `config`） |
+| `core/paths.py` | 156 | `VERSION`、程序目录、数据目录解析、`resource_path()`、数据库位置读写 |
+| `core/platform.py` | 386 | DPI 感知与缩放（`enable_dpi_awareness` `sync_ui_scale` `px` `tk_font` `lock_ctk_scaling`）、Win11 不透明（`make_window_opaque` `refresh_window_opacity` `_apply_opaque_window`）、回收站 |
+| `core/state.py` | 52 | 运行时可变全局：`UI_SCALE`、`ANIMATIONS_ENABLED` |
+| `core/tasks.py` | 96 | worker → 主线程投递（`ui_call` / `start_ui_pump`），替代跨线程 `root.after` |
+| `core/files.py` | 144 | 文件指纹、`format_size`、`sanitize_filename`、`locate_tacz_by_path` |
+| `config.py` | 20 | 聚合层：把上面四个再导出，保持 `config.X` 调用方式 |
+
+> **改颜色 / 间距 / 字号 → 只改 `theme/palette.py`**。
+
+### 3.3 动画（`src/pulses/animation`）
+
+| 文件 | 行数 | 职责 |
+|---|---|---|
+| `animation/easing.py` | 168 | 缓动曲线（含三条弹簧）、`lerp_color`、`_TWEENS` 注册表 |
+| `animation/tween.py` | 257 | `tween()` 调度器、`attach_hover_glow()`、销毁时清理补间 |
+
+| 曲线 | 用途 |
+|---|---|
+| `ease_out_cubic` | 位移默认 |
+| `ease_out_spring` | 弹窗入场（过冲 ~7%） |
+| `ease_out_pill` | 分段控件滑块（过冲 ~5%） |
+| `ease_out_soft_spring` | 颜色 / 描边（过冲 ~3%） |
+| `ease_out_back` | Toast |
+
+> 动画开关：`config.ANIMATIONS_ENABLED`。关闭时 `tween()` 一帧到位，逻辑不变。
+
+### 3.4 控件（`src/pulses/widget`）
+
+| 文件 | 行数 | 职责 |
+|---|---|---|
+| `button.py` | 135 | `AnimatedButton`：hover / 按下 / 松开都是逐帧混色 |
+| `segmented.py` | 331 | `CanvasSegmented`：自绘分段控件（导航、选项卡、单选） |
+| `stack.py` | 308 | `SlideStack`：页面栈，推入/推出（页面停靠在视口外，不用 hidden） |
+| `toast.py` | 122 | `Toast`：右上角浮出提示 |
+| `factory.py` | 583 | `make_button` `make_entry` `make_label` `make_section_header` `make_list_scroll` `make_checkbox` `FormField` `attach_entry_focus` `attach_entry_menu` `ellipsize` `open_url` |
+| `cards.py` | 656 | `PresetCard`（三行文字按宽度省略）/ `CardList` / `ScrollArea` / `StatusDot` / `EmptyState` |
+| `diffrow.py` | 361 | `DiffRow` / `DiffList`（逐项勾选）/ `InfoRow` / `InfoList`（只读） |
+
+### 3.5 界面（`src/pulses`）
+
+| 文件 | 行数 | 职责 |
+|---|---|---|
+| `dialogs.py` | 1000 | 窗口内覆盖层弹窗（`OverlayCard`）、`show_info/warning/error`、`ask_*`、数据库定位与迁移对话框 |
+| `managers.py` | 1304 | 数据层：`AppSettings` `LogManager` `GuideManager` `RecentPacksManager` `TaczWatcher` `PresetManager` |
+| `pages.py` | 535 | 设置页（常规 / 数据库 / 关于，含「在线同步」分组） |
+| `ui/window.py` | 420 | `WindowMixin`：窗口骨架、侧边栏、页面切换、Win11 不透明防护、菜单 |
+| `ui/page_home.py` | 651 | `HomePageMixin`：主界面三列布局、拖入、最近面板 |
+| `ui/packs.py` | 790 | `PacksMixin`：整合包加载、预设卡片/选中、右键菜单、重命名/删除、TACZ 监控 |
+| `ui/transfer.py` | 503 | `TransferMixin`：应用预设、导入/导出、进度条、忙碌态 |
+| `ui/database.py` | 440 | `DatabaseMixin`：数据库定位 / 切换 / 合并 / 迁移 |
+| `ui/page_log.py` | 94 | `LogPageMixin`：日志页 |
+| `ui/misc.py` | 236 | `MiscMixin`：身份提示、教程入口、杂项 |
+| `ui/online.py` | 1778 | `OnlineMixin`：**所有在线相关界面**（卡片状态、来源、同步、发布、身份登录、详情、诊断） |
+| `ui/app.py` | 238 | 装配 `PulsesSwapApp(8 个 mixin)` + `main()`（含 Win11 不透明与缩放锁） |
+
+> 主窗口是 mixin 拼起来的：`PulsesSwapApp(WindowMixin, HomePageMixin, LogPageMixin,`
+> `DatabaseMixin, PacksMixin, TransferMixin, MiscMixin, OnlineMixin)`。
+> 每个 mixin 只依赖 `self.xxx` 上的约定属性（见 §5）。
+
+### 3.6 在线同步（`src/online`）
+
+| 文件 | 行数 | 职责 |
+|---|---|---|
+| `errors.py` | 113 | 统一异常：`message / detail / hint / retryable` + 11 个子类 |
+| `acw.py` | 71 | 蓝奏 `acw_sc__v2` 人机校验的纯 Python 解法 |
+| `hashing.py` | 336 | 文件 sha256、**树摘要**、`HashCache`、`scan_local` |
+| `manifest.py` | 200 | manifest 规范化 / 校验 / 原子写 / 版本比较 |
+| `packing.py` | 122 | 确定性打包、防穿越与防炸弹的解包 |
+| `diff.py` | 252 | 两方比对 → `Plan`（角色动作、阻塞项、统计、默认勾选） |
+| `provider_lanzou.py` | 645 | 匿名分享解析：列表 / 直链 / 人机校验 / 流式下载 / 重试 |
+| `provider_lanzou_account.py` | 575 | 账号操作：登录 / 建目录 / 流式上传 / 删除 / 分享 |
+| `downloader.py` | 259 | 下载到暂存 + 当场校验 |
+| `updater.py` | 251 | 原子替换、目录两步改名 + journal、崩溃恢复 |
+| `publisher.py` | 301 | 建目录 → 删云端多余 → 上传 → manifest 最后替换 → 取分享 |
+| `trash.py` | 139 | 系统回收站（Windows / freedesktop） |
+| `paths.py` | 86 | 状态目录布局（`.online/`） |
+| `service.py` | 929 | 门面：绑定 / 检查 / 同步 / 发布 / 诊断 / 记账 / index.json |
+| `__init__.py` | 38 | 公开 API |
+
+---
+
+## 4. 数据流
+
+### 4.1 本地（预设切换）
+
+```
+整合包目录/tacz  ←── apply_preset() ──→ 数据库/<预设名>/
+      │                                     │
+      └── 当前生效的枪包                      └── 未生效的预设（index.json + 枪包）
+```
+
+- `PresetManager.apply_preset()` 把当前 `tacz` 里的枪包**移回**原预设，再把目标预设的枪包**移入** `tacz`
+- 受保护、不参与移动的：`tacz-pre.toml`、`blacklist.txt`、`tacz_default_gun/`、`index.json` 等
+
+### 4.2 在线同步（玩家）
+
+```
+① check()
+   云端分享 ──list_files──> 找 _pulses_manifest.txt ──fetch──> manifest
+   本地目录 ──scan_local(HashCache)──> files[]
+        └── diff.compare(local, cloud, role="player") ──> Plan
+② sync(plan, selection)
+   Downloader: 逐项下载到 staging → 校验（zip 比 sha256 / folder 比树摘要）
+   Installer : 原子替换进正式目录（目录用两步改名 + journal）
+   _finish() : 更新 index.json / version.txt / 本地 manifest / sources.json
+```
+
+**本地内容目录（`root`）随预设状态变化**：
+
+| 预设状态 | `root` |
+|---|---|
+| 未应用 | `数据库/<预设名>/` |
+| 已应用 | `整合包/tacz/` |
+
+`PresetRef(name, path, root, applied)` 就是干这个的：`path` 存元数据，`root` 放内容。
+
+### 4.3 发布（开发者）
+
+```
+publish_plan(): ensure_path(云端路径) → folder_share → 用分享链接读云端 manifest
+                → scan_local → diff.compare(role="developer")
+publish():      删云端多余 → 逐个上传（文件夹先打包）→ manifest(generation+1) → 分享
+```
+
+### 4.4 状态目录
+
+```
+PulsesSwap_database/.online/
+├── sources.json              每个预设的源（链接 / 密码 / 云端路径 / 上次版本 / 历史）
+├── account.json              开发者账号（打码保存）
+├── cloud/<preset>-<hash>.json 上次拉到的云端 manifest（离线可用）
+├── local/<preset>-<hash>.json 上次算出的本地 manifest（展示缓存）
+├── cache/<root-hash>.json     哈希缓存（按内容目录区分）
+└── staging/<preset>-<hash>/   下载暂存 + journal.json
+```
+
+> 目录名以 `.` 开头是必须的：预设扫描会跳过隐藏目录，否则它会被当成一个预设。
+
+---
+
+## 5. 关键约定
+
+### 5.1 manifest 格式
+
+```json
+{"schema":1, "name":"SSR预设包", "version":"2026.10.18", "generation":7,
+ "min_app":"2.5.0", "notes":"…", "files":[
+   {"path":"gun_alpha.zip","type":"zip","size":41943040,
+    "sha256":"9f2c…","packed_size":41943040},
+   {"path":"gun_beta.zip","type":"folder","target":"gun_beta",
+    "size":52428800,"files":42,"sha256":"7d1a…","packed_size":39800000}]}
+```
+
+| 字段 | 含义 |
+|---|---|
+| `path` | 上传到网盘的文件名，**也是比对唯一键**（不区分大小写） |
+| `type` | `zip` 原样 / `folder` 解压到 `target` / `file` 其他 |
+| `sha256` | 内容摘要；`folder` 是**树摘要** |
+| `size` / `packed_size` | 逻辑体积 / 传输体积 |
+
+### 5.2 树摘要（folder 类型的 sha256）
+
+```
+h = sha256("pulses-tree-v1\n")
+for (rel, size, file_sha) in sorted(树里每个文件):
+    h.update(rel + "\0" + size + "\0" + file_sha + "\n")
+```
+
+只取决于内容，与打包细节无关 → 开发者算一次、玩家解压后再算一次，能对上。
+
+### 5.3 不进 manifest 的东西
+
+`index.json` / `version.txt` / `description.txt` / `tacz-pre.toml` / `blacklist.txt` /
+`tacz_default_gun/` / 隐藏文件。见 `hashing.EXCLUDED_NAMES` 与 `service._sanitize_cloud()`。
+
+### 5.4 网盘接口（2026 版，已实测）
+
+| 动作 | 接口 |
+|---|---|
+| 登录 | `GET accounts.woozooo.com/accounts.php?action=login&ref=lanzoui.com`（先过 acw）→ `POST` `task=uselogin&username&password&ref` → 跟随 `msgs` |
+| 列目录 | `POST pc.woozooo.com/doupload.php` `task=47` |
+| 建目录 | 同上 `task=2` |
+| 列文件 | 同上 `task=5` |
+| 删文件 | 同上 `task=6` |
+| 分享 | 同上 `task=18`（完整地址在 `info.new_url`） |
+| 上传 | `POST pc.woozooo.com/html5up.php`，multipart，目录用 `folder_id_bb_n` |
+| 下载直链 | `/fn` → `apifile/ajaxfile.php`，**必须带 `websign=2`** |
+
+### 5.5 mixin 之间依赖的约定属性
+
+`OnlineMixin` 假设 `self` 上有：`root`、`log_manager`、`preset_manager`、`tacz_path`、
+`settings`（`AppSettings`）、`db_ready`、`current_selected_preset`、
+以及 `preset_cards`、`_update_preset_list()`、`on_preset_selected()`、`toast()`。
+
+---
+
+## 5.6 文档索引
+
+| 文档 | 给谁看 |
+|---|---|
+| `docs/swap-online.md` | 方案与设计决策（含视觉体系 §14、功能清单核对） |
+| `docs/tutorial-player.md` | 玩家端操作教程 + 教程动画分镜 |
+| `docs/tutorial-developer.md` | 开发者端操作教程 + 教程动画分镜 |
+| `docs/tutorial-animation-brief.md` | 做教程动画的 AI：去哪拿信息、什么不能改 |
+| `docs/handover.md` | 本文：代码结构与交接 |
+
+## 6. 怎么跑
+
+```bash
+# 源码运行
+python src/main.py
+
+# 单元 + 集成测试（130 个）
+python -m unittest discover -s tests -t .
+
+# 打包：一份 spec 出三端
+pyinstaller packaging/pulses_swap.spec --noconfirm --clean
+```
+
+| 平台 | 产物 | 说明 |
+|---|---|---|
+| Windows 10/11（主要用户） | `dist/PulsesSwap/PulsesSwap.exe` → Inno Setup 安装器 | 图标用 `icon.ico`；Win10 上 DWM 属性不认会自动跳过，不影响启动 |
+| macOS | `dist/PulsesSwap.app` | 必须走 `BUNDLE`，否则只是个 Unix 可执行文件；图标用 `icon.icns`；Intel / Apple Silicon 各打一份 |
+| Linux | `dist/PulsesSwap/` | 仅开发自测用，不对外发布 |
+
+**图标 / logo**：三端共用 `packaging/icon.{ico,png,icns}`，由 `make_icon.py` 生成。
+想换成自己的 logo，把图放到 `packaging/logo.png` 再跑一次：
+
+```bash
+python packaging/make_icon.py     # 三个格式一起重出
+```
+
+CI（`.github/workflows/build.yml`）在推 `v*` tag 时自动构建 Windows 安装器 +
+macOS 双架构 + Linux，并发布到 Release；手动 dispatch 只出 artifact。
+
+**没有 CI 也能出 Windows 包**（PyInstaller 不能交叉编译，必须在 Windows 上跑）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1
+```
+
+产物：`dist\PulsesSwap\PulsesSwap.exe`（目录版）+ `dist\installer\*.exe`（装了 Inno Setup 才有）。
+
+无显示环境跑界面测试（本机做法）：
+
+```bash
+export XDG_RUNTIME_DIR=/tmp/xdg
+export DISPLAY=:99          # weston headless + Xwayland
+```
+
+---
+
+## 7. 验证脚本（`packaging/`）
+
+| 脚本 | 作用 | 需要网络 |
+|---|---|---|
+| `ui_snapshot.py` | 导出控件树 JSON，改前改后比对 | 否 |
+| `ui_audit.py` | 全流程 + 所有按钮逐个点击 | 否 |
+| `anim_invariants.py` | 动画中间帧不变量 | 否 |
+| `scale_check.py` | 100% / 125% / 150% 三档布局 | 否 |
+| `online_ui_check.py` | 在线界面冒烟（身份/来源/同步/发布） | 否 |
+| `online_e2e.py` | 两端全流程 15 阶段（含失败/重启） | 否（本地模拟服务） |
+| `online_smoke.py` | 真实分享：列表 / 下载 / 校验 | **是** |
+| `lanzou_live_upload.py` | 真实账号：上传 / 分享 / 下载回验 | **是** |
+| `lanzou_live_publish.py` | 真实账号：完整发布闭环 | **是** |
+| `win_dwm_check.py` | Win11 不透明逻辑 | 否 |
+| `startup_check.py` | **走真实入口 `main()`**，确认打包后能启动 | 否 |
+| `lanzou_publish_release.py` | 把 dist 里的产物传到网盘下载文件夹（凭据走环境变量） | **是** |
+
+> 界面截图：本机是 weston(headless) + Xwayland，组合器把窗口内容放在自己的
+> pixmap 里，`XGetImage` / `CopyArea` 都拿不到像素，`weston-screenshooter`
+> 在 headless 后端直接断言失败。**要截图请在普通桌面上跑**；
+> 需要精确排版数据就用 `ui_snapshot.py` 导出的控件树 JSON。
+
+> 后三个 `lanzou_live_*` / `online_smoke` 会打真实网盘，**别频繁跑**（有封号风险）。
+> 凭据只从环境变量 `PULSES_LANZOU_USER` / `PULSES_LANZOU_PASS` 读，不落盘。
+
+---
+
+## 8. 改哪里
+
+| 想改什么 | 去哪 |
+|---|---|
+| 配色 / 圆角 / 间距 / 字号 | `theme/palette.py` |
+| 字体回退 | `theme/typography.py` |
+| 动画曲线 / 时长 | `animation/easing.py`、各控件的 `tween(...)` 调用 |
+| 主界面布局 | `ui/page_home.py` |
+| 预设卡片长相 | `widget/cards.py` |
+| 弹窗样式 | `dialogs.py`（`add_title/add_subtitle/add_divider/add_buttons`） |
+| 表单字段（标签+输入+提示+报错） | `widget/factory.py` 的 `FormField` |
+| 字号阶梯 | `theme/typography.py`（`FS_TINY`…`FS_DISPLAY`） |
+| 在线界面的文案 / 流程 | `ui/online.py` |
+| 差异判定规则 | `online/diff.py` |
+| 同步落盘 / 原子替换 | `online/updater.py` |
+| 网盘接口 | `online/provider_lanzou*.py` |
+| manifest 字段 | `online/manifest.py` |
+
+---
+
+## 9. 已知限制
+
+| 限制 | 说明 |
+|---|---|
+| 单文件 100MB | 蓝奏免费账号上限，超出会被 `diff` 标红 |
+| 扩展名白名单 | `.json` 等传不上去；manifest 用 `.txt` |
+| 不支持断点续传 | 蓝奏不给 Range，失败整包重来（文件级重试有） |
+| 文件夹型枪包粒度 | 内容一变就整包重传 |
+| 无玩家回滚 | 设计如此：云端为准，覆盖不备份 |
+| 网盘风控 | 机房 IP 可能要求人机验证；家庭宽带正常 |
+| 登录要 acw 校验 | 已实现，但网盘改版时需要跟着改 |
+
+---
+
+## 10. 历史与坑（读代码前先看这段）
+
+1. **主窗口原本是 7399 行单文件**，后来拆成 `theme/core/animation/widget/ui` 分层，
+   再按职责拆成 8 个 mixin。`src/pulses_swap.py` 是兼容壳。
+2. **页面栈不能用 `state="hidden"`**：隐藏的 canvas window 不会被 Tk 重新布局，
+   切回来会是 384×483 的旧尺寸（表现为"撕裂"）。现在页面停靠在视口外。
+3. **CTk 控件尺寸不能乘 `px()`**：CTk 自己会按 `widget_scaling` 放大，
+   再乘一次就是双重缩放（125% 下卡片高 134 而不是 115）。
+   `px()` 只用于 `tk.Canvas` 尺寸、`grid minsize`、`place` 偏移。
+4. **用 `grid` 布局的卡片要 `grid_propagate(False)`**，只写 `pack_propagate` 高度仍会被内容顶开。
+5. **补间要在控件销毁时清理**：CTk 的 `bind` 绑在内部 Canvas 上，
+   不能用 `event.widget` 判断，要用闭包捕获控件本身（见 `tween._install_destroy_guard`）。
+6. **`.online` 必须是隐藏目录**，否则会被预设扫描当成一个预设。
+7. **在线检查的并发**：检查中再次请求会排队补跑（`_online_recheck`），
+   否则卡片会停在旧状态。
+8. **蓝奏的三个坑**：登录换域名、上传换 `/html5up.php`、下载要 `websign=2`。
+   这三个都是真实账号实测出来的，mock 里也加了对应校验防止回归。
+9. **Win11「没写半透明却半透明」的真凶是 CTk 自己**：
+   `ScalingTracker.check_dpi_scaling()` 每 100ms 轮询 DPI，一旦判定变化就
+   `attributes("-alpha", 0.15)` → 改缩放 → `attributes("-alpha", 1)`。
+   在 Win11 上这会重新触发 DWM 材质评估（Mica/亚克力回来），
+   中途抛异常还会永久停在 15%。修法是 `lock_ctk_scaling()`：
+   关掉 `deactivate_automatic_dpi_awareness`、摘掉轮询、把 DPI 缓存归一成 1.0，
+   再显式设我们自己的缩放。**别再往 `_opacity_tick` 里加逻辑**，它现在只是兜底。
+   标题栏另外用 `DWMWA_CAPTION_COLOR(35)/BORDER_COLOR(34)/TEXT_COLOR(36)` 上色，
+   不设的话 DWM 会给标题栏铺一层带材质的底，同样透壁纸。
+10. **原生 Tk 控件的字号必须是负数**：`tk.Canvas` 文字、`tk.Listbox` 的正数字号
+    是「磅」，会被 `tk scaling` 再乘一次（100% 下 1.33 倍、150% 下 2 倍），
+    和 CTk 的像素字号对不上。统一走 `tk_font(family, size_px, weight)`。
+    CTk 控件则相反：**不要**套 `px()`，它自己会缩放。
+11. **`from x import *` 不会带出下划线开头的名字**：拆分后 `main()` 里的
+    `_set_app_user_model_id` / `_apply_opaque_window` 就是这样丢的 ——
+    所有测试都直接 `PulsesSwapApp(root)`，所以全绿，但打包出来的 exe 一双击就
+    NameError。现在这两个给了公开别名（`set_app_user_model_id` /
+    `apply_opaque_window`），并由 `packaging/startup_check.py` 守着。
+    **改 `main()` 之后一定跑一遍它。**
+12. **输入框一律用 `make_entry()` / `FormField`**：右键菜单（剪切/复制/粘贴/全选/清空）、
+    聚焦描边、校验变红都在里面，自己 `ctk.CTkEntry(...)` 会漏掉这些。
+    校验报错要**先 `focus()` 再 `error()`** —— 聚焦事件是排队投递的，顺序反了红色会被盖掉。

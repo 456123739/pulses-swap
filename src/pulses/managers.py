@@ -61,6 +61,7 @@ class AppSettings:
         self.storage_mode = "isolated"
         self.animations = True
         self.role = "player"
+        self.online_auto_check = True
         self._settings_file: Path | None = None
 
     def bind_database(self, db_path: Path):
@@ -76,6 +77,8 @@ class AppSettings:
                 self.storage_mode = data.get('storage_mode', 'isolated')
                 self.role = data.get('role', 'player')
                 self.animations = bool(data.get('animations', True))
+                self.online_auto_check = bool(
+                    data.get('online_auto_check', True))
             except Exception:
                 pass
 
@@ -87,7 +90,8 @@ class AppSettings:
             with open(self._settings_file, 'w', encoding='utf-8') as f:
                 json.dump({'storage_mode': self.storage_mode,
                            'role': self.role,
-                           'animations': self.animations},
+                           'animations': self.animations,
+                           'online_auto_check': self.online_auto_check},
                           f, indent=2, ensure_ascii=False)
             return True
         except Exception as e:
@@ -577,6 +581,18 @@ class PresetManager:
         except Exception as e:
             self.log.log(f"加载预设 {preset_path.name} 失败: {e}", 'ERROR')
 
+    def reload_preset(self, name: str) -> bool:
+        """在线同步改了磁盘内容后，把单个预设从 index.json 重新读一遍。"""
+        info = self.presets.get(name)
+        if not info:
+            return False
+        path = Path(info['path'])
+        if not path.exists():
+            return False
+        self._load_preset(path)
+        self.save_cache()
+        return True
+
     def create_preset(self, name: str, version: str = 'v1.0.0') -> bool:
         if not name or name in self.presets:
             return False
@@ -855,424 +871,6 @@ class PresetManager:
             return True
         except Exception as e:
             self.log.log(f"更新预设索引失败: {e}", 'ERROR')
-            return False
-
-    def export_preset(self, preset_name: str, export_path: Path, progress_callback=None) -> bool:
-        if preset_name not in self.presets:
-            return False
-        if preset_name == "default":
-            self.log.log("不允许导出名为 'default' 的预设", 'ERROR')
-            return False
-
-        preset_info = self.presets[preset_name]
-        preset_path = Path(preset_info['path'])
-        was_applied = preset_info.get('applied', False)
-
-        if was_applied and self.tacz_path and self.tacz_path.exists():
-            source_path = self.tacz_path
-            self.log.log(f"预设 '{preset_name}' 已应用，从 TACZ 读取枪包内容",
-                          'INFO', verbose=True)
-        else:
-            source_path = preset_path
-            self.log.log(f"从预设文件夹读取导出内容: {preset_name}", 'INFO',
-                          verbose=True)
-
-        try:
-            if was_applied and self.tacz_path and self.tacz_path.exists():
-                current_gunpacks = self._get_gunpacks_from_folder(self.tacz_path)
-            else:
-                current_gunpacks = self._get_gunpacks_from_folder(preset_path)
-
-            index_data = {
-                'name': preset_info['name'],
-                'version': preset_info.get('version', 'v1.0.0'),
-                'gunpacks': current_gunpacks,
-                'applied': was_applied,
-                'incremental_count': preset_info.get('incremental_count', 0)
-            }
-            with open(preset_path / 'index.json', 'w', encoding='utf-8') as f:
-                json.dump(index_data, f, indent=2, ensure_ascii=False)
-
-            protected_all = self.PROTECTED_FILES + self.PROTECTED_DIRS
-            items = []
-            added_names = set()
-
-            if source_path == preset_path:
-                for item in source_path.rglob('*'):
-                    if item == source_path:
-                        continue
-                    rel = item.relative_to(source_path)
-                    if rel.parts and rel.parts[0] in protected_all:
-                        continue
-                    items.append(item)
-                    added_names.add(str(rel))
-            else:
-                for item in source_path.rglob('*'):
-                    if item == source_path:
-                        continue
-                    rel = item.relative_to(source_path)
-                    if rel.parts and rel.parts[0] in protected_all:
-                        continue
-                    items.append(item)
-                    added_names.add(str(rel))
-
-                for meta_name in ['index.json', 'description.txt', 'version.txt']:
-                    meta_path = preset_path / meta_name
-                    if meta_path.exists() and meta_name not in added_names:
-                        items.append(meta_path)
-                        added_names.add(meta_name)
-
-            total = len(items)
-            if total == 0:
-                with zipfile.ZipFile(export_path, 'w', zipfile.ZIP_STORED):
-                    pass
-                self.log.log(f"预设 '{preset_name}' 导出成功（空包）", 'SUCCESS')
-                if progress_callback:
-                    progress_callback(0, 0, "完成")
-                return True
-
-            self.log.log(f"正在打包 {total} 个项目...", 'PROCESS')
-            with zipfile.ZipFile(export_path, 'w', zipfile.ZIP_STORED) as zipf:
-                for idx, item in enumerate(items):
-                    try:
-                        if source_path == preset_path:
-                            arcname = item.relative_to(preset_path)
-                        else:
-                            try:
-                                arcname = item.relative_to(source_path)
-                            except ValueError:
-                                arcname = item.relative_to(preset_path)
-
-                        if item.is_file():
-                            zipf.write(item, arcname)
-                        else:
-                            zipf.write(item, str(arcname) + '/')
-                    except Exception as e:
-                        self.log.log(f"打包 {item.name} 失败: {e}", 'WARNING')
-                    if progress_callback and idx % 2 == 0:
-                        progress_callback(idx + 1, total, f"打包 {item.name}")
-                    if idx % 20 == 0:
-                        time.sleep(0.001)
-
-            self.log.log(f"预设 '{preset_name}' 导出成功: {export_path.name}", 'SUCCESS')
-            if progress_callback:
-                progress_callback(total, total, "完成")
-            return True
-
-        except Exception as e:
-            self.log.log(f"导出预设失败: {e}", 'ERROR')
-            return False
-
-    def export_incremental(self, preset_name: str, export_path: Path, progress_callback=None) -> bool:
-        if preset_name not in self.presets or not self.tacz_path:
-            return False
-        if preset_name == "default":
-            self.log.log("不允许导出名为 'default' 的预设", 'ERROR')
-            return False
-
-        preset_info = self.presets[preset_name]
-        if not preset_info.get('applied', False):
-            self.log.log("只能对已应用的预设导出增量更新", 'ERROR')
-            return False
-
-        changes = self.detect_changes(preset_name)
-        total_changes = len(changes['added']) + len(changes['removed']) + len(changes['modified'])
-        if total_changes == 0:
-            self.log.log("未检测到任何变更", 'INFO')
-            return False
-        self.log.log(
-            f"检测到变更: 新增 {len(changes['added'])} / "
-            f"移除 {len(changes['removed'])} / "
-            f"修改 {len(changes['modified'])}",
-            'INFO')
-
-        base_gunpacks = preset_info.get('gunpacks', {})
-        new_gunpacks = self._get_gunpacks_from_folder(self.tacz_path)
-
-        files_to_pack = []
-        for name in changes['added'] + changes['modified']:
-            item = self.tacz_path / name
-            if item.exists():
-                files_to_pack.append(item)
-
-        increment = preset_info.get('incremental_count', 0) + 1
-
-        metadata = {
-            'format': 'pulses_swap_incremental',
-            'format_version': 2,
-            'preset_name': preset_name,
-            'pack_name': self.pack_name,
-            'version': preset_info.get('version', 'v1.0.0'),
-            'increment': increment,
-            'changes': changes,
-            'base_gunpacks_index': base_gunpacks,
-            'new_gunpacks_index': new_gunpacks,
-            'timestamp': datetime.now().isoformat()
-        }
-
-        try:
-            total = len(files_to_pack) + 1
-            processed = 0
-            with zipfile.ZipFile(export_path, 'w', zipfile.ZIP_STORED) as zipf:
-                zipf.writestr('_increment.json',
-                              json.dumps(metadata, indent=2, ensure_ascii=False))
-                processed += 1
-                if progress_callback:
-                    progress_callback(processed, total, "写入元数据")
-                for item in files_to_pack:
-                    try:
-                        if item.is_file():
-                            zipf.write(item, item.name)
-                        else:
-                            for sub in item.rglob('*'):
-                                if sub.is_file():
-                                    zipf.write(sub, str(sub.relative_to(self.tacz_path)))
-                    except Exception as e:
-                        self.log.log(f"打包 {item.name} 失败: {e}", 'WARNING')
-                    processed += 1
-                    if progress_callback:
-                        progress_callback(processed, total, f"打包 {item.name}")
-                    time.sleep(0.001)
-
-            self.log.log("导出完成，正在同步校验数据...", 'PROCESS')
-            preset_info['gunpacks'] = new_gunpacks
-            preset_info['incremental_count'] = increment
-            preset_path = Path(preset_info['path'])
-            index_data = {
-                'name': preset_info['name'],
-                'version': preset_info.get('version', 'v1.0.0'),
-                'gunpacks': new_gunpacks,
-                'applied': True,
-                'incremental_count': increment
-            }
-            with open(preset_path / 'index.json', 'w', encoding='utf-8') as f:
-                json.dump(index_data, f, indent=2, ensure_ascii=False)
-            self.save_cache()
-
-            self.log.log(f"增量更新包导出成功: {export_path.name} (迭代 {increment})", 'SUCCESS')
-            self.log.log(f"校验数据已同步为最新 ({len(new_gunpacks)} 个枪包)",
-                          'SUCCESS', verbose=True)
-            if progress_callback:
-                progress_callback(total, total, "完成")
-            return True
-        except Exception as e:
-            self.log.log(f"导出增量包失败: {e}", 'ERROR')
-            return False
-
-    def import_preset(self, import_path: Path, progress_callback=None) -> bool:
-        try:
-            temp_dir = Path(tempfile.mkdtemp())
-            with zipfile.ZipFile(import_path, 'r') as zipf:
-                members = zipf.infolist()
-                total = len(members)
-                for idx, member in enumerate(members):
-                    if member.is_dir():
-                        continue
-                    try:
-                        zipf.extract(member, temp_dir)
-                        if progress_callback and idx % 2 == 0:
-                            progress_callback(idx + 1, total, f"解压 {member.filename}")
-                    except Exception as e:
-                        self.log.log(f"解压失败 {member.filename}: {e}", 'WARNING')
-                    if idx % 20 == 0:
-                        time.sleep(0.001)
-            index_file = temp_dir / 'index.json'
-            if not index_file.exists():
-                self.log.log("导入失败: 缺少index.json", 'ERROR')
-                shutil.rmtree(temp_dir)
-                return False
-            with open(index_file, 'r', encoding='utf-8') as f:
-                index_data = json.load(f)
-            preset_name = index_data.get('name', import_path.stem)
-            raw = index_data.get('gunpacks', {})
-            standard = {}
-            for name, value in raw.items():
-                if isinstance(value, dict):
-                    standard[name] = value
-                elif isinstance(value, list):
-                    standard[name] = {'type': 'zip', 'size': 0, 'file_count': 1,
-                                      'hash': str(value[0]) if value else ''}
-                else:
-                    standard[name] = {'type': 'zip', 'size': 0, 'file_count': 1}
-            index_data['gunpacks'] = standard
-            index_data['version'] = index_data.get('version',
-                                                    index_data.get('description', 'v1.0.0'))
-            index_data['incremental_count'] = index_data.get('incremental_count', 0)
-            if preset_name in self.presets:
-                if not ask_yes_no("确认覆盖", f"预设 '{preset_name}' 已存在，是否覆盖？"):
-                    shutil.rmtree(temp_dir)
-                    return False
-                old_path = Path(self.presets[preset_name]['path'])
-                if old_path.exists():
-                    shutil.rmtree(old_path)
-                del self.presets[preset_name]
-            preset_path = self.database_path / preset_name
-            if preset_path.exists():
-                shutil.rmtree(preset_path)
-            shutil.move(str(temp_dir), str(preset_path))
-            with open(preset_path / 'index.json', 'w', encoding='utf-8') as f:
-                json.dump(index_data, f, indent=2, ensure_ascii=False)
-            self._load_preset(preset_path)
-            gunpacks = self._get_gunpacks_from_folder(preset_path)
-            self.presets[preset_name]['gunpacks'] = gunpacks
-            index_data['gunpacks'] = gunpacks
-            with open(preset_path / 'index.json', 'w', encoding='utf-8') as f:
-                json.dump(index_data, f, indent=2, ensure_ascii=False)
-            self.save_cache()
-            if progress_callback:
-                progress_callback(100, 100, "完成")
-            self.log.log(f"预设 '{preset_name}' 导入成功", 'SUCCESS')
-            return True
-        except Exception as e:
-            self.log.log(f"导入预设失败: {e}", 'ERROR')
-            return False
-
-    def import_incremental(self, import_path: Path, progress_callback=None) -> bool:
-        try:
-            temp_dir = Path(tempfile.mkdtemp())
-            with zipfile.ZipFile(import_path, 'r') as zipf:
-                for member in zipf.infolist():
-                    if member.is_dir():
-                        continue
-                    try:
-                        zipf.extract(member, temp_dir)
-                    except Exception as e:
-                        self.log.log(f"解压失败 {member.filename}: {e}", 'WARNING')
-            meta_file = temp_dir / '_increment.json'
-            if not meta_file.exists():
-                self.log.log("不是有效的增量更新包（缺少元数据）", 'ERROR')
-                shutil.rmtree(temp_dir)
-                return False
-            with open(meta_file, 'r', encoding='utf-8') as f:
-                metadata = json.load(f)
-            if metadata.get('format') != 'pulses_swap_incremental':
-                self.log.log("不是有效的增量更新包（格式不匹配）", 'ERROR')
-                shutil.rmtree(temp_dir)
-                return False
-
-            preset_name = metadata.get('preset_name')
-            version = metadata.get('version', '')
-            increment = metadata.get('increment', 0)
-            changes = metadata.get('changes', {})
-            new_gunpacks = metadata.get('new_gunpacks_index', {})
-            base_gunpacks = metadata.get('base_gunpacks_index')
-
-            if preset_name not in self.presets:
-                self.log.log(f"目标预设 '{preset_name}' 不存在", 'ERROR')
-                shutil.rmtree(temp_dir)
-                return False
-            preset_info = self.presets[preset_name]
-            if preset_info.get('version', '') != version:
-                self.log.log(f"版本不匹配: 本地 '{preset_info.get('version','')}' vs 更新 '{version}'", 'ERROR')
-                shutil.rmtree(temp_dir)
-                show_error("版本不匹配",
-                    f"增量更新包版本与本地不一致：\n\n"
-                    f"本地版本: {preset_info.get('version','')}\n"
-                    f"更新版本: {version}\n\n"
-                    f"请确认您使用的是对应的增量包。")
-                return False
-            if not preset_info.get('applied', False):
-                self.log.log(f"预设 '{preset_name}' 未应用，无法导入增量更新", 'ERROR')
-                shutil.rmtree(temp_dir)
-                show_error("无法应用",
-                    f"预设 '{preset_name}' 当前未应用。\n\n"
-                    f"请先切换到该预设后再导入增量更新。")
-                return False
-
-            if base_gunpacks:
-                self.log.log("正在校验本地枪包与增量包要求的原始状态...", 'PROCESS')
-                local_gunpacks = self._get_gunpacks_from_folder(self.tacz_path)
-                missing = []
-                modified = []
-                for name, base_fp in base_gunpacks.items():
-                    if name not in local_gunpacks:
-                        missing.append(name)
-                    elif not fingerprints_match(local_gunpacks[name], base_fp):
-                        modified.append(name)
-
-                if missing or modified:
-                    self.log.log("增量更新校验失败：本地枪包与增量包要求的原始状态不匹配", 'ERROR')
-                    if missing:
-                        self.log.log(f"  缺失 {len(missing)} 个枪包（需向管理员请求）:", 'ERROR')
-                        for n in missing[:10]:
-                            self.log.log(f"    × {n}", 'ERROR')
-                        if len(missing) > 10:
-                            self.log.log(f"    ... 还有 {len(missing)-10} 个", 'ERROR')
-                    if modified:
-                        self.log.log(f"  内容已被修改 {len(modified)} 个枪包:", 'ERROR')
-                        for n in modified[:10]:
-                            self.log.log(f"    ~ {n}", 'ERROR')
-                        if len(modified) > 10:
-                            self.log.log(f"    ... 还有 {len(modified)-10} 个", 'ERROR')
-
-                    lines = ["增量更新无法应用：本地枪包状态与增量包要求的原始状态不匹配。\n"]
-                    if missing:
-                        lines.append(f"缺失的枪包（{len(missing)} 个，需向管理员请求）：")
-                        for n in missing[:10]:
-                            lines.append(f"  × {n}")
-                        if len(missing) > 10:
-                            lines.append(f"  ... 还有 {len(missing)-10} 个")
-                        lines.append("")
-                    if modified:
-                        lines.append(f"内容已被修改的枪包（{len(modified)} 个）：")
-                        for n in modified[:10]:
-                            lines.append(f"  ~ {n}")
-                        if len(modified) > 10:
-                            lines.append(f"  ... 还有 {len(modified)-10} 个")
-                        lines.append("")
-                    lines.append("请先恢复这些枪包到原始状态后再重试。")
-
-                    shutil.rmtree(temp_dir)
-                    show_error("增量更新校验失败", "\n".join(lines))
-                    return False
-                else:
-                    self.log.log("本地枪包与原始状态匹配", 'SUCCESS', verbose=True)
-            else:
-                self.log.log("提示：此增量包未包含原始校验数据，跳过兼容性校验", 'WARNING')
-
-            added = changes.get('added', [])
-            removed = changes.get('removed', [])
-            modified = changes.get('modified', [])
-            self.log.log(f"增量更新: 新增 {len(added)} / 移除 {len(removed)} / "
-                          f"修改 {len(modified)}", 'INFO', verbose=True)
-
-            for name in removed:
-                target = self.tacz_path / name
-                if target.exists():
-                    if self._safe_remove(target):
-                        self.log.log(f"已移除 {name}（可在回收站找回）", 'DEBUG')
-
-            for name in added + modified:
-                src = temp_dir / name
-                if not src.exists():
-                    continue
-                dst = self.tacz_path / name
-                if dst.exists():
-                    if dst.is_dir():
-                        shutil.rmtree(dst)
-                    else:
-                        dst.unlink()
-                shutil.move(str(src), str(dst))
-
-            if new_gunpacks:
-                preset_info['gunpacks'] = new_gunpacks
-            else:
-                preset_info['gunpacks'] = self._get_gunpacks_from_folder(self.tacz_path)
-            preset_info['incremental_count'] = increment
-            preset_path = Path(preset_info['path'])
-            index_data = {
-                'name': preset_info['name'],
-                'version': preset_info.get('version', 'v1.0.0'),
-                'gunpacks': preset_info['gunpacks'], 'applied': True,
-                'incremental_count': increment}
-            with open(preset_path / 'index.json', 'w', encoding='utf-8') as f:
-                json.dump(index_data, f, indent=2, ensure_ascii=False)
-            self.save_cache()
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            self.log.log(f"增量更新导入成功 (迭代 {increment})", 'SUCCESS')
-            return True
-        except Exception as e:
-            self.log.log(f"导入增量包失败: {e}", 'ERROR')
             return False
 
     def get_current_gunpacks_for_preset(self, preset_name: str, use_cache: bool = True) -> dict:

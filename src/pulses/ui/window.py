@@ -135,9 +135,13 @@ class WindowMixin:
         sidebar.grid_propagate(False)
         self.sidebar = sidebar
 
-        make_label(sidebar, text=PROJECT_NAME, fg=C_ACCENT, font_size=FS_SUBHEAD,
-                    bold=True).pack(anchor=W, padx=PAD_CARD_X,
-                                    pady=(PAD_CARD_Y, 0))
+        brand = ctk.CTkFrame(sidebar, fg_color="transparent")
+        brand.pack(fill=X, padx=PAD_CARD_X, pady=(PAD_CARD_Y, 0))
+        # 一枚 4x16 的强调色竖条：品牌区有了视觉锚点，不是一行光秃秃的字
+        ctk.CTkFrame(brand, fg_color=C_ACCENT, width=4, height=16,
+                     corner_radius=2).pack(side=LEFT, padx=(0, PAD_TIGHT))
+        make_label(brand, text=PROJECT_NAME, fg=C_TEXT_MAIN,
+                    font_size=FS_SUBHEAD, bold=True).pack(side=LEFT)
         make_label(sidebar, text=f"v{VERSION} · {AUTHOR}", fg=C_TEXT_MUTED,
                     font_size=FS_TINY).pack(anchor=W, padx=PAD_CARD_X,
                                             pady=(PAD_MICRO, PAD_GAP))
@@ -152,7 +156,8 @@ class WindowMixin:
             orientation="vertical", item_height=H_NAV, pad=4, gap=PAD_XS,
             radius=R_CONTROL, bg_color=C_CARD_BG, pill_color=C_ACCENT_SOFT,
             hover_color=C_ACCENT_SOFT, text_color=C_TEXT_MAIN,
-            active_text_color=C_ACCENT, font_size=FS_BODY, bold_active=True,
+            # 侧边栏是主要导航，比正文大一档（16px）更稳，也不会撑爆 38px 行高
+            active_text_color=C_ACCENT, font_size=FS_SUBHEAD, bold_active=True,
             text_anchor="w", text_pad=14, duration_ms=240, height=nav_height)
         self.nav.pack(fill=X, padx=PAD_XS)
 
@@ -180,6 +185,25 @@ class WindowMixin:
                                            fg=C_ACCENT, font_size=FS_TINY)
         self.sb_preset_label.pack(anchor=W, padx=PAD_CARD_X,
                                    pady=(PAD_MICRO, PAD_CARD_Y))
+
+        # ===== 身份卡（玩家 / 开发者） =====
+        # pack(side=BOTTOM) 是自下往上叠的：先摆状态卡，身份卡就会在它上面。
+        identity_card = ctk.CTkFrame(sidebar, fg_color=C_CARD_BG,
+                                      corner_radius=R_CONTROL,
+                                      border_width=BORDER_W,
+                                      border_color=C_BORDER_SOFT)
+        identity_card.pack(side=BOTTOM, fill=X, padx=PAD_XS,
+                            pady=(PAD_GAP, PAD_TIGHT))
+        attach_hover_glow(identity_card)
+        self.identity_badge = make_label(identity_card, text="玩家",
+                                          fg=C_TEXT_SECONDARY,
+                                          font_size=FS_SMALL, bold=True)
+        self.identity_badge.pack(anchor=W, padx=PAD_CARD_X,
+                                  pady=(PAD_TIGHT, PAD_MICRO))
+        self.identity_btn = make_button(identity_card, "切换身份",
+                                         command=self.open_identity_dialog,
+                                         width=84)
+        self.identity_btn.pack(fill=X, padx=PAD_TIGHT, pady=(0, PAD_TIGHT))
 
         # ===== 右侧内容列：页面区 + 全局状态条（进度条） =====
         content_col = ctk.CTkFrame(main_frame, fg_color="transparent")
@@ -234,13 +258,13 @@ class WindowMixin:
         self.guide = GuideManager(self.root)
         self.guide.register(
             "step1_select_pack", [self.pack_drop_area],
-            desc="Step 1 · 拖入整合包根目录，或点击「选择」定位")
+            desc="Step 1 · 拖入整合包根目录，或点「选择整合包」")
         self.guide.register(
             "step2_create_preset", [self.create_preset_btn],
-            desc="Step 2 · 点击「+ 创建」新建预设，放入枪包")
+            desc="Step 2 · 点「＋ 新建」建预设，再把枪包拖进去")
         self.guide.register(
             "step3_apply", [self.apply_btn],
-            desc="Step 4 · 点击「一键替换」启用预设")
+            desc="点击「一键替换」启用这个预设")
 
         self.show_page("home", animate=False)
         self._play_entrance()

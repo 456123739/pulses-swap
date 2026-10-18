@@ -70,43 +70,48 @@ class HomePageMixin:
         page.grid_columnconfigure(0, weight=0, minsize=px(LEFT_COL_W))
         page.grid_columnconfigure(1, weight=1)
 
+        # ===== 左列：选整合包 → 选预设 =====
+        # 预设列表是这一页的主角，Step1 固定高度，剩下的纵向空间全给它。
         left_panel = ctk.CTkFrame(page, fg_color="transparent")
         left_panel.grid(row=0, column=0, sticky="nsew", padx=(0, PAD_GAP))
-        # 纵向预算：Step1/Step3 固定高度，剩余空间全部给 Step2 的预设列表，
-        # 这样窗口变小/DPI 放大时先压缩列表，Step3 卡片不会被裁（见 H_STEP*_MIN）
         left_panel.grid_columnconfigure(0, weight=1)
         left_panel.grid_rowconfigure(0, weight=0, minsize=px(H_STEP1_MIN))
         left_panel.grid_rowconfigure(1, weight=1, minsize=px(H_STEP2_MIN))
-        left_panel.grid_rowconfigure(2, weight=0, minsize=px(H_STEP3_MIN))
 
+        # ===== 右列：详情条 → 主操作 → 枪包 → 日志 =====
         right_panel = ctk.CTkFrame(page, fg_color="transparent")
         right_panel.grid(row=0, column=1, sticky="nsew")
         right_panel.grid_columnconfigure(0, weight=1)
-        right_panel.grid_rowconfigure(0, weight=1)
-        right_panel.grid_rowconfigure(1, weight=0)
+        right_panel.grid_rowconfigure(0, weight=0)   # 详情条
+        right_panel.grid_rowconfigure(1, weight=0)   # 同步（按需出现）
+        right_panel.grid_rowconfigure(2, weight=0)   # 一键替换
+        right_panel.grid_rowconfigure(3, weight=1)   # 枪包列表
+        right_panel.grid_rowconfigure(4, weight=0)   # 日志标题
+        right_panel.grid_rowconfigure(5, weight=0)   # 日志正文
 
-        # ===== 整合包分组（大拖入框） =====
-        pack_group = ctk.CTkFrame(left_panel, fg_color=C_CARD_BG, corner_radius=R_CARD,
-                                    border_width=BORDER_W, border_color=C_BORDER_SOFT)
+        # ---------- Step 1 · 整合包 ----------
+        pack_group = ctk.CTkFrame(left_panel, fg_color=C_CARD_BG,
+                                    corner_radius=R_CARD, border_width=0)
         pack_group.grid(row=0, column=0, sticky="nsew", pady=(0, PAD_GAP))
-        attach_hover_glow(pack_group)
-        make_label(pack_group, text="Step 1 · 整合包", fg=C_ACCENT,
-                    font_size=FS_SUBHEAD, bold=True).pack(
-                        anchor=W, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
+        make_section_header(pack_group, 1, "整合包").pack(
+            fill=X, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
         pack_content = ctk.CTkFrame(pack_group, fg_color="transparent")
         pack_content.pack(fill=X, padx=PAD_CARD_X, pady=(0, PAD_CARD_Y))
 
         # 大拖入框
-        self.pack_drop_area = ctk.CTkFrame(pack_content, fg_color=C_PANEL_ALT_BG,
-                                             corner_radius=R_CARD, border_width=BORDER_W,
+        self.pack_drop_area = ctk.CTkFrame(pack_content, fg_color=C_INPUT_BG,
+                                             corner_radius=R_CONTROL,
+                                             border_width=BORDER_W,
                                              border_color=C_BORDER_SOFT)
         self.pack_drop_area.pack(fill=X, pady=(0, PAD_TIGHT))
+        # 拖放目标要有 hover 反馈：鼠标进来描边浮一层强调软色
+        attach_hover_glow(self.pack_drop_area, base_color=C_BORDER_SOFT,
+                          hover_color=C_ACCENT_SOFT)
 
         self.pack_drop_label = ctk.CTkLabel(
             self.pack_drop_area,
-            text="Step 1 · 拖入整合包根目录\n"
-                 "或整合包内任意文件（自动定位 tacz）",
-            text_color=C_TEXT_SECONDARY, font=(config.FONT_FAMILY, FS_BODY),
+            text="拖入整合包根目录，或整合包内任意文件（自动定位 tacz）",
+            text_color=C_TEXT_SECONDARY, font=(config.FONT_FAMILY, FS_SMALL),
             justify=LEFT, anchor="w", fg_color="transparent")
         self.pack_drop_label.pack(fill=X, padx=PAD_GAP, pady=(PAD_GAP, PAD_XS))
 
@@ -115,28 +120,30 @@ class HomePageMixin:
             self.pack_drop_area, text="未选择", height=H_CONTROL)
         self.pack_path_frame.pack(fill=X, padx=PAD_GAP, pady=(0, PAD_TIGHT))
 
-        # 按钮行
+        # 按钮行：只留一个实心主操作，其余走扁平文字按钮
         self.pack_btn_row = ctk.CTkFrame(self.pack_drop_area,
                                           fg_color="transparent")
         pack_btn_row = self.pack_btn_row
-        pack_btn_row.pack(fill=X, padx=PAD_INNER, pady=(0, PAD_GAP))
+        pack_btn_row.pack(fill=X, padx=PAD_INNER, pady=(0, PAD_INNER))
 
-        self.select_pack_btn = make_button(pack_btn_row, "选择",
+        self.select_pack_btn = make_button(pack_btn_row, "选择整合包",
                                              command=self.select_pack,
-                                             width=60, accent=True)
-        self.select_pack_btn.pack(side=LEFT, padx=(0, PAD_XS))
-        self.open_pack_btn = make_button(pack_btn_row, "目录",
-                                           command=self.open_pack_folder,
-                                           width=52, state="disabled")
-        self.open_pack_btn.pack(side=LEFT, padx=(0, PAD_XS))
-        self.close_pack_btn = make_button(pack_btn_row, "关闭",
-                                            command=self.close_pack,
-                                            width=56)
-        self.close_pack_btn.pack(side=LEFT, padx=(0, PAD_XS))
-        self.recent_toggle_btn = make_button(pack_btn_row, "▼ 最近",
-                                               command=self.toggle_recent,
-                                               width=70)
+                                             width=104, accent=True)
+        self.select_pack_btn.pack(side=LEFT, padx=(0, PAD_TIGHT))
+        self.recent_toggle_btn = make_text_button(pack_btn_row, "最近",
+                                                    command=self.toggle_recent)
         self.recent_toggle_btn.pack(side=LEFT)
+        # 打开目录 / 关闭整合包 / 数据库位置：低频操作收进「⋯」
+        # （菜单每次打开时按当前状态现算，所以不再需要「隐形按钮」来持有可用状态）
+        self.pack_more_btn = make_menu_button(
+            pack_btn_row, items=lambda: [
+                ("打开整合包目录", self.open_pack_folder
+                 if self.current_pack_path else None),
+                ("关闭整合包", self.close_pack if self.current_pack_path else None),
+                None,
+                ("数据库位置", self.open_preset_manager if self.db_ready else None),
+            ])
+        self.pack_more_btn.pack(side=RIGHT)
 
         # 绑定 DND 到拖入框和提示文字
         if HAS_DND:
@@ -150,21 +157,21 @@ class HomePageMixin:
         # 最近打开：做成「不参与布局」的下拉浮层。
         # 挂在按钮行下面、用 place 定位 —— place 不影响 pack/grid 的排版，
         # 所以展开/收起时整页不会重新布局。
-        # （之前是 pack + 高度补间：每帧改高度都要重排整页，Windows 上就是
-        #   又慢又闪白，用户指着这个按钮反馈的。）
         self.recent_wrap = ctk.CTkFrame(self.pack_btn_row,
                                          fg_color="transparent", height=1)
         self.recent_wrap.pack_propagate(False)
-        self.recent_frame = ctk.CTkFrame(self.recent_wrap, fg_color=C_PANEL_ALT_BG,
-                                          corner_radius=R_CONTROL, border_width=BORDER_W,
-                                          border_color=C_BORDER_SOFT)
+        self.recent_frame = ctk.CTkFrame(self.recent_wrap, fg_color=C_PANEL_BG,
+                                          corner_radius=R_CONTROL, border_width=0)
         self.recent_listbox = Listbox(self.recent_frame, height=4,
-                                       bg=C_PANEL_ALT_BG, fg=C_TEXT_MAIN,
+                                       bg=C_PANEL_BG, fg=C_TEXT_MAIN,
                                        selectbackground=C_ACCENT_SOFT,
                                        selectforeground=C_ACCENT,
+                                       activestyle="none", borderwidth=0,
+                                       selectborderwidth=0,
                                        relief='flat', highlightthickness=0,
-                                       font=(config.FONT_FAMILY,
-                                             max(1, int(FS_SMALL * config.UI_SCALE))))
+                                       # 原生 Listbox：必须用负数字号（像素），
+                                       # 正数是磅值，会被 tk scaling 再乘一次
+                                       font=tk_font(config.FONT_FAMILY, FS_SMALL))
         self.recent_scroll = make_list_scroll(self.recent_frame,
                                                self.recent_listbox, width=8)
         self.recent_listbox.pack(side=LEFT, fill=BOTH, expand=True,
@@ -174,213 +181,205 @@ class HomePageMixin:
         self.recent_listbox.bind('<Double-Button-1>', self.on_recent_double_click)
 
         # 状态标签
-        self.pack_status_label = make_label(pack_content, text="状态: 未加载",
-                                             fg=C_ERROR, font_size=FS_SMALL)
+        self.pack_status_label = make_label(pack_content, text="未加载",
+                                             fg=C_TEXT_MUTED, font_size=FS_TINY)
         self.pack_status_label.pack(anchor=W, pady=(PAD_XS, 0))
-        self.pack_name_label = make_label(pack_content, text="当前预设: 无",
+        self.pack_name_label = make_label(pack_content, text="当前预设：无",
                                            fg=C_ACCENT, font_size=FS_SMALL)
         self.pack_name_label.pack(anchor=W, pady=(PAD_MICRO, 0))
 
-        # ===== 预设管理 =====
-        preset_group = ctk.CTkFrame(left_panel, fg_color=C_CARD_BG, corner_radius=R_CARD,
-                                     border_width=BORDER_W, border_color=C_BORDER_SOFT)
-        preset_group.grid(row=1, column=0, sticky="nsew", pady=(0, PAD_GAP))
-        attach_hover_glow(preset_group)
-        make_label(preset_group, text="Step 2 · 预设管理", fg=C_ACCENT,
-                    font_size=FS_SUBHEAD, bold=True).pack(
-                        anchor=W, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
+        # ---------- Step 2 · 预设管理 ----------
+        preset_group = ctk.CTkFrame(left_panel, fg_color=C_CARD_BG,
+                                     corner_radius=R_CARD, border_width=0)
+        preset_group.grid(row=1, column=0, sticky="nsew")
+        make_section_header(preset_group, 2, "预设管理",
+                            subtitle="双击看详情").pack(
+            fill=X, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
         preset_content = ctk.CTkFrame(preset_group, fg_color="transparent")
         preset_content.pack(fill=BOTH, expand=True, padx=PAD_CARD_X,
                             pady=(0, PAD_CARD_Y))
 
+        # 列表直接铺在白卡片上：卡片自己有描边，不再套一层灰底
         preset_list_wrap = ctk.CTkFrame(preset_content, fg_color=C_CARD_BG,
-                                         corner_radius=R_CONTROL, border_width=BORDER_W,
-                                         border_color=C_BORDER_SOFT)
+                                         corner_radius=0, border_width=0)
         preset_list_wrap.pack(fill=BOTH, expand=True, pady=(0, PAD_GAP))
-        attach_hover_glow(preset_list_wrap)
-        self.preset_listbox = Listbox(preset_list_wrap, height=4,
-                                       bg=C_CARD_BG, fg=C_TEXT_MAIN,
-                                       selectbackground=C_ACCENT_SOFT,
-                                       selectforeground=C_ACCENT,
-                                       relief='flat', highlightthickness=0,
-                                       font=(config.FONT_FAMILY,
-                                             max(1, int(FS_BODY * config.UI_SCALE))))
-        self.preset_scroll = make_list_scroll(preset_list_wrap,
-                                               self.preset_listbox)
-        self.preset_listbox.pack(side=LEFT, fill=BOTH, expand=True,
-                                  padx=(PAD_XS, 0), pady=PAD_XS)
-        self.preset_scroll.pack(side=RIGHT, fill=Y, padx=(2, PAD_XS),
-                                 pady=PAD_XS)
-        self.preset_listbox.bind('<<ListboxSelect>>', self.on_preset_selected)
-        self.preset_listbox.bind('<Button-3>', self.show_preset_context_menu)
-
-        # 拖入框：预设/更新包
-        self.drop_area = ctk.CTkFrame(preset_content, fg_color=C_PANEL_ALT_BG,
-                                       corner_radius=R_CARD, border_width=BORDER_W,
-                                       border_color=C_BORDER_SOFT, height=H_DROP_AREA)
-        self.drop_area.pack(fill=X, pady=(0, PAD_GAP))
-        self.drop_area.pack_propagate(False)
-        attach_hover_glow(self.drop_area)
-        self.drop_label = ctk.CTkLabel(
-            self.drop_area,
-            text="Step 2 · 导入预设包 / 更新包\n"
-                 "拖入 .fgcpack / .fgcupdate，或点击此处选择",
-            text_color=C_TEXT_SECONDARY, font=(config.FONT_FAMILY, FS_TINY),
-            justify=LEFT, anchor="w", fg_color="transparent")
-        self.drop_label.pack(fill=BOTH, expand=True, padx=PAD_INNER, pady=PAD_INNER)
-        self.drop_label.bind('<Button-1>', lambda e: self.select_import_file())
-        self.drop_area.bind('<Button-1>', lambda e: self.select_import_file())
-        if HAS_DND:
-            try:
-                self.drop_area.drop_target_register(DND_FILES)
-                self.drop_area.dnd_bind('<<Drop>>', self.on_drop_file)
-                self.drop_label.drop_target_register(DND_FILES)
-                self.drop_label.dnd_bind('<<Drop>>', self.on_drop_file)
-            except Exception:
-                pass
+        self.preset_cards = CardList(
+            preset_list_wrap,
+            on_select=self.on_preset_selected,
+            on_action=self.on_preset_action,
+            on_menu=self.show_preset_context_menu,
+            on_open=self.open_preset_detail,
+            empty_text="还没有预设",
+            empty_hint="先在上面选一个整合包",
+            bg=C_CARD_BG)
+        self.preset_cards.pack(fill=BOTH, expand=True)
 
         preset_btn_frame = ctk.CTkFrame(preset_content, fg_color="transparent")
         preset_btn_frame.pack(fill=X)
-        self.create_preset_btn = make_button(preset_btn_frame, "＋ 创建",
+        self.create_preset_btn = make_button(preset_btn_frame, "＋ 新建",
                                               command=self.create_preset,
-                                              state="disabled", width=68)
-        self.create_preset_btn.pack(side=LEFT, padx=(0, PAD_XS))
-        self.export_preset_btn = make_button(preset_btn_frame, "导出",
-                                              command=self.export_preset,
-                                              state="disabled", width=56)
-        self.export_preset_btn.pack(side=LEFT, padx=PAD_XS)
-        self.export_incremental_btn = make_button(preset_btn_frame, "更新",
-                                                   command=self.export_incremental,
-                                                   state="disabled", width=56)
-        self.export_incremental_btn.pack(side=LEFT, padx=PAD_XS)
-        self.refresh_preset_btn = make_button(preset_btn_frame, "刷新",
-                                               command=self.refresh_presets,
-                                               state="disabled", width=52)
-        self.refresh_preset_btn.pack(side=LEFT, padx=PAD_XS)
-        self.open_db_btn = make_button(preset_btn_frame, "数据库",
-                                        command=self.open_preset_manager,
-                                        state="disabled", width=64)
-        self.open_db_btn.pack(side=LEFT, padx=PAD_XS)
+                                              state="disabled", accent=True,
+                                              width=84)
+        self.create_preset_btn.pack(side=LEFT, padx=(0, PAD_TIGHT))
+        # 玩家和开发者都要「从云端添加 / 检查更新」；其余低频操作进「⋯」
+        self.add_cloud_btn = make_text_button(preset_btn_frame, "从云端",
+                                               command=self.open_add_from_cloud,
+                                               state="disabled")
+        self.add_cloud_btn.pack(side=LEFT)
+        self.preset_more_btn = make_menu_button(
+            preset_btn_frame, items=lambda: [
+                ("检查全部更新", self._online_check_all if self.db_ready else None),
+                ("刷新列表", self.refresh_presets if self.db_ready else None),
+                ("打开数据库文件夹", self.open_preset_manager
+                 if self.db_ready else None),
+            ])
+        self.preset_more_btn.pack(side=RIGHT)
         self.loading_label = make_label(preset_btn_frame, text="", fg=C_ACCENT,
                                         font_size=FS_TINY)
-        self.loading_label.pack(side=LEFT, padx=PAD_TIGHT)
+        self.loading_label.pack(side=RIGHT, padx=PAD_TIGHT)
 
-        # ===== 预设详情 =====
-        info_group = ctk.CTkFrame(left_panel, fg_color=C_CARD_BG, corner_radius=R_CARD,
-                                   border_width=BORDER_W, border_color=C_BORDER_SOFT)
-        info_group.grid(row=2, column=0, sticky="ew")
-        attach_hover_glow(info_group)
-        make_label(info_group, text="Step 3 · 预设详情", fg=C_ACCENT,
-                    font_size=FS_SUBHEAD, bold=True).pack(
-                        anchor=W, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
-        info_content = ctk.CTkFrame(info_group, fg_color="transparent")
-        info_content.pack(fill=X, padx=PAD_CARD_X, pady=(0, PAD_CARD_Y))
+        # ---------- Step 3 · 预设详情（横条，放在右列顶部） ----------
+        info_group = ctk.CTkFrame(right_panel, fg_color=C_CARD_BG,
+                                   corner_radius=R_CARD, border_width=0)
+        info_group.grid(row=0, column=0, sticky="ew", pady=(0, PAD_GAP))
+        info_head = ctk.CTkFrame(info_group, fg_color="transparent")
+        info_head.pack(fill=X, padx=PAD_CARD_X, pady=(PAD_CARD_Y, 0))
+        make_section_header(info_head, 3, "预设详情").pack(side=LEFT)
+        self.detail_btn = make_text_button(
+            info_head, "打开详情", command=self._open_current_detail)
+        self.detail_btn.pack(side=RIGHT)
 
-        self.preset_name_label = make_label(info_content, text="预设: 未选择",
-                                             fg=C_ACCENT, font_size=FS_SUBHEAD,
-                                             bold=True)
-        self.preset_name_label.pack(anchor=W)
-        self.preset_version_label = make_label(info_content, text="版本号: 无",
-                                                fg=C_TEXT_SECONDARY, font_size=FS_SMALL)
-        self.preset_version_label.pack(anchor=W, pady=(PAD_MICRO, 0))
-        self.preset_status_label = make_label(info_content, text="状态: 未应用",
-                                               fg=C_TEXT_SECONDARY, font_size=FS_SMALL)
-        self.preset_status_label.pack(anchor=W, pady=(PAD_MICRO, 0))
+        info_body = ctk.CTkFrame(info_group, fg_color="transparent")
+        info_body.pack(fill=X, padx=PAD_CARD_X, pady=(PAD_TIGHT, PAD_CARD_Y))
 
-        version_edit_frame = ctk.CTkFrame(info_content, fg_color="transparent")
-        version_edit_frame.pack(fill=X, pady=(PAD_INNER, 0))
-        make_label(version_edit_frame, text="Step 3 · 版本号:", fg=C_TEXT_MAIN,
-                    font_size=FS_SMALL).pack(side=LEFT)
-        self.version_entry = make_entry(version_edit_frame, width=120)
-        self.version_entry.pack(side=LEFT, fill=X, expand=True,
-                                padx=(PAD_TIGHT, PAD_TIGHT))
+        title_row = ctk.CTkFrame(info_body, fg_color="transparent")
+        title_row.pack(fill=X)
+        self.preset_name_label = make_label(
+            title_row, text="未选择", fg=C_TEXT_MAIN, font_size=FS_TITLE, bold=True)
+        self.preset_name_label.pack(side=LEFT)
+        self.preset_status_label = make_label(
+            title_row, text="未应用", fg=C_TEXT_MUTED, font_size=FS_SMALL)
+        self.preset_status_label.pack(side=RIGHT)
+
+        meta_row = ctk.CTkFrame(info_body, fg_color="transparent")
+        meta_row.pack(fill=X, pady=(PAD_TIGHT, 0))
+
+        ver_box = ctk.CTkFrame(meta_row, fg_color="transparent")
+        ver_box.pack(side=LEFT, fill=X, expand=True)
+        make_label(ver_box, text="版本", fg=C_TEXT_MUTED,
+                   font_size=FS_TINY).pack(side=LEFT)
+        self.version_entry = make_entry(ver_box, width=110)
+        self.version_entry.pack(side=LEFT, padx=(PAD_TIGHT, PAD_XS))
         self.version_entry.bind('<Return>', lambda e: self.save_version())
-        self.save_version_btn = make_button(version_edit_frame, "保存",
+        self.save_version_btn = make_button(ver_box, "保存",
                                              command=self.save_version,
-                                             state="disabled", width=60)
-        self.save_version_btn.pack(side=RIGHT)
+                                             state="disabled", width=56)
+        self.save_version_btn.pack(side=LEFT)
+        # 「当前版本」不单独占一行了：状态行已经说明应用情况，
+        # 这里留一个不参与布局的标签，兼容 packs.py 里原有的 configure 调用。
+        self.preset_version_label = make_label(
+            ver_box, text="", fg=C_TEXT_MUTED, font_size=FS_TINY)
 
-        # ===== 枪包列表 =====
-        gunpack_group = ctk.CTkFrame(right_panel, fg_color=C_CARD_BG, corner_radius=R_CARD,
-                                      border_width=BORDER_W, border_color=C_BORDER_SOFT)
-        gunpack_group.grid(row=0, column=0, sticky="nsew", pady=(0, PAD_GAP))
-        attach_hover_glow(gunpack_group)
-        make_label(gunpack_group, text="枪包列表", fg=C_ACCENT,
-                    font_size=FS_SUBHEAD, bold=True).pack(
-                        anchor=W, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
+        cloud_box = ctk.CTkFrame(meta_row, fg_color="transparent")
+        cloud_box.pack(side=RIGHT)
+        make_label(cloud_box, text="云端", fg=C_TEXT_MUTED,
+                   font_size=FS_TINY).pack(side=LEFT)
+        self.preset_online_label = make_label(
+            cloud_box, text="未绑定", fg=C_TEXT_MUTED, font_size=FS_SMALL)
+        self.preset_online_label.pack(side=LEFT, padx=(PAD_TIGHT, PAD_XS))
+        self.source_btn = make_text_button(cloud_box, "填写链接",
+                                            command=self._open_current_source)
+        self.source_btn.pack(side=LEFT)
+
+        # ---------- 主操作 ----------
+        # 平时只有「一键替换」。云端有更新时，上面再浮出一颗「同步 N 项」——
+        # 不需要的时候完全不占地方，也不会一进界面就摆一排同步按钮。
+        self.sync_btn = make_button(right_panel, "同步更新",
+                                     command=self._sync_current_preset,
+                                     accent=False, height=38,
+                                     font_size=FS_SMALL)
+        self.sync_btn.grid(row=1, column=0, sticky="ew", pady=(0, PAD_TIGHT))
+        self.sync_btn.grid_remove()
+
+        self.apply_btn = make_button(right_panel, "一键替换",
+                                      command=self.apply_preset,
+                                      state="disabled", accent=True,
+                                      height=44, font_size=FS_SUBHEAD)
+        self.apply_btn.grid(row=2, column=0, sticky="ew", pady=(0, PAD_GAP))
+
+        # ---------- 枪包列表 ----------
+        gunpack_group = ctk.CTkFrame(right_panel, fg_color=C_CARD_BG,
+                                      corner_radius=R_CARD, border_width=0)
+        gunpack_group.grid(row=3, column=0, sticky="nsew", pady=(0, PAD_GAP))
+        gunpack_head = ctk.CTkFrame(gunpack_group, fg_color="transparent")
+        gunpack_head.pack(fill=X, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
+        make_section_header(gunpack_head, 4, "枪包列表").pack(side=LEFT)
+        self.gunpack_count_label = make_label(
+            gunpack_head, text="共 0 个", fg=C_TEXT_MUTED, font_size=FS_TINY)
+        self.gunpack_count_label.pack(side=LEFT, padx=(PAD_GAP, 0))
+        self.gunpack_more_btn = make_menu_button(
+            gunpack_head, items=lambda: [
+                ("刷新枪包列表", self.refresh_gunpacks
+                 if self.current_selected_preset else None),
+                ("全部刷新", self.refresh_all),
+                None,
+                ("打开 TACZ 目录", self.open_tacz_folder
+                 if self.tacz_path else None),
+            ])
+        self.gunpack_more_btn.pack(side=RIGHT)
+
         gunpack_content = ctk.CTkFrame(gunpack_group, fg_color="transparent")
         gunpack_content.pack(fill=BOTH, expand=True, padx=PAD_CARD_X,
                              pady=(0, PAD_CARD_Y))
-
-        toolbar_frame = ctk.CTkFrame(gunpack_content, fg_color="transparent")
-        toolbar_frame.pack(fill=X, pady=(0, PAD_TIGHT))
-        self.gunpack_count_label = make_label(toolbar_frame, text="共 0 个枪包",
-                                               fg=C_TEXT_MAIN, font_size=FS_SMALL)
-        self.gunpack_count_label.pack(side=LEFT)
-
-        self.refresh_gunpack_btn = make_button(toolbar_frame, "刷新",
-                                                command=self.refresh_gunpacks,
-                                                state="disabled", width=56)
-        self.refresh_gunpack_btn.pack(side=RIGHT)
-
-        self.open_tacz_btn = make_button(toolbar_frame, "打开TACZ",
-                                          command=self.open_tacz_folder,
-                                          state="disabled", width=84)
-        self.open_tacz_btn.pack(side=RIGHT, padx=(0, PAD_XS))
-
-        self.refresh_all_btn = make_button(toolbar_frame, "全部刷新",
-                                            command=self.refresh_all, width=76)
-        self.refresh_all_btn.pack(side=RIGHT, padx=(0, PAD_XS))
-
-        gunpack_list_wrap = ctk.CTkFrame(gunpack_content, fg_color=C_CARD_BG,
-                                          corner_radius=R_CONTROL, border_width=BORDER_W,
-                                          border_color=C_BORDER_SOFT)
+        gunpack_list_wrap = ctk.CTkFrame(gunpack_content, fg_color=C_INPUT_BG,
+                                          corner_radius=R_CONTROL, border_width=0)
         gunpack_list_wrap.pack(fill=BOTH, expand=True)
-        attach_hover_glow(gunpack_list_wrap)
         self.gunpack_listbox = Listbox(gunpack_list_wrap, height=6,
-                                        bg=C_CARD_BG, fg=C_TEXT_MAIN,
+                                        bg=C_INPUT_BG, fg=C_TEXT_MAIN,
                                         selectbackground=C_ACCENT_SOFT,
                                         selectforeground=C_ACCENT,
+                                        activestyle="none", borderwidth=0,
+                                        selectborderwidth=0,
                                         relief='flat', highlightthickness=0,
-                                        font=(config.FONT_FAMILY,
-                                              max(1, int(FS_BODY * config.UI_SCALE))))
+                                        font=tk_font(config.FONT_FAMILY, FS_BODY))
         self.gunpack_listbox.bind('<Double-Button-1>', self.on_gunpack_open)
         self.gunpack_scroll = make_list_scroll(gunpack_list_wrap,
                                                 self.gunpack_listbox)
         self.gunpack_listbox.pack(side=LEFT, fill=BOTH, expand=True,
-                                   padx=(PAD_XS, 0), pady=PAD_XS)
+                                   padx=(PAD_INNER, 0), pady=PAD_INNER)
         self.gunpack_scroll.pack(side=RIGHT, fill=Y, padx=(2, PAD_XS),
-                                  pady=PAD_XS)
+                                  pady=PAD_INNER)
 
-        self.apply_btn = make_button(right_panel, "Step 4 · 一键替换",
-                                      command=self.apply_preset,
-                                      state="disabled", accent=True)
-        self.apply_btn.grid(row=1, column=0, sticky="ew")
-
-        # ===== 分割线 + 日志栏 =====
-        # 需求：分割线上面是「一键替换 + 工具条按钮 + 枪包列表」，下面放日志
-        divider = ctk.CTkFrame(right_panel, fg_color=C_BORDER_SOFT, height=1)
-        divider.grid(row=2, column=0, sticky="ew", pady=(PAD_GAP, PAD_GAP))
-
-        home_log_group = ctk.CTkFrame(right_panel, fg_color=C_CARD_BG,
-                                       corner_radius=R_CARD, border_width=BORDER_W,
-                                       border_color=C_BORDER_SOFT)
-        home_log_group.grid(row=3, column=0, sticky="ew")
-        attach_hover_glow(home_log_group)
-        log_head = ctk.CTkFrame(home_log_group, fg_color="transparent")
-        log_head.pack(fill=X, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
+        # ---------- 日志 ----------
+        log_head = ctk.CTkFrame(right_panel, fg_color="transparent")
+        log_head.grid(row=4, column=0, sticky="ew")
         make_label(log_head, text="日志", fg=C_TEXT_MUTED,
-                    font_size=FS_TINY).pack(side=LEFT)
-        make_button(log_head, "清空", command=self.clear_log,
-                     width=48).pack(side=RIGHT)
+                   font_size=FS_TINY).pack(side=LEFT, padx=(PAD_XS, 0))
+        make_text_button(log_head, "清空", command=self.clear_log).pack(side=RIGHT)
         self.home_log_text = ctk.CTkTextbox(
-            home_log_group, height=H_HOME_LOG, fg_color=C_INPUT_BG,
+            right_panel, height=H_HOME_LOG, fg_color=C_PANEL_BG,
             border_color=C_BORDER_SOFT, border_width=BORDER_W,
-            corner_radius=R_CONTROL, text_color=C_TEXT_MAIN,
+            corner_radius=R_CONTROL, text_color=C_TEXT_SECONDARY,
             font=(FONT_FAMILY_MONO, FS_SMALL), wrap="word")
-        self.home_log_text.pack(fill=X, padx=PAD_CARD_X, pady=(0, PAD_CARD_Y))
+        self.home_log_text.grid(row=5, column=0, sticky="ew", pady=(PAD_XS, 0))
 
         return page
+
+    def _sync_current_preset(self):
+        name = getattr(self, "current_selected_preset", None)
+        if name:
+            self.open_sync_dialog(name)
+
+    # ==================== 当前预设的两个入口 ====================
+    def _open_current_detail(self):
+        name = getattr(self, "current_selected_preset", None)
+        if name:
+            self.open_preset_detail(name)
+
+    def _open_current_source(self):
+        name = getattr(self, "current_selected_preset", None)
+        if name:
+            self.open_source_dialog(name)
 
     # ==================== 整合包拖入 ====================
     def on_pack_drop(self, event):
@@ -538,7 +537,9 @@ class HomePageMixin:
                     pass
 
         frame(0.0, 0.0)
-        tween(self.recent_wrap, "height", 190, frame, done, easing=ease_out_cubic)
+        # 展开/收起用弹簧：末端轻轻过冲一点再落定，手感更"活"
+        tween(self.recent_wrap, "height", 240, frame, done,
+              easing=ease_out_spring)
 
     def update_recent_list(self):
         if not hasattr(self, 'recent_listbox'):
@@ -569,58 +570,3 @@ class HomePageMixin:
             show_error("错误", f"路径不存在: {path}")
             return
         self.load_pack(Path(path))
-
-    # ==================== 拖放（预设/更新包） ====================
-    def on_drop_file(self, event):
-        if self.is_applying or self.loading_presets:
-            return
-        try:
-            files = self.root.tk.splitlist(event.data)
-        except Exception:
-            files = [event.data]
-        if not files:
-            return
-        raw = files[0].strip('"').strip("'")
-        if not raw:
-            return
-        self.handle_import_file(Path(raw))
-
-    def select_import_file(self):
-        if self.is_applying or self.loading_presets:
-            return
-        if not self.preset_manager:
-            show_warning("提示", "请先选择整合包")
-            return
-        p = filedialog.askopenfilename(
-            title="选择预设包或增量更新包",
-            filetypes=[("Pulses Swap 包", "*.fgcpack *.fgcupdate"),
-                       ("完整预设包", "*.fgcpack"),
-                       ("增量更新包", "*.fgcupdate"),
-                       ("所有文件", "*.*")])
-        if p:
-            self.handle_import_file(Path(p))
-
-    def handle_import_file(self, file_path: Path):
-        if not self.preset_manager:
-            show_warning("提示", "请先选择整合包")
-            return
-        if self.is_applying:
-            show_warning("操作进行中", "请等待当前操作完成")
-            return
-        if not file_path.exists():
-            show_error("错误", f"文件不存在: {file_path}")
-            return
-        suffix = file_path.suffix.lower()
-        if suffix == '.fgcupdate':
-            self.do_import_incremental(file_path)
-        elif suffix == '.fgcpack':
-            self.do_import_preset(file_path)
-        else:
-            try:
-                with zipfile.ZipFile(file_path, 'r') as zf:
-                    if '_increment.json' in zf.namelist():
-                        self.do_import_incremental(file_path)
-                    else:
-                        self.do_import_preset(file_path)
-            except Exception as e:
-                show_error("错误", f"无法识别文件: {e}")

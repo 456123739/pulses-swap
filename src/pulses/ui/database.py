@@ -95,6 +95,7 @@ class DatabaseMixin:
             self.log_manager.log("未选择数据库，部分功能不可用", 'WARNING')
 
     def _use_database(self, db_path: Path):
+        self.db_path = Path(db_path)
         self.settings.bind_database(db_path)
         self.recent_manager = RecentPacksManager(db_path / ".global.json")
         self.db_ready = True
@@ -288,9 +289,6 @@ class DatabaseMixin:
         self.progress_label.pack_forget()
         self._disable_buttons(False)
         self.select_pack_btn.configure(state="normal")
-        if self.current_pack_path:
-            self.open_pack_btn.configure(state="normal")
-            self.open_tacz_btn.configure(state="normal")
 
         disposed = stats.get('disposed', 'none')
         disposed_text = {
