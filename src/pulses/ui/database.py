@@ -83,6 +83,18 @@ class DatabaseMixin:
         if db_path:
             self.log_manager.log(f"数据库位置失效: {db_path}", 'WARNING')
 
+        # 绿色版：程序旁边就有一个数据库（随包带的空库，或用户拷过来的旧库）
+        # ——直接用它，连配置文件都不需要，解压双击即用。
+        try:
+            if DatabaseLocator.is_valid_database(DEFAULT_DB_DIR):
+                self.log_manager.log(
+                    f"使用随包数据库：{DEFAULT_DB_DIR}", 'SUCCESS')
+                DatabaseLocator.save_db_path(DEFAULT_DB_DIR)
+                self._use_database(DEFAULT_DB_DIR)
+                return
+        except Exception:
+            pass
+
         # 首次启动：直接把默认库建好，不弹「请你选择数据库」——
         # 新用户根本不知道数据库该放哪，问一次只会卡住他。
         # 需要换位置时，主界面「更多 → 数据库位置」里随时能改。
