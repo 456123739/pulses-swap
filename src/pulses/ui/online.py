@@ -1731,6 +1731,15 @@ class OnlineMixin:
         """同步/发布之后：重读预设、刷新卡片与详情。"""
         self._preset_size_cache.pop(name, None)
         try:
+            info = ((self.preset_manager.presets.get(name) or {})
+                    if self.preset_manager else {})
+            # 已应用的预设，内容真相在 tacz：发布/同步成功后把索引按 tacz
+            # 重算，否则卡片还显示旧的枪包数，启动时还会误报「多余/变更」。
+            if info.get("applied"):
+                self.preset_manager.update_preset_index(name, from_tacz=True)
+        except Exception:
+            pass
+        try:
             if self.preset_manager:
                 self.preset_manager.reload_preset(name)
         except Exception:

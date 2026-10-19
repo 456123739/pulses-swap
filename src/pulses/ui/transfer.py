@@ -368,6 +368,14 @@ class TransferMixin:
                 pass
             self.log_manager.log("预设应用成功！", 'SUCCESS')
         else:
+            # 失败时 apply_preset 会把 applied 标记回滚：界面也必须跟着回到
+            # 「未应用」，否则卡片还挂着「已应用」，用户以为换成功了。
+            try:
+                self._update_preset_list()
+                if self.current_selected_preset:
+                    self.on_preset_selected(self.current_selected_preset)
+            except Exception:
+                pass
             show_error("错误", "预设应用失败，请查看日志")
         self._start_watcher()
         self._update_guide()
