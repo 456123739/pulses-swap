@@ -1,4 +1,4 @@
-# Pulses Swap 交接文档（v2.5.7）
+# Pulses Swap 交接文档（v2.5.8）
 
 > 给接手的人 / AI 看的：这个软件被拆成了哪些文件、每个文件干什么、
 > 数据怎么流动、改哪里、怎么跑测试、怎么打包。
@@ -12,7 +12,7 @@
 一键把某组枪包换进游戏的 `tacz` 目录；同时把预设发布到**蓝奏云**，
 玩家绑定分享链接后可以增量同步。
 
-- 版本：`2.5.7`（`src/pulses/core/paths.py` 里的 `VERSION`）
+- 版本：`2.5.8`（`src/pulses/core/paths.py` 里的 `VERSION`）
 - 入口：`src/main.py` → `pulses.ui.app.main()`
 - 依赖：`customtkinter` `tkinterdnd2` `watchdog` `Pillow`（见 `requirements.txt`）
 - 不依赖任何第三方网络库（HTTP 全用标准库 `urllib`）
@@ -29,7 +29,7 @@ pulses-swap/
 │   ├── pulses/                 界面 + 本地逻辑
 │   └── online/                 在线同步（不依赖 tkinter，可命令行跑）
 ├── packaging/                  打包配置 + 各种验证脚本
-├── tests/                      单元 / 集成测试（130 个）
+├── tests/                      单元 / 集成测试（139 个）
 ├── docs/                       方案、教程、交接文档
 └── requirements.txt
 ```
@@ -274,7 +274,7 @@ for (rel, size, file_sha) in sorted(树里每个文件):
 # 源码运行
 python src/main.py
 
-# 单元 + 集成测试（130 个）
+# 单元 + 集成测试（139 个）
 python -m unittest discover -s tests -t .
 
 # 打包：一份 spec 出三端
@@ -463,3 +463,25 @@ export DISPLAY=:99          # weston headless + Xwayland
     `PulsesSwap_database`，切了位置、重新打开整合包又会切回去。现在独立模式会
     明确拒绝并提示先改成「合并数据库」；合并模式切换后会更新 `db_path`，
     并把 `storage_mode` 写回新库（新库默认是 isolated，不写回会被冲掉）。
+21. **替换预设要有事务性回滚**。`_move_items` 失败后不能继续搬（半成品更大），
+    而且必须把「已经搬进 tacz 的新预设文件」搬回预设目录 —— 否则下次重试的
+    `_clear_dir` 会把它们删掉，真的丢枪包。现在按阶段（reclaim / clear / load）
+    回滚：回收阶段失败就保持原预设 applied（绝不删），装载阶段失败就把新文件搬回。
+22. **「必须先应用」要守在所有入口**：卡片主按钮、卡片动作、右键、预览弹窗、
+    `_run_publish` 本身都要检查；只在 `_publish_now` 拦，会被 `open_publish_dialog`
+    绕过。
+23. **切换数据库后要按新库的 role 重刷整套界面**（徽标/主题/主操作/设置页分区）。
+    切库只改 `settings` 不改界面，会出现「数据库是玩家、界面还是开发者」。
+    独立数据库模式下「切换数据库」本身没有意义，直接拒绝并提示先改合并模式。
+24. **预设改名要迁移在线绑定**：`sources.json`、云端/本地 manifest 缓存、UI 的
+    `online_states` 都按预设名做 key；只改文件夹名，云端路径和分享链接会“消失”。
+25. **进度回调来自工作线程**：`show_progress` 里所有 Tk 操作必须先 `ui_call`
+    回主线程，否则进度条不刷新（异常还会被 try 吞掉，表现为“卡住”）。
+26. **云端文件名不能只靠“原名”**：蓝奏对同名文件既可能改名、也可能存成两条同名
+    记录（真机实测），玩家按名字找会拿到旧的那条。发布器现在给每次上传一个带
+    内容指纹的唯一名（`name.<sha8>.ext`），manifest 用 `cloud` 字段记录它，下载器
+    按 `cloud` 取、按 `path` 落盘；旧文件在 manifest 提交后按 **id** 清理（能清掉
+    同名重复）。改发布/下载逻辑时别把这个字段丢了。
+27. **`sources.json` 的读改写不要跨网络**：`_folder_of` 在 `ensure_path`（网络）
+    之后重新 `get` 再写 `folder_id`，否则会用请求前的旧快照覆盖掉期间写入的
+    分享链接/发布历史。

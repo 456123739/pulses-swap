@@ -800,6 +800,14 @@ class LegacyDatabaseMigrator:
                     stats['renamed'] += 1
                 elif conflict_mode == 'overwrite':
                     shutil.rmtree(target_path, ignore_errors=True)
+                    if target_path.exists():
+                        stats['errors'].append(
+                            f"{target_name}: 旧目录删除不干净，跳过覆盖")
+                        if log_manager:
+                            log_manager.log(
+                                f"覆盖 {target_name} 失败：旧目录删不掉",
+                                'ERROR')
+                        continue
 
             try:
                 shutil.copytree(preset_dir, target_path)
@@ -810,6 +818,9 @@ class LegacyDatabaseMigrator:
                         legacy_data = json.load(f)
                     new_data = LegacyDatabaseMigrator.convert_preset_index(
                         legacy_data, target_path)
+                    # 合并/迁移过来的预设不可能“已应用到当前 tacz”：清掉标记，
+                    # 否则一个库会出现多个 applied，替换时还会覆盖真实文件
+                    new_data['applied'] = False
                     with open(idx_file, 'w', encoding='utf-8') as f:
                         json.dump(new_data, f, indent=2, ensure_ascii=False)
                 with open(target_path / 'version.txt', 'w', encoding='utf-8') as f:

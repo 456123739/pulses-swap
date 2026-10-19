@@ -65,6 +65,9 @@ class PacksMixin:
 
     # ==================== 整合包管理 ====================
     def select_pack(self):
+        if getattr(self, "online_busy", False) or getattr(self, "is_applying", False):
+            show_warning("操作进行中", "正在同步/发布，等完成后再切换整合包。")
+            return
         if not self.db_ready:
             show_warning("提示", "数据库未初始化，请重启程序")
             return
@@ -275,6 +278,9 @@ class PacksMixin:
             self.log_manager.log("默认预设创建成功", 'SUCCESS')
 
     def close_pack(self):
+        if getattr(self, "online_busy", False):
+            show_warning("操作进行中", "正在同步/发布，等完成后再关闭整合包。")
+            return
         if self.is_applying:
             show_warning("操作进行中", "请等待当前操作完成")
             return
@@ -299,6 +305,12 @@ class PacksMixin:
                                            text_color=C_TEXT_MUTED)
         self.gunpack_count_label.configure(text="共 0 个枪包")
         self.version_entry.delete(0, END)
+        try:
+            self.sync_btn.pack_forget()
+            self.aux_row.grid_remove()
+            self.apply_btn.configure(text="一键替换")
+        except Exception:
+            pass
         # 关闭后只有「整合包相关」的按钮该灰掉；「选择整合包 / 数据库」必须
         # 保持可用 —— 之前这里调了 _disable_buttons(True) 把包括「选择」在内
         # 的所有按钮全禁掉，之后没有任何地方再解开，关掉一个包就再也选不了
@@ -687,6 +699,12 @@ class PacksMixin:
     def rename_preset(self, preset_name):
         if not self.preset_manager or self.loading_presets:
             return
+        if getattr(self, "online_busy", False) or self.is_applying:
+            show_warning("操作进行中", "正在同步/发布，完成后再改名。")
+            return
+        if preset_name in getattr(self, "online_checking", set()):
+            show_warning("正在检查这个预设", "等检查完成后再改名。")
+            return
         new_name = ask_text(self, "重命名预设", "新的预设名称",
                             initial=preset_name,
                             placeholder="例如 SSR 预设包", ok_text="重命名")
@@ -705,6 +723,7 @@ class PacksMixin:
         self.root.config(cursor="watch")
         try:
             if self.preset_manager.rename_preset(preset_name, new_name):
+                self._after_rename_preset(preset_name, new_name)
                 self.current_selected_preset = new_name
                 self._update_preset_list()
                 self.preset_cards.select(new_name, notify=False)
@@ -717,6 +736,12 @@ class PacksMixin:
 
     def delete_preset(self, preset_name):
         if not self.preset_manager or self.loading_presets:
+            return
+        if getattr(self, "online_busy", False) or self.is_applying:
+            show_warning("操作进行中", "正在同步/发布，完成后再删除。")
+            return
+        if preset_name in getattr(self, "online_checking", set()):
+            show_warning("正在检查这个预设", "等检查完成后再删除。")
             return
         if preset_name == "default":
             show_warning("提示", "不能删除默认预设")
@@ -733,6 +758,22 @@ class PacksMixin:
             return
         try:
             if self.preset_manager.delete_preset(preset_name):
+                # 删除要清干净：云端绑定、manifest 缓存、在线状态、体积缓存
+                try:
+                    if self.online is not None:
+                        self.online.forget_preset(preset_name)
+                except Exception:
+                    pass
+                for store in (self.online_states, self.online_pending):
+                    try:
+                        store.pop(preset_name, None)
+                    except Exception:
+                        pass
+                try:
+                    self._online_recheck.discard(preset_name)
+                    self._preset_size_cache.pop(preset_name, None)
+                except Exception:
+                    pass
                 if self.current_selected_preset == preset_name:
                     self.current_selected_preset = None
                     self.preset_name_label.configure(text="未选择")
@@ -780,6 +821,10 @@ class PacksMixin:
                 'SUCCESS')
             self.toast(f"已创建「{name}」，把枪包放进打开的文件夹", "success")
             self._update_guide()
+        else:
+            show_error("无法创建预设",
+                       "名称不合法（不能含 \\ / : * ? \" < > |、不能以点开头、"
+                       "不能是系统保留名），或目录已存在。换个名字试试。")
 
     def save_version(self):
         if not self.preset_manager or not self.current_selected_preset:

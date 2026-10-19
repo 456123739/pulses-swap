@@ -613,7 +613,8 @@ class OnlineService:
             self.scan(ref)
 
         try:
-            self.update_index(ref, version=plan.cloud_version)
+            # 有文件失败时不能把版本推进到云端新版本：本地并不完整
+            self.update_index(ref, version=plan.cloud_version if all_ok else "")
         except OSError as exc:
             self._log(f"更新 index.json 失败: {exc}", "WARNING")
 
@@ -902,8 +903,67 @@ class OnlineService:
     # ------------------------------------------------------------------
     # 发布
     # ------------------------------------------------------------------
+    def rename_preset(self, old: str, new: str) -> None:
+        """预设改名：把 sources.json 的绑定和本地缓存一起迁到新名字。
+
+        不改的话，改名后云端路径/分享链接会“消失”（还挂在旧 key 上），
+        玩家再点更新就找不到源了。
+        """
+        if not old or not new or old == new:
+            return
+        record = self.sources.get(old)
+        if record:
+            self.sources.put(new, record)
+            self.sources.remove(old)
+        for maker in (paths.cloud_manifest_path, paths.local_manifest_path):
+            try:
+                src = maker(self.db_path, old)
+                dst = maker(self.db_path, new)
+                if os.path.isfile(src):
+                    # 目标名可能残留着已删除预设的旧缓存：覆盖掉
+                    try:
+                        os.unlink(dst)
+                    except OSError:
+                        pass
+                    os.replace(src, dst)
+            except OSError:
+                pass
+        try:
+            src = paths.staging_dir(self.db_path, old)
+            dst = paths.staging_dir(self.db_path, new)
+            if os.path.isdir(src):
+                shutil.rmtree(dst, ignore_errors=True)
+                os.replace(src, dst)
+        except OSError:
+            pass
+
+    def forget_preset(self, name: str) -> None:
+        """预设被删除：把 sources / manifest 缓存 / staging 一起清掉。"""
+        if not name:
+            return
+        try:
+            self.sources.remove(name)
+        except Exception:
+            pass
+        for maker in (paths.cloud_manifest_path, paths.local_manifest_path):
+            try:
+                os.unlink(maker(self.db_path, name))
+            except OSError:
+                pass
+        shutil.rmtree(paths.staging_dir(self.db_path, name), ignore_errors=True)
+
     def cloud_path_of(self, preset: str) -> str:
         return str(self.sources.get(preset).get("cloud_path") or "")
+
+    def clear_source(self, preset: str) -> None:
+        """解除一个预设的云端绑定（保留发布历史，但不再自动检查/发布）。"""
+        record = self.sources.get(preset)
+        if not record:
+            return
+        for key in ("cloud_path", "folder_id", "share_url", "share_password"):
+            record.pop(key, None)
+        record.pop("lanzou", None)
+        self.sources.put(preset, record)
 
     def set_cloud_path(self, preset: str, cloud_path: str) -> None:
         record = self.sources.get(preset)
@@ -935,6 +995,9 @@ class OnlineService:
             raise SourceError("还没有填云端路径",
                               hint="例如 /PulsesSwap/SSR预设包")
         folder = account.ensure_path(cloud_path)
+        # 建目录期间可能已经有别的写入（分享链接/历史），写回前重新读一次，
+        # 别拿网络请求之前的快照覆盖掉它们
+        record = self.sources.get(preset)
         if record.get("folder_id") != folder:
             record["folder_id"] = folder
             self.sources.put(preset, record)
@@ -1053,11 +1116,17 @@ class OnlineService:
                 selection=selection, version=version, notes=notes,
                 min_app=min_app, name=ref.name,
                 previous_generation=plan.cloud_generation,
+                previous_manifest=self.load_cloud_manifest(ref.name) or None,
                 on_item=on_item, on_progress=on_progress)
         finally:
             shutil.rmtree(staging, ignore_errors=True)
 
         if result.ok:
+            # 发布成功后本地版本也跟着走，下次一键发布不会回退成旧版本号
+            try:
+                self.update_index(ref, version=result.version)
+            except OSError as exc:
+                self._log(f"发布后更新本地 index.json 失败: {exc}", "WARNING")
             self._record_publish(ref.name, result, plan)
         return result
 
@@ -1074,12 +1143,15 @@ class OnlineService:
             lanzou["url"] = result.share_url
             lanzou["password"] = result.share_password
         history = list(record.get("history") or [])
+        manifest = result.manifest or {}
         history.insert(0, {"version": result.version,
                            "generation": result.generation,
                            "at": int(time.time()),
                            "uploaded": len(result.uploaded),
                            "bytes": result.bytes_uploaded,
-                           "notes": plan.cloud_notes})
+                           "notes": str(manifest.get("notes") or "")})
+        record["last_notes"] = str(manifest.get("notes") or "")
+        record["last_min_app"] = str(manifest.get("min_app") or "")
         record["history"] = history[:20]
         self.sources.put(preset, record)
         if result.manifest:

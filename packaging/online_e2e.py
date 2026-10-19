@@ -217,6 +217,9 @@ def main() -> int:
     pump(root, 900)
     app.load_pack(pack)
     check("整合包加载", pump_until(root, lambda: not app.loading_presets, 8))
+    # e2e 用同一份整合包模拟两端，无法同时「已应用」；发布前的 applied 守卫
+    # 由线上实测与 UI 自检覆盖，这里只测在线管线本身。
+    app._online_guard_applied = lambda name, action: True
     app.online.account_base = account.base
     pump(root, 300)
 
@@ -362,12 +365,16 @@ def main() -> int:
                          30))
         check("二次发布成功", bool(app._last_publish_result.ok))
         check("generation = 2", app._last_publish_result.generation == 2)
+        check("发布后本地版本已更新",
+              app.preset_manager.presets["测试预设"]["version"] == "v2026.10.19",
+              app.preset_manager.presets["测试预设"]["version"])
         close_overlays(root)
 
         print("[10] 玩家（已应用）同步更新")
         app._set_role("player")
         app._last_sync_result = None
-        check("检查完成", refresh_online(app, root, "玩家预设"))
+        check("检查完成", refresh_online(app, root, "玩家预设"),
+              state_of("玩家预设"))
         update_plan = plan_of("玩家预设")
         check("待下载 1 项（alpha.zip）",
               [i.path for i in update_plan.items
@@ -446,7 +453,12 @@ def main() -> int:
         if share_server is None:
             share_server = account._shares.get(folder_id)
         check("拿到分享服务", share_server is not None)
-        share_server.corrupt("alpha.zip")
+        cloud_now = app.online.load_cloud_manifest("玩家预设") or {}
+        target_cloud = next(
+            (str(e.get("cloud") or e.get("path"))
+             for e in cloud_now.get("files") or []
+             if e.get("path") == "alpha.zip"), "alpha.zip")
+        share_server.corrupt(target_cloud)
         app.online_states.pop("玩家预设", None)
         app._last_sync_result = None
         app._online_check("玩家预设")
@@ -472,7 +484,7 @@ def main() -> int:
         check("失败时不会把坏文件装进去",
               (tacz / "alpha.zip").read_bytes() == b"local edit",
               (tacz / "alpha.zip").read_bytes()[:24])
-        share_server.state.corrupt.discard("alpha.zip")
+        share_server.state.corrupt.discard(target_cloud)
 
         print("[14b] 修好云端后重试，应当恢复正常")
         app.online_states.pop("玩家预设", None)

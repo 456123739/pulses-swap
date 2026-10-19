@@ -485,6 +485,43 @@ def preset_name_of(row_text: str) -> str:
     return row_text
 
 
+_RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL",
+                   *(f"COM{i}" for i in range(1, 10)),
+                   *(f"LPT{i}" for i in range(1, 10))}
+
+
+def validate_preset_name(name: str) -> str:
+    """预设名会直接当目录名用：必须是单层、非保留名、无非法字符。"""
+    text = str(name or "").strip()
+    if not text or text in (".", ".."):
+        raise ValueError("预设名称不能为空")
+    if len(text) > 80:
+        raise ValueError("预设名称太长（最多 80 个字符）")
+    for char in r'\/:*?"<>|':
+        if char in text:
+            raise ValueError(f"预设名称不能包含 {char}")
+    if text.startswith("."):
+        raise ValueError("预设名称不能以点开头")
+    if text.endswith((" ", ".")):
+        raise ValueError("预设名称不能以空格或点结尾")
+    if text.split(".")[0].strip().upper() in _RESERVED_NAMES:
+        raise ValueError(f"「{text}」是系统保留名，换一个")
+    return text
+
+
+def safe_preset_name(raw, fallback: str = "云端预设") -> str:
+    """把云端 manifest 里的名字收拾成合法目录名（不合法就替换/兜底）。"""
+    text = str(raw or "").strip()
+    for char in r'\/:*?"<>|':
+        text = text.replace(char, "_")
+    text = text.strip(" .")[:80]
+    if not text or text in (".", ".."):
+        return fallback
+    if text.split(".")[0].strip().upper() in _RESERVED_NAMES:
+        return fallback
+    return text
+
+
 class PresetManager:
     PROTECTED_FILES = ['tacz-pre.toml', '.export-state.json', 'blacklist.txt']
     PROTECTED_DIRS = ['tacz_default_gun']
@@ -533,8 +570,26 @@ class PresetManager:
         except Exception as e:
             self.log.log(f"保存缓存失败: {e}", 'WARNING')
 
+    def _normalize_applied(self) -> None:
+        """一个库只能有一个「已应用」。多个说明索引被合并/拷贝坏了，全部重置。"""
+        applied = [n for n, info in self.presets.items() if info.get('applied')]
+        if len(applied) <= 1:
+            return
+        for name in applied:
+            info = self.presets[name]
+            info['applied'] = False
+            try:
+                self._update_preset_status(Path(info['path']), False)
+            except Exception:
+                pass
+        self.current_preset = None
+        self.log.log(
+            f"检测到 {len(applied)} 个预设都标记为已应用，已全部重置；"
+            f"请重新选择要应用的预设", 'WARNING')
+
     def load_all_presets(self, use_cache: bool = True):
         if use_cache and self.load_from_cache():
+            self._normalize_applied()
             return
         self.presets = {}
         if not self.database_path.exists():
@@ -542,6 +597,7 @@ class PresetManager:
         for preset_dir in self.database_path.iterdir():
             if preset_dir.is_dir() and not preset_dir.name.startswith('.'):
                 self._load_preset(preset_dir)
+        self._normalize_applied()
         self.log.log(f"预设加载完成，共 {len(self.presets)} 个预设", 'INFO',
                           verbose=True)
         self.save_cache()
@@ -604,7 +660,12 @@ class PresetManager:
         return True
 
     def create_preset(self, name: str, version: str = 'v1.0.0') -> bool:
-        if not name or name in self.presets:
+        if name in self.presets:
+            return False
+        try:
+            name = validate_preset_name(name)
+        except ValueError as exc:
+            self.log.log(f"预设名不合法：{exc}", 'ERROR')
             return False
         preset_path = self.database_path / name
         try:
@@ -648,23 +709,27 @@ class PresetManager:
             return False
 
     def rename_preset(self, old_name: str, new_name: str) -> bool:
-        if old_name not in self.presets or new_name in self.presets:
+        if old_name not in self.presets:
             return False
-        if not new_name or not new_name.strip():
-            return False
-        for char in r'\/:*?"<>|':
-            if char in new_name:
-                self.log.log(f"预设名称不能包含非法字符: {char}", 'ERROR')
-                return False
         try:
-            preset_info = self.presets[old_name]
-            old_path = Path(preset_info['path'])
-            new_path = self.database_path / new_name
-            was_applied = preset_info.get('applied', False)
-            if was_applied:
-                preset_info['applied'] = False
-                self.current_preset = None
+            new_name = validate_preset_name(new_name)
+        except ValueError as exc:
+            self.log.log(f"预设名不合法：{exc}", 'ERROR')
+            return False
+        if new_name == old_name:
+            return True
+        if new_name in self.presets:
+            return False
+        preset_info = self.presets[old_name]
+        old_path = Path(preset_info['path'])
+        new_path = self.database_path / new_name
+        renamed = False
+        try:
+            if new_path.exists():
+                raise FileExistsError(f"目标目录已存在：{new_path.name}")
+            # 先只改目录；applied/current 在最后一步才动，失败就不用回滚状态
             old_path.rename(new_path)
+            renamed = True
             index_file = new_path / 'index.json'
             if index_file.exists():
                 with open(index_file, 'r', encoding='utf-8') as f:
@@ -675,15 +740,19 @@ class PresetManager:
             preset_info['path'] = str(new_path)
             preset_info['name'] = new_name
             self.presets[new_name] = preset_info
-            del self.presets[old_name]
-            if was_applied:
-                preset_info['applied'] = True
+            self.presets.pop(old_name, None)
+            if preset_info.get('applied'):
                 self.current_preset = new_name
                 self._update_preset_status(new_path, True)
             self.save_cache()
             return True
         except Exception as e:
             self.log.log(f"重命名预设失败: {e}", 'ERROR')
+            if renamed:
+                try:
+                    new_path.rename(old_path)
+                except OSError as exc:
+                    self.log.log(f"改名回滚失败，目录可能停在 {new_path}: {exc}", 'ERROR')
             return False
 
     def delete_preset(self, name: str) -> bool:
@@ -743,13 +812,18 @@ class PresetManager:
         return bool(c['added'] or c['removed'] or c['modified'])
 
     def _move_items(self, src_dir: Path, dst_dir: Path, exclude=None,
-                    progress_callback=None) -> int:
+                    progress_callback=None) -> list[str]:
+        """把 src_dir 的条目移到 dst_dir；遇到第一个失败就停下，返回已移动的名字。
+
+        失败后继续搬只会让「半成品」更大，调用方也没法回滚。返回值用于
+        出错时把已经搬过去的东西搬回来。
+        """
         if not src_dir.exists():
-            return 0
+            return []
         exclude = exclude or []
         items = [i for i in src_dir.iterdir() if i.name not in exclude]
         total = len(items)
-        moved = 0
+        moved: list[str] = []
         for i, item in enumerate(items):
             try:
                 dest = dst_dir / item.name
@@ -759,13 +833,14 @@ class PresetManager:
                     else:
                         dest.unlink()
                 shutil.move(str(item), str(dest))
-                moved += 1
+                moved.append(item.name)
                 if progress_callback:
                     progress_callback(i + 1, total, f"移动 {item.name}")
                 if (i + 1) % self.BATCH_SIZE == 0:
                     time.sleep(self.BATCH_DELAY)
             except Exception as e:
                 self.log.log(f"移动 {item.name} 失败: {e}", 'WARNING')
+                break
         return moved
 
     def _clear_dir(self, dir_path: Path, exclude=None):
@@ -808,57 +883,153 @@ class PresetManager:
                 break
         if current_applied == preset_name:
             return True
+
         target_preset = self.presets[preset_name]
         target_path = Path(target_preset['path'])
         protected_all = self.PROTECTED_FILES + self.PROTECTED_DIRS
+        metadata = ('description.txt', 'index.json', 'version.txt')
+        tacz = Path(self.tacz_path)
+        cur_info = self.presets.get(current_applied) if current_applied else None
+        cur_path = Path(cur_info['path']) if cur_info else None
+        phase = "preflight"
+        moved_target: list[str] = []
+
+        def _leftover(extra=()):
+            return [p.name for p in tacz.iterdir()
+                    if p.name not in protected_all and p.name not in extra]
+
         try:
             self.log.log(f"开始切换预设: {current_applied or 'None'} -> {preset_name}", 'PROCESS')
             # 预检：tacz 必须可写。只读目录下如果直接搬，会出现「删不掉旧文件、
             # 新枪包却移进去、最后还标记成已应用」的半成品状态。
-            probe = self.tacz_path / ".pulses_write_probe"
+            probe = tacz / ".pulses_write_probe"
             try:
                 probe.write_bytes(b"x")
                 probe.unlink()
             except OSError as exc:
                 self.log.log(f"tacz 目录不可写，无法替换：{exc}", 'ERROR')
                 return False
-            if current_applied and current_applied in self.presets:
-                cur_info = self.presets[current_applied]
-                cur_path = Path(cur_info['path'])
-                moved = self._move_items(self.tacz_path, cur_path, protected_all, progress_callback)
+
+            # 没有任何 applied 标记但 tacz 里有东西：先收进一个“恢复”预设，
+            # 绝不能直接清空 —— 合并库/索引损坏/崩溃后这里会有用户真实枪包。
+            if cur_info is None:
+                stray = _leftover(())
+                if stray:
+                    phase = "rescue"
+                    rescue_name = "恢复的枪包 " + time.strftime("%Y%m%d-%H%M%S")
+                    n = 1
+                    while rescue_name in self.presets:
+                        n += 1
+                        rescue_name = (f"恢复的枪包 {time.strftime('%Y%m%d-%H%M%S')}"
+                                       f"-{n}")
+                    if not self.create_preset(rescue_name, "v1.0.0"):
+                        raise OSError("tacz 里有未归属的枪包，且无法创建恢复预设")
+                    rescue = self.presets[rescue_name]
+                    rescue_path = Path(rescue['path'])
+                    moved = self._move_items(tacz, rescue_path, protected_all,
+                                             progress_callback)
+                    stuck = _leftover(())
+                    if stuck:
+                        raise OSError(
+                            f"tacz 里有 {len(stuck)} 个文件收不进恢复预设：{stuck[:3]}")
+                    self.log.log(
+                        f"tacz 里有 {len(moved)} 个未归属枪包，"
+                        f"已收进预设「{rescue_name}」", 'WARNING')
+                    cur_info = None
+                    cur_path = None
+
+            phase = "reclaim"
+            if cur_info is not None:
+                moved = self._move_items(tacz, cur_path, protected_all,
+                                         progress_callback)
+                stuck = _leftover(())
+                if stuck:
+                    # 没搬干净就不能往下清空 —— 否则这些文件会被当垃圾删掉
+                    raise OSError(f"有 {len(stuck)} 个文件无法回收：{stuck[:3]}")
                 cur_info['applied'] = False
                 self._update_preset_status(cur_path, False)
-                self.log.log(f"已回收 {moved} 个枪包到 '{current_applied}'", 'INFO',
-                          verbose=True)
-            self._clear_dir(self.tacz_path, protected_all)
-            leftovers = [p.name for p in Path(self.tacz_path).iterdir()
-                         if p.name not in protected_all]
+                self.log.log(f"已回收 {len(moved)} 个枪包到 '{current_applied}'",
+                             'INFO', verbose=True)
+
+            phase = "clear"
+            self._clear_dir(tacz, protected_all)
+            leftovers = _leftover(())
             if leftovers:
                 raise OSError(f"tacz 没有被清空（{len(leftovers)} 项删不掉）：{leftovers[:3]}")
-            metadata = ('description.txt', 'index.json', 'version.txt')
-            moved = self._move_items(target_path, self.tacz_path, list(metadata),
-                                     progress_callback)
+
+            phase = "load"
+            moved_target = self._move_items(target_path, tacz, list(metadata),
+                                            progress_callback)
+            if not isinstance(moved_target, (list, tuple)):
+                moved_target = []
             remaining = [p.name for p in target_path.iterdir()
                          if p.name not in metadata]
             if remaining:
                 raise OSError(f"{len(remaining)} 个枪包没能移入 tacz：{remaining[:3]}")
+
+            phase = "done"
             target_preset['applied'] = True
             self._update_preset_status(target_path, True)
             self.current_preset = preset_name
             self.save_cache()
-            self.log.log(f"成功应用预设 '{preset_name}' (移动了 {moved} 个枪包)", 'SUCCESS')
+            self.log.log(f"成功应用预设 '{preset_name}' (移动了 {len(moved_target)} 个枪包)",
+                         'SUCCESS')
             return True
         except Exception as e:
             self.log.log(f"应用预设失败: {e}", 'ERROR')
-            # 保守收尾：半成品不算任何预设「已应用」，让用户能重试
             try:
-                target_preset['applied'] = False
-                self._update_preset_status(target_path, False)
-                if current_applied and current_applied in self.presets:
-                    cur_info = self.presets[current_applied]
-                    cur_info['applied'] = False
-                    self._update_preset_status(Path(cur_info['path']), False)
-                self.current_preset = None
+                if phase == "reclaim":
+                    # 回收阶段就失败了：原预设的文件还在 tacz / 已回收一部分。
+                    # 保持「已应用」，下次重试会先再回收，绝不会被 _clear_dir 删掉。
+                    if cur_info is not None:
+                        cur_info['applied'] = True
+                        self._update_preset_status(cur_path, True)
+                        self.current_preset = current_applied
+                    target_preset['applied'] = False
+                    self._update_preset_status(target_path, False)
+                elif phase == "clear":
+                    # 回收成功、清空失败：尽量把残留还给原预设；还不掉就保持
+                    # 原预设 applied，避免它在下次替换时被当成垃圾清掉。
+                    still = _leftover(())
+                    if cur_info is not None and cur_path is not None:
+                        for name in list(still):
+                            src, dst = tacz / name, cur_path / name
+                            if src.exists() and not dst.exists():
+                                try:
+                                    shutil.move(str(src), str(dst))
+                                except OSError as exc:
+                                    self.log.log(f"回滚 {name} 失败: {exc}", 'WARNING')
+                        still = _leftover(())
+                        cur_info['applied'] = bool(still)
+                        self._update_preset_status(cur_path, bool(still))
+                        self.current_preset = current_applied if still else None
+                    target_preset['applied'] = False
+                    self._update_preset_status(target_path, False)
+                else:
+                    # 已经在往 tacz 搬新预设：把搬过去的搬回预设目录
+                    for name in moved_target:
+                        src, dst = tacz / name, target_path / name
+                        if not src.exists():
+                            continue
+                        try:
+                            if dst.exists():
+                                if dst.is_dir():
+                                    shutil.rmtree(dst)
+                                else:
+                                    dst.unlink()
+                            shutil.move(str(src), str(dst))
+                        except OSError as exc:
+                            self.log.log(f"回滚 {name} 失败: {exc}", 'WARNING')
+                    leftover = _leftover(())
+                    if leftover:
+                        self.log.log(
+                            f"tacz 里仍残留 {leftover[:3]}，请手动检查后再替换", 'ERROR')
+                    target_preset['applied'] = False
+                    self._update_preset_status(target_path, False)
+                    if cur_info is not None:
+                        cur_info['applied'] = False
+                        self._update_preset_status(cur_path, False)
+                    self.current_preset = None
                 self.save_cache()
             except Exception:
                 pass

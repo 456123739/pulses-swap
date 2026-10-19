@@ -281,6 +281,65 @@ class ServiceTest(unittest.TestCase):
 
 
 class ShareRecordTest(unittest.TestCase):
+    def test_rename_migrates_cloud_binding(self):
+        temp = tempfile.TemporaryDirectory()
+        try:
+            service = OnlineService(Path(temp.name) / "db")
+            service._remember_share("旧名字", "https://x.lanzoul.com/b1", "pw")
+            service.rename_preset("旧名字", "新名字")
+            moved = service.source_of("新名字")
+            self.assertEqual(moved["lanzou"]["url"], "https://x.lanzoul.com/b1")
+            self.assertEqual(moved["share_password"], "pw")
+            self.assertEqual(service.source_of("旧名字"), {})
+        finally:
+            temp.cleanup()
+
+    def test_rename_overwrites_stale_target_cache(self):
+        temp = tempfile.TemporaryDirectory()
+        try:
+            db = Path(temp.name) / "db"
+            service = OnlineService(db)
+            for name, payload in (("旧预设", b"OLD"), ("新预设", b"STALE")):
+                path = paths.cloud_manifest_path(db, name)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(payload)
+            service._remember_share("旧预设", "https://x.lanzoul.com/b2", "pw")
+            service.rename_preset("旧预设", "新预设")
+            self.assertEqual(paths.cloud_manifest_path(db, "新预设").read_bytes(),
+                             b"OLD")
+            self.assertFalse(paths.cloud_manifest_path(db, "旧预设").exists())
+        finally:
+            temp.cleanup()
+
+    def test_clear_source_removes_binding(self):
+        temp = tempfile.TemporaryDirectory()
+        try:
+            service = OnlineService(Path(temp.name) / "db")
+            service._remember_share("预设", "https://x.lanzoul.com/b3", "pw")
+            service.clear_source("预设")
+            source = service.source_of("预设")
+            self.assertNotIn("lanzou", source)
+            self.assertNotIn("share_url", source)
+            self.assertEqual(service.cloud_path_of("预设"), "")
+        finally:
+            temp.cleanup()
+
+    def test_forget_preset_removes_binding_cache_and_staging(self):
+        temp = tempfile.TemporaryDirectory()
+        try:
+            db = Path(temp.name) / "db"
+            service = OnlineService(db)
+            service._remember_share("要删的预设", "https://x.lanzoul.com/b1", "pw")
+            staging = paths.staging_dir(db, "要删的预设")
+            staging.mkdir(parents=True, exist_ok=True)
+            (staging / "part.bin").write_bytes(b"x")
+            service.forget_preset("要删的预设")
+            self.assertEqual(service.source_of("要删的预设"), {})
+            self.assertFalse(staging.exists())
+            self.assertFalse(paths.cloud_manifest_path(db, "要删的预设").exists())
+        finally:
+            temp.cleanup()
+
     def test_remember_share_fills_source_page_fields(self):
         temp = tempfile.TemporaryDirectory()
         try:

@@ -272,8 +272,12 @@ for key in ("merged", "isolated"):
           (app.settings.storage_mode, _sf))
 for key in ("developer", "player"):
     sp.role_seg.select(key, notify=True)
-    pump(300)
-    check(f"用户身份切到 {key}", app.settings.role == key, app.settings.role)
+    pump(700)
+    badge = str(app.identity_badge.cget("text"))
+    want = "开发者" if key == "developer" else "玩家"
+    check(f"用户身份切到 {key}（徽标同步）",
+          app.settings.role == key and badge == want,
+          (app.settings.role, badge))
 for key in ("off", "on"):
     sp.anim_seg.select(key, notify=True)
     pump(300)

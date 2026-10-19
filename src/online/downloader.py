@@ -117,12 +117,17 @@ class Downloader:
         listing = self.share.list_files()
         self._listing = {str(f["name"]).lower(): f for f in listing}
         missing = [e["path"] for e in entries
-                   if str(e["path"]).lower() not in self._listing]
+                   if self._cloud_name(e) not in self._listing]
         if missing:
             raise SourceError(
                 f"云端缺少 {len(missing)} 个文件",
                 detail=", ".join(missing[:5]),
                 hint="云端文件被改动过，请发布者重新发布。")
+
+    @staticmethod
+    def _cloud_name(entry: dict) -> str:
+        """云端实际文件名（同名被改名时 manifest 会带 cloud 字段）。"""
+        return str(entry.get("cloud") or entry.get("path") or "").lower()
 
     def _target_of(self, entry: dict) -> str:
         if entry.get("type") == "folder":
@@ -152,7 +157,7 @@ class Downloader:
                    on_progress=None, base_done: int = 0,
                    total_bytes: int = 0) -> ItemResult:
         path = str(entry["path"])
-        info = self._listing.get(path.lower())
+        info = self._listing.get(self._cloud_name(entry))
         if info is None:
             return ItemResult(entry, error=f"云端缺少 {path}")
 

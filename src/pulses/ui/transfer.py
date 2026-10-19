@@ -65,6 +65,10 @@ class TransferMixin:
 
     # ==================== 导出 ====================
     def show_progress(self, current, total, message=""):
+        # 进度回调来自工作线程：Tk 控件只能在主线程动
+        if threading.current_thread() is not threading.main_thread():
+            ui_call(self.root, self.show_progress, current, total, message)
+            return
         self._inline_progress(current, total, message)
         if total > 0:
             pct = current / total
@@ -134,6 +138,7 @@ class TransferMixin:
         if busy:
             self.is_applying = True
             _set_state("publish_btn", "disabled")
+            _set_state("sync_btn", "disabled")
             _set_state("apply_alt_btn", "disabled")
             self.apply_btn.configure(state="disabled", text=f"{operation}中...")
             self.create_preset_btn.configure(state="disabled")
@@ -144,13 +149,25 @@ class TransferMixin:
             self.is_applying = False
             self.apply_btn.configure(state="normal", text="一键替换")
             _set_state("publish_btn", "normal")
+            _set_state("sync_btn", "normal")
             _set_state("apply_alt_btn", "normal")
             self.create_preset_btn.configure(state="normal")
             self.select_pack_btn.configure(state="normal")
             self.save_version_btn.configure(state="normal")
             self.preset_cards.set_enabled(True)
-            if not self.current_selected_preset:
-                self.apply_btn.configure(state="disabled")
+            name = getattr(self, "current_selected_preset", None)
+            info = {}
+            try:
+                info = (self.preset_manager.presets.get(name) or {}) \
+                    if (self.preset_manager and name) else {}
+            except Exception:
+                info = {}
+            if not name:
+                self.apply_btn.configure(state="disabled", text="一键替换")
+            elif info.get("applied"):
+                self.apply_btn.configure(state="disabled", text="已应用")
+            else:
+                self.apply_btn.configure(state="normal", text="一键替换")
 
     # ==================== 枪包列表 ====================
     def _sync_gunpack_empty(self):

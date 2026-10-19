@@ -89,6 +89,12 @@ def _norm_entry(entry: dict) -> dict:
     out = {"path": path, "type": kind,
            "size": _as_int(entry.get("size")),
            "sha256": digest}
+    # 云端实际文件名（同名上传被网盘改名时与 path 不同）；老 manifest 没有这个字段
+    cloud = str(entry.get("cloud") or "").strip()
+    if cloud:
+        if "/" in cloud or "\\" in cloud or cloud in (".", ".."):
+            raise ManifestError(f"cloud 字段不是合法文件名: {cloud!r}")
+        out["cloud"] = cloud
     packed = _as_int(entry.get("packed_size"))
     if kind == "folder":
         target = check_path(entry.get("target") or _strip_zip(path))

@@ -371,9 +371,9 @@ class WindowMixin:
         正在更新 / 替换时**直接拒绝退出**：写到一半被 kill 会留下半成品，
         下次打开还得修。忙时不弹确认框，只提示，避免用户手快点了「是」。
         """
-        if self.is_applying:
+        if self.is_applying or getattr(self, "online_busy", False):
             try:
-                self.toast("正在处理，完成后再退出", "warning")
+                self.toast("正在同步/发布，完成后再退出", "warning")
             except Exception:
                 pass
             return
@@ -414,11 +414,23 @@ class WindowMixin:
         self.show_page("settings")
 
     def _on_settings_saved(self):
-        """自动保存回调：只写日志 + 右上角浮一条提示，不再弹模态框打断操作。"""
+        """自动保存回调：日志 + 提示；身份/存储若变了要把界面一起切过去。"""
         # 「已切换到 xx 存储」这类回显属于细节：只在完整日志模式下保留
         self.log_manager.log(
             f"设置已保存: 存储模式={self.settings.storage_mode}, 身份={self.settings.role}",
             'SUCCESS', verbose=True)
+        # 设置页的「用户身份」单选是直接写 settings 的，不经过 _set_role；
+        # 这里补上界面切换，否则要重启才生效。
+        try:
+            if getattr(config, "UI_ROLE", "player") != self.settings.role:
+                self._apply_role_from_settings()
+                self.online_states = {}
+                self._online_recheck.clear()
+                self.online_pending.clear()
+                self._preset_size_cache.clear()
+                self._update_preset_list()
+        except Exception:
+            pass
         self.toast("设置已自动保存", "success")
 
     def _on_db_action(self, action: str):

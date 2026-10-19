@@ -120,17 +120,23 @@ class DatabaseMixin:
         else:
             self.log_manager.log("未选择数据库，部分功能不可用", 'WARNING')
 
-    def _use_database(self, db_path: Path):
-        self.db_path = Path(db_path)
-        self.settings.bind_database(db_path)
-        # 上次是开发者身份的话，界面直接用开发者配色起来
+    def _apply_role_from_settings(self):
+        """按当前数据库里的身份，把整套界面刷成一致状态。
+
+        启动、切换数据库都要走这里：设置页是在绑定数据库之前建的，
+        不重刷就会出现「身份是开发者、设置页却没有数据库管理」这类错乱。
+        """
         try:
             role = getattr(self.settings, "role", "player")
+            previous = getattr(config, "UI_ROLE", "player")
             config.UI_ROLE = role
-            if role == "developer":
-                theme_widgets(self.root, "player", "developer")
-            # 身份徽标 / 主操作 / 入口可见性：和配色同一来源，避免
-            # 「显示玩家、界面却是开发者配色」这种错乱
+            roots = [self.root]
+            roots.extend(p for p in getattr(self, "pages", {}).values()
+                         if p is not None)
+            try:
+                theme_widgets(roots, previous, role)
+            except Exception:
+                pass
             try:
                 self._update_identity_ui()
             except Exception:
@@ -139,15 +145,18 @@ class DatabaseMixin:
                 self._apply_role_actions()
             except Exception:
                 pass
+            try:
+                self._rebuild_settings_role_dependent()
+            except Exception:
+                pass
         except Exception:
             pass
-        # 设置页是在绑定数据库之前建的，那时 role 还是默认的 player；
-        # 以开发者身份重启时，「数据库管理」那一块会整块缺失。
-        # 绑定数据库后按真实身份重建一次。
-        try:
-            self._rebuild_settings_role_dependent()
-        except Exception:
-            pass
+
+    def _use_database(self, db_path: Path):
+        self.db_path = Path(db_path)
+        self.settings.bind_database(db_path)
+        # 数据库里的 role 决定整套界面（配色/徽标/主操作/设置页分区）
+        self._apply_role_from_settings()
         self.recent_manager = RecentPacksManager(db_path / ".global.json")
         self.db_ready = True
         self.update_recent_list()
@@ -187,6 +196,9 @@ class DatabaseMixin:
                 "每个整合包都用自己的 PulsesSwap_database。\n\n"
                 "要固定使用一个数据库，请先在设置里把存储方式改成"
                 "「合并数据库」，再切换位置。")
+            return
+        if self.loading_presets or self.is_applying:
+            show_warning("操作进行中", "等当前操作完成后再切换数据库。")
             return
         folder = filedialog.askdirectory(title="选择新的数据库文件夹",
                                           initialdir=str(PROGRAM_DIR))
@@ -230,6 +242,8 @@ class DatabaseMixin:
         self.log_manager.log(f"数据库已切换: {path}", 'SUCCESS')
         show_info("完成", "数据库已切换，请重新打开整合包。")
         self.close_pack()
+        # 新库可能是玩家身份：徽标/主题/按钮/设置页要一起换过来
+        self._apply_role_from_settings()
 
     def merge_database(self):
         if not self.db_ready:

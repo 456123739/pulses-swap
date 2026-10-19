@@ -1,6 +1,7 @@
 """发布 → 分享 → 玩家同步 的完整闭环（两个本地模拟服务对接）。"""
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 import tempfile
@@ -14,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mock_lanzou_account import MockLanzouAccount
 from online import diff, hashing
 from online.errors import AuthError, SourceError
+from online.provider_lanzou import MANIFEST_NAME
 from online.service import OnlineService, PresetRef
 
 
@@ -141,6 +143,135 @@ class PublishLoopTest(unittest.TestCase):
         history = self.dev.publish_history("测试预设")
         self.assertEqual(len(history), 1)
         self.assertEqual(history[0]["version"], "2026.10.18")
+
+    def _cloud_name(self, manifest, path):
+        for entry in manifest.get("files") or []:
+            if entry.get("path") == path:
+                return entry.get("cloud") or path
+        return path
+
+    def _cloud_folder(self, name="测试预设"):
+        account = self.account_server
+        return account.folder_id(name, account.folder_id("PulsesSwap"))
+
+    def test_failed_upload_keeps_old_version_downloadable(self):
+        self._login()
+        self.dev.set_cloud_path("测试预设", "/PulsesSwap/测试预设")
+        plan = self.dev.publish_plan(self.dev_ref)
+        first = self.dev.publish(self.dev_ref, plan, diff.selection_of(plan),
+                                 version="v1.0.0", notes="首发")
+        self.assertTrue(first.ok, first.failed)
+        folder = self._cloud_folder()
+        before = self.account_server.files_in(folder)
+        before_manifest = json.loads(before[MANIFEST_NAME].decode("utf-8"))
+        old_readme = self._cloud_name(before_manifest, "readme.txt")
+        self.assertEqual(before[old_readme], b"hello")
+
+        write(self.dev_root / "readme.txt", b"hello v2")
+        new_readme = ("readme."
+                      + hashlib.sha256(b"hello v2").hexdigest()[:8] + ".txt")
+        plan = self.dev.publish_plan(self.dev_ref)
+        self.account_server.state.fail_uploads.add(new_readme)
+        failed = self.dev.publish(self.dev_ref, plan, diff.selection_of(plan),
+                                  version="v2.0.0")
+        self.assertFalse(failed.ok)
+
+        after = self.account_server.files_in(folder)
+        # 旧文件没有被提前删除，旧 manifest 也还在
+        self.assertEqual(after[old_readme], b"hello")
+        manifest = json.loads(after[MANIFEST_NAME].decode("utf-8"))
+        self.assertEqual(manifest["version"], "v1.0.0")
+        for entry in manifest["files"]:
+            cloud_name = entry.get("cloud") or entry["path"]
+            self.assertIn(cloud_name, after)
+
+        # 玩家仍然能完整下载旧版本
+        player_root = Path(self.temp.name) / "player" / "测试预设"
+        player_root.mkdir(parents=True)
+        player = OnlineService(Path(self.temp.name) / "player_db",
+                               app_version="2.4.16",
+                               account_base=self.account_server.base)
+        player.bind("测试预设", first.share_url, first.share_password)
+        pref = PresetRef("测试预设", str(player_root), str(player_root))
+        pplan = player.check(pref)
+        result = player.sync(pref, pplan, diff.selection_of(pplan))
+        self.assertTrue(result.ok, result.failed)
+        self.assertEqual((player_root / "readme.txt").read_bytes(), b"hello")
+
+    def test_unselected_new_file_is_not_in_manifest(self):
+        self._login()
+        self.dev.set_cloud_path("测试预设", "/PulsesSwap/测试预设")
+        plan = self.dev.publish_plan(self.dev_ref)
+        self.assertTrue(self.dev.publish(self.dev_ref, plan,
+                                          diff.selection_of(plan),
+                                          version="v1").ok)
+        write(self.dev_root / "brand_new.zip", b"new")   # 不需要是真 zip
+        plan = self.dev.publish_plan(self.dev_ref)
+        selection = diff.selection_of(plan) - {"brand_new.zip"}
+        result = self.dev.publish(self.dev_ref, plan, selection, version="v2")
+        self.assertTrue(result.ok, result.failed)
+        folder = self._cloud_folder()
+        files = self.account_server.files_in(folder)
+        manifest = json.loads(files[MANIFEST_NAME].decode("utf-8"))
+        paths = {e["path"] for e in manifest["files"]}
+        self.assertNotIn("brand_new.zip", paths)
+        for entry in manifest["files"]:
+            cloud_name = entry.get("cloud") or entry["path"]
+            self.assertIn(cloud_name, files)
+
+    def test_renamed_cloud_file_is_downloadable_by_path(self):
+        """云端同名被改名时，玩家按 path 落盘、按 cloud 下载。"""
+        self._login()
+        self.dev.set_cloud_path("测试预设", "/PulsesSwap/测试预设")
+        plan = self.dev.publish_plan(self.dev_ref)
+        first = self.dev.publish(self.dev_ref, plan, diff.selection_of(plan),
+                                 version="v1")
+        self.assertTrue(first.ok)
+        write(self.dev_root / "readme.txt", b"hello v2")
+        plan = self.dev.publish_plan(self.dev_ref)
+        second = self.dev.publish(self.dev_ref, plan, diff.selection_of(plan),
+                                  version="v2")
+        self.assertTrue(second.ok, second.failed)
+        folder = self._cloud_folder()
+        files = self.account_server.files_in(folder)
+        manifest = json.loads(files[MANIFEST_NAME].decode("utf-8"))
+        entry = next(e for e in manifest["files"] if e["path"] == "readme.txt")
+        cloud_name = entry.get("cloud") or entry["path"]
+        self.assertIn(cloud_name, files)
+
+        player_root = Path(self.temp.name) / "player2" / "测试预设"
+        player_root.mkdir(parents=True)
+        player = OnlineService(Path(self.temp.name) / "player2_db",
+                               app_version="2.4.16",
+                               account_base=self.account_server.base)
+        player.bind("测试预设", second.share_url, second.share_password)
+        pref = PresetRef("测试预设", str(player_root), str(player_root))
+        pplan = player.check(pref)
+        result = player.sync(pref, pplan, diff.selection_of(pplan))
+        self.assertTrue(result.ok, result.failed)
+        self.assertEqual((player_root / "readme.txt").read_bytes(), b"hello v2")
+
+    def test_publish_updates_local_version_and_history_notes(self):
+        self._login()
+        self.dev.set_cloud_path("测试预设", "/PulsesSwap/测试预设")
+        plan = self.dev.publish_plan(self.dev_ref)
+        self.assertTrue(self.dev.publish(self.dev_ref, plan,
+                                          diff.selection_of(plan),
+                                          version="v1.0.0",
+                                          notes="第一次说明").ok)
+        index = json.loads((self.dev_root / "index.json").read_text("utf-8"))
+        self.assertEqual(index["version"], "v1.0.0")
+
+        write(self.dev_root / "readme.txt", b"hello v2")
+        plan = self.dev.publish_plan(self.dev_ref)
+        self.assertTrue(self.dev.publish(self.dev_ref, plan,
+                                          diff.selection_of(plan),
+                                          version="v2.0.0",
+                                          notes="第二次说明").ok)
+        index = json.loads((self.dev_root / "index.json").read_text("utf-8"))
+        self.assertEqual(index["version"], "v2.0.0")
+        history = self.dev.publish_history("测试预设")
+        self.assertEqual(history[0]["notes"], "第二次说明")
 
     def test_second_publish_only_changes(self):
         self._login()

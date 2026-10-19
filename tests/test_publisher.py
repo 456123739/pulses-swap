@@ -103,6 +103,12 @@ class PublisherTest(unittest.TestCase):
         self.assertIsNotNone(self.server.folder_id("测试预设",
                                                    self.server.folder_id("PulsesSwap")))
 
+    def _cloud_name(self, path: str) -> str:
+        entry = next(e for e in self.entries() if e["path"] == path)
+        import os
+        stem, ext = os.path.splitext(path)
+        return f"{stem}.{entry['sha256'][:8]}{ext}"
+
     def test_first_publish(self):
         result, plan = self.publish(version="2026.10.18", notes="首发")
         self.assertTrue(result.ok, result.failed)
@@ -112,8 +118,10 @@ class PublisherTest(unittest.TestCase):
         self.assertTrue(result.share_url)
 
         files = self.server.files_in(self.folder)
-        self.assertEqual(set(files),
-                         {"alpha.zip", "beta.zip", "readme.txt", MANIFEST_NAME})
+        expected = {MANIFEST_NAME} | {self._cloud_name(p)
+                                      for p in ("alpha.zip", "beta.zip",
+                                                "readme.txt")}
+        self.assertEqual(set(files), expected)
 
         manifest = self.cloud_manifest()
         self.assertEqual(manifest["version"], "2026.10.18")
@@ -125,7 +133,8 @@ class PublisherTest(unittest.TestCase):
         self.assertGreater(by_path["beta.zip"]["packed_size"], 0)
 
         # 打出来的包能被解回去，且树摘要对得上
-        data = files["beta.zip"]
+        beta_cloud = by_path["beta.zip"].get("cloud") or "beta.zip"
+        data = files[beta_cloud]
         archive = Path(self.temp.name) / "beta.zip"
         archive.write_bytes(data)
         target = Path(self.temp.name) / "unpacked"
@@ -181,8 +190,8 @@ class PublisherTest(unittest.TestCase):
     def test_upload_failure_keeps_manifest(self):
         self.publish(version="1.0.0")
         before = self.cloud_manifest()
-        self.server.state.fail_uploads.add("readme.txt")
         write(self.root / "readme.txt", b"broken upload")
+        self.server.state.fail_uploads.add(self._cloud_name("readme.txt"))
         result, plan = self.publish(version="2.0.0")
         self.assertFalse(result.ok)
         self.assertEqual(result.failed[0][0], "readme.txt")
@@ -190,14 +199,17 @@ class PublisherTest(unittest.TestCase):
         self.assertEqual(after["version"], before["version"])
         self.assertEqual(after["generation"], before["generation"])
 
-    def test_rename_guard(self):
-        self.server.state.rename_uploads.add("readme.txt")
+    def test_renamed_upload_is_recorded_in_manifest(self):
+        """网盘把同名文件改名时，manifest 要记下实际文件名（cloud 字段）。"""
+        wanted = self._cloud_name("readme.txt")
+        self.server.state.rename_uploads.add(wanted)
         result, plan = self.publish(version="1.0.0")
-        self.assertFalse(result.ok)
-        self.assertTrue(any("改名" in message
-                            for _path, message in result.failed))
+        self.assertTrue(result.ok, result.failed)
+        manifest = self.cloud_manifest()
+        entry = next(e for e in manifest["files"] if e["path"] == "readme.txt")
+        self.assertTrue(entry.get("cloud", "").startswith("readme."))
         files = self.server.files_in(self.folder)
-        self.assertNotIn("readme(1).txt", files)
+        self.assertIn(entry["cloud"], files)
 
     def test_cancel(self):
         from online.errors import CancelledError

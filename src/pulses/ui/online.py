@@ -150,6 +150,7 @@ class OnlineMixin:
         """关掉整合包：停掉在线服务，别让后台线程还拿着旧路径。"""
         self.online = None
         self.online_states = {}
+        self._clear_check_timers()
         self.online_checking = set()
         self.online_pending = {}
         self.online_queue = []
@@ -221,6 +222,7 @@ class OnlineMixin:
             self._rebuild_settings_role_dependent()
         if changed:
             self.online_states = {}
+            self._clear_check_timers()
             self._online_recheck.clear()
             self.online_pending.clear()
             self._preset_size_cache.clear()
@@ -551,6 +553,35 @@ class OnlineMixin:
         self._preset_size_cache[name] = measured
         return measured
 
+    def _after_rename_preset(self, old: str, new: str) -> None:
+        """改名后把在线状态、绑定、缓存一起搬到新名字。"""
+        if not old or not new or old == new:
+            return
+        try:
+            if self.online is not None:
+                self.online.rename_preset(old, new)
+        except Exception:
+            pass
+        for store in (self.online_states, self.online_pending):
+            try:
+                if old in store:
+                    store[new] = store.pop(old)
+            except Exception:
+                pass
+        try:
+            if old in self._online_recheck:
+                self._online_recheck.discard(old)
+                self._online_recheck.add(new)
+        except Exception:
+            pass
+        try:
+            if old in self._preset_size_cache:
+                self._preset_size_cache[new] = self._preset_size_cache.pop(old)
+        except Exception:
+            pass
+        if getattr(self, "current_selected_preset", None) == old:
+            self.current_selected_preset = new
+
     def _check_summary(self, name: str) -> str:
         """检查完成后的简短结论（来源页里显示）。"""
         state = self._online_state(name)
@@ -749,6 +780,14 @@ class OnlineMixin:
         self.online_checking.add(name)
         if pending:
             self.online_pending[name] = pending
+        # 每次检查一个自增 run id：完成/超时只认自己那次，避免旧定时器
+        # 把后面的检查、挂起的同步/发布一起清掉。
+        run = int(getattr(self, "_check_seq", 0)) + 1
+        self._check_seq = run
+        runs = getattr(self, "_check_runs", None)
+        if runs is None:
+            runs = self._check_runs = {}
+        runs[name] = run
         state = self.online_states.setdefault(name, {})
         state["phase"] = "checking"
         state["phase_text"] = "连接云端…"
@@ -769,19 +808,22 @@ class OnlineMixin:
                     plan = service.publish_plan(ref, on_phase=on_phase)
                 else:
                     plan = service.check(ref, on_phase=on_phase)
-                ui_call(self.root, self._on_check_done, name, plan, None)
+                ui_call(self.root, self._on_check_done, name, plan, None, run)
             except OnlineError as exc:
-                ui_call(self.root, self._on_check_done, name, None, exc)
+                ui_call(self.root, self._on_check_done, name, None, exc, run)
             except Exception as exc:                    # noqa: BLE001
                 ui_call(self.root, self._on_check_done, name, None,
-                        OnlineError(f"检查失败：{exc}"))
+                        OnlineError(f"检查失败：{exc}"), run)
 
         threading.Thread(target=worker, daemon=True).start()
 
         # 网络卡住时线程可能长期不返回：兜一层超时，别让卡片永远停在「检查中」
         def _timeout():
+            if runs.get(name) != run:
+                return                       # 这是上一次检查的定时器，别误伤
             if name not in self.online_checking:
                 return
+            self._cancel_check_timer(name)
             self.online_checking.discard(name)
             # 超时就把这次挂起的动作一起取消：否则用户下次随便点一下检查，
             # 迟到的结果会顺手把「发布」也执行了
@@ -796,9 +838,31 @@ class OnlineMixin:
                 self._refresh_preset_cards()
 
         try:
-            self.root.after(90000, _timeout)
+            self._cancel_check_timer(name)
+            timers = getattr(self, "_check_timers", None)
+            if timers is None:
+                timers = self._check_timers = {}
+            timers[name] = self.root.after(90000, _timeout)
         except Exception:
             pass
+
+    def _clear_check_timers(self) -> None:
+        for name in list(getattr(self, "_check_timers", {}) or {}):
+            self._cancel_check_timer(name)
+        runs = getattr(self, "_check_runs", None)
+        if isinstance(runs, dict):
+            runs.clear()
+
+    def _cancel_check_timer(self, name: str) -> None:
+        timers = getattr(self, "_check_timers", None)
+        if not timers:
+            return
+        timer = timers.pop(name, None)
+        if timer:
+            try:
+                self.root.after_cancel(timer)
+            except Exception:
+                pass
 
     def _check_phase(self, name: str, text: str) -> None:
         """检查过程中的阶段提示（连接云端 / 读取云端 / 扫描本地）。"""
@@ -808,8 +872,25 @@ class OnlineMixin:
         state["phase_text"] = text
         self._refresh_preset_cards()
 
-    def _on_check_done(self, name, plan, error):
+    def _on_check_done(self, name, plan, error, run=None):
+        current = getattr(self, "_check_runs", {}).get(name)
+        if run is not None and current is not None and run != current:
+            # 过期的检查结果：界面/状态已经被新一次检查接管
+            return
+        self._cancel_check_timer(name)
+        runs = getattr(self, "_check_runs", None)
+        if runs is not None:
+            runs.pop(name, None)
         self.online_checking.discard(name)
+        # 关掉整合包 / 删掉预设之后，迟到的检查结果不要再写回界面状态
+        if (self.online is None or self.preset_manager is None
+                or name not in self.preset_manager.presets):
+            self.online_pending.pop(name, None)
+            try:
+                self._online_recheck.discard(name)
+            except Exception:
+                pass
+            return
         state = self.online_states.setdefault(name, {})
         state.pop("phase_text", None)
         state["checked_at"] = time.time()
@@ -983,9 +1064,10 @@ class OnlineMixin:
         if error is not None:
             show_error("读取失败", str(error))
             return
-        name = str(info.get("name") or "").strip()
-        if not name:
-            name = "云端预设"
+        name = safe_preset_name(info.get("name"), "云端预设")
+        if name != str(info.get("name") or "").strip():
+            self.log_manager.log(
+                f"云端预设名不合法，已改为「{name}」", 'WARNING')
         if name in (self.preset_manager.presets if self.preset_manager else {}):
             show_warning("预设已存在",
                          f"本地已经有「{name}」了。\n"
@@ -1143,7 +1225,10 @@ class OnlineMixin:
                 if not manager.rename_preset(name, new_name):
                     name_field.error("改名失败")
                     return
+                self._after_rename_preset(name, new_name)
                 target = new_name
+                if getattr(self, "current_selected_preset", None) == name:
+                    self.current_selected_preset = new_name
             if new_ver and new_ver != str(info.get("version") or ""):
                 try:
                     manager.update_preset_version(target, new_ver)
@@ -1462,6 +1547,29 @@ class OnlineMixin:
 
         test_btn = make_text_button(actions, "测试连接", command=test)
         test_btn.pack(side=LEFT)
+
+        if self.is_developer:
+            def clear_source():
+                if not ask_yes_no(
+                        "清除云端绑定",
+                        "会清掉这个预设的云端路径和分享链接（不影响本地/云端文件）。\n"
+                        "之后需要重新填写才能发布。"):
+                    return
+                try:
+                    self.online.clear_source(name)
+                except Exception as exc:
+                    show_error("清除失败", str(exc))
+                    return
+                path_var.set("")
+                url_var.set("")
+                pwd_var.set("")
+                self.online_states.pop(name, None)
+                self._update_preset_list()
+                status.configure(text="已清除云端绑定", text_color=C_SUCCESS)
+
+            make_text_button(actions, "清除云端绑定",
+                             command=clear_source).pack(side=LEFT,
+                                                        padx=(PAD_TIGHT, 0))
         save_btn = make_button(actions, "保存", command=save, accent=True,
                                 width=76)
         save_btn.pack(side=LEFT, padx=(PAD_TIGHT, 0))
@@ -1572,6 +1680,9 @@ class OnlineMixin:
     # ==================================================================
     # 同步
     # ==================================================================
+    def _set_online_busy(self, busy: bool) -> None:
+        self.online_busy = bool(busy)
+
     def _sync_now(self, name: str) -> None:
         """玩家点「更新」= 直接同步，不再弹「要更新哪些」的选择框。
 
@@ -1583,6 +1694,9 @@ class OnlineMixin:
         # 玩家第一次从云端拉取时，预设必然是空的、也没法「先应用再更新」；
         # 「先应用才能执行」只约束开发者的发布。同步本身写的是预设目录
         # （已应用时写 tacz），两种状态都安全。
+        if getattr(self, "is_applying", False):
+            self.toast("正在替换枪包，完成后再更新", "warning")
+            return
         state = self._online_state(name)
         plan = state.get("plan")
         if plan is None:
@@ -1605,6 +1719,9 @@ class OnlineMixin:
     def open_sync_dialog(self, name: str):
         if self.online is None:
             show_warning("在线功能不可用", "在线模块没有加载成功。")
+            return
+        if getattr(self, "is_applying", False):
+            self.toast("正在替换枪包，完成后再更新", "warning")
             return
         state = self._online_state(name)
         plan = state.get("plan")
@@ -1682,6 +1799,8 @@ class OnlineMixin:
                         f"[{index}/{total}] {entry.get('path')}")
 
         service = self.online
+        self._set_online_busy(True)
+        self.set_busy_state(True, "同步")
 
         def worker():
             try:
@@ -1701,6 +1820,8 @@ class OnlineMixin:
         threading.Thread(target=worker, daemon=True).start()
 
     def _on_sync_done(self, card, name, result, error):
+        self._set_online_busy(False)
+        self.set_busy_state(False, "")
         self._last_sync_result = result
         if card is not None:
             try:
@@ -1731,17 +1852,19 @@ class OnlineMixin:
         """同步/发布之后：重读预设、刷新卡片与详情。"""
         self._preset_size_cache.pop(name, None)
         try:
-            info = ((self.preset_manager.presets.get(name) or {})
-                    if self.preset_manager else {})
-            # 已应用的预设，内容真相在 tacz：发布/同步成功后把索引按 tacz
-            # 重算，否则卡片还显示旧的枪包数，启动时还会误报「多余/变更」。
-            if info.get("applied"):
-                self.preset_manager.update_preset_index(name, from_tacz=True)
+            if self.preset_manager:
+                # 先重读 index.json：同步成功时 service._finish 已经把云端版本
+                # 写进去了；先 reindex 会拿内存里的旧版本把它覆盖回去。
+                self.preset_manager.reload_preset(name)
         except Exception:
             pass
         try:
-            if self.preset_manager:
-                self.preset_manager.reload_preset(name)
+            info = ((self.preset_manager.presets.get(name) or {})
+                    if self.preset_manager else {})
+            # 已应用的预设，内容真相在 tacz：按 tacz 重算枪包指纹，
+            # 否则卡片还显示旧的枪包数，启动时还会误报「多余/变更」。
+            if info.get("applied"):
+                self.preset_manager.update_preset_index(name, from_tacz=True)
         except Exception:
             pass
         self.online_states.pop(name, None)
@@ -1796,6 +1919,9 @@ class OnlineMixin:
         """
         if self.online is None:
             return
+        if getattr(self, "is_applying", False) or getattr(self, "online_busy", False):
+            self.toast("正在处理，完成后再发布", "warning")
+            return
         if not self._online_guard_applied(name, "发布"):
             return
         state = self._online_state(name)
@@ -1811,7 +1937,12 @@ class OnlineMixin:
         if not plan.has_changes or not selection:
             self.toast("云端已是最新", "success")
             return
-        self._run_publish(name, plan, selection, self._preset_version_of(name), "")
+        # 一键发布沿用上次的更新说明/最低版本，不静默清空
+        source = (self.online.source_of(name) if self.online else {}) or {}
+        self._run_publish(name, plan, selection,
+                          self._preset_version_of(name),
+                          str(source.get("last_notes") or ""),
+                          str(source.get("last_min_app") or ""))
 
     def open_publish_dialog(self, name: str):
         if self.online is None:
@@ -1819,6 +1950,8 @@ class OnlineMixin:
             return
         if not self.is_developer:
             self.open_identity_dialog()
+            return
+        if not self._online_guard_applied(name, "发布"):
             return
         if not self.online.has_account():
             self.open_identity_dialog()
@@ -1843,9 +1976,10 @@ class OnlineMixin:
 
         form = ctk.CTkFrame(card.body, fg_color="transparent")
         form.pack(fill=X, pady=(PAD_TIGHT, PAD_TIGHT))
+        source = (self.online.source_of(name) if self.online else {}) or {}
         version_var = StringVar(value=self._preset_version_of(name))
-        notes_var = StringVar(value="")
-        min_app_var = StringVar(value="")
+        notes_var = StringVar(value=str(source.get("last_notes") or ""))
+        min_app_var = StringVar(value=str(source.get("last_min_app") or ""))
 
         row = ctk.CTkFrame(form, fg_color="transparent")
         row.pack(fill=X)
@@ -1901,6 +2035,9 @@ class OnlineMixin:
 
     def _run_publish(self, name, plan, selection, version, notes,
                      min_app: str = ""):
+        # 最底层再守一道：任何入口（卡片/右键/预览）都不能绕过「先应用」
+        if not self._online_guard_applied(name, "发布"):
+            return
         ref = self._preset_ref(name)
         if ref is None:
             return
@@ -1928,6 +2065,8 @@ class OnlineMixin:
                     str(entry_name))
 
         service = self.online
+        self._set_online_busy(True)
+        self.set_busy_state(True, "发布")
 
         def worker():
             try:
@@ -1949,6 +2088,8 @@ class OnlineMixin:
         threading.Thread(target=worker, daemon=True).start()
 
     def _on_publish_done(self, card, name, result, error):
+        self._set_online_busy(False)
+        self.set_busy_state(False, "")
         self._last_publish_result = result
         if card is not None:
             try:
