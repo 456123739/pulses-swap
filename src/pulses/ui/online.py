@@ -701,6 +701,16 @@ class OnlineMixin:
                             or C_TEXT_MUTED)
         except Exception:
             pass
+        # 「填写链接」只在真没来源时出现；发布过/绑定过的预设显示「查看来源」
+        btn = getattr(self, "source_btn", None)
+        if btn is not None:
+            try:
+                bound = bool(self.online is not None and (
+                    self.online.is_bound(name)
+                    or (self.is_developer and self.online.cloud_path_of(name))))
+                btn.configure(text="查看来源" if bound else "填写链接")
+            except Exception:
+                pass
         self._update_sync_button(name, data)
 
     def _update_sync_button(self, name, data=None) -> None:
@@ -743,6 +753,11 @@ class OnlineMixin:
         cards.set_items(items)
         if self.current_selected_preset:
             cards.select(self.current_selected_preset, notify=False)
+            # 卡片状态变了，右上角详情条也要跟着变（检查/发布完成后最容易漏）
+            try:
+                self._update_preset_online_label(self.current_selected_preset)
+            except Exception:
+                pass
 
     # ==================================================================
     # 检查更新
