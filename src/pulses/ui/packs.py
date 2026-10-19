@@ -832,4 +832,8 @@ class PacksMixin:
         v = self.version_entry.get().strip() or "v1.0.0"
         if self.preset_manager.update_preset_version(self.current_selected_preset, v):
             self.preset_version_label.configure(text=v)
+            self.version_entry.delete(0, END)
+            self.version_entry.insert(0, v)
+            # 左侧卡片的版本也要立刻变
+            self._update_preset_list()
             self.log_manager.log(f"版本号已更新为: {v}", 'SUCCESS')

@@ -311,6 +311,20 @@ class ShareRecordTest(unittest.TestCase):
         finally:
             temp.cleanup()
 
+    def test_rebind_drops_old_cloud_cache(self):
+        temp = tempfile.TemporaryDirectory()
+        try:
+            db = Path(temp.name) / "db"
+            service = OnlineService(db)
+            service.bind("预设", "https://a.lanzoul.com/b1", "pw")
+            cache = paths.cloud_manifest_path(db, "预设")
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            cache.write_bytes(b"old-source-manifest")
+            service.bind("预设", "https://b.lanzoul.com/b2", "pw")
+            self.assertFalse(cache.exists())
+        finally:
+            temp.cleanup()
+
     def test_clear_source_removes_binding(self):
         temp = tempfile.TemporaryDirectory()
         try:

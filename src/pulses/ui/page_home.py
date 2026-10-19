@@ -506,6 +506,7 @@ class HomePageMixin:
             if dev:
                 self.apply_btn.place_forget()
                 self.publish_btn.place(relx=0.0, rely=0.0, relwidth=1.0)
+                self.sync_btn.pack_forget()
                 self.apply_alt_btn.pack(side=LEFT, fill=X, expand=True,
                                         padx=(PAD_TIGHT, 0))
                 self.aux_row.grid()

@@ -588,15 +588,19 @@ class OnlineMixin:
         plan = state.get("plan")
         if plan is None or online_diff is None:
             return ""
+        offline = bool(getattr(plan, "offline", False))
+        suffix = "（离线）" if offline else ""
         try:
             if self.is_developer:
                 pending = (plan.count_of(online_diff.UPLOAD)
                            + plan.count_of(online_diff.DELETE_CLOUD))
                 return ("云端已是最新" if not pending
-                        else f"有 {pending} 项待发布")
+                        else f"有 {pending} 项待发布{suffix}")
             updates = (plan.count_of(online_diff.DOWNLOAD)
                        + plan.count_of(online_diff.REPAIR))
-            return "已是最新" if not updates else f"有 {updates} 个更新"
+            if not updates:
+                return "已是最新" + suffix
+            return f"有 {updates} 个更新{suffix}"
         except Exception:
             return ""
 
@@ -653,6 +657,12 @@ class OnlineMixin:
                         dot_color=DOT_ERROR, action="", action_kind="")
             return data
 
+        if getattr(plan, "offline", False):
+            # 云端这次没连上，计划来自缓存：只允许「重试」，不允许发布/同步
+            data.update(status="无法连接（用缓存）", status_color=C_ERROR,
+                        dot_color=DOT_ERROR, action="重试", action_kind="check")
+            return data
+
         suffix = "（离线）" if getattr(plan, "offline", False) else ""
         if self.is_developer:
             pending = (plan.count_of(online_diff.UPLOAD)
@@ -695,15 +705,27 @@ class OnlineMixin:
             return
         data = {}
         try:
+            state = self._online_state(name)
+            phase = str(state.get("phase") or "")
             data = self._preset_card_data(name)
             text = str(data.get("status") or "未绑定")
-            # 这一行的左边已经写了「云端」，状态里的「云端已是最新」去掉前缀，
-            # 否则会读成「云端 云端已是最新」
-            if text.startswith("云端"):
-                text = text[2:].lstrip(" ·")
-            label.configure(text=_short(text, 26),
-                            text_color=data.get("status_color")
-                            or C_TEXT_MUTED)
+            color = data.get("status_color") or C_TEXT_MUTED
+            # 详情条只放一句人话：连不上就是「无法连接」，具体原因在卡片/来源页。
+            plan = state.get("plan")
+            if phase == "error" or text.startswith("连接失败"):
+                text, color = "无法连接", C_ERROR
+            elif plan is not None and getattr(plan, "offline", False):
+                # 有缓存所以还能列差异，但云端这次确实没连上
+                text, color = "无法连接 · 用缓存", C_WARNING
+            elif phase == "checking":
+                text, color = str(state.get("phase_text") or "连接中…"), C_ACCENT
+            else:
+                # 左边已经写了「云端」，去掉状态里的「云端」前缀
+                if text == "未绑定云端源":
+                    text = "未绑定"
+                elif text.startswith("云端"):
+                    text = text[2:].lstrip(" ·")
+            label.configure(text=_short(text, 26), text_color=color)
         except Exception:
             pass
         # 「填写链接」只在真没来源时出现；发布过/绑定过的预设显示「查看来源」
@@ -726,6 +748,18 @@ class OnlineMixin:
             if data is None:
                 data = self._preset_card_data(name)
             plan = (self._online_state(name) or {}).get("plan")
+            if self.is_developer:
+                # 开发者没有「同步」这个动作；辅助行里的「一键替换」由
+                # _apply_role_actions 负责，这里不能动 aux_row
+                button.pack_forget()
+                return
+            if plan is not None and getattr(plan, "offline", False):
+                button.pack_forget()
+                alt = getattr(self, "apply_alt_btn", None)
+                aux = getattr(self, "aux_row", None)
+                if aux is not None and (alt is None or not alt.winfo_ismapped()):
+                    aux.grid_remove()
+                return
             pending = 0
             if plan is not None:
                 for item in plan.items:
@@ -1726,6 +1760,9 @@ class OnlineMixin:
         if getattr(plan, "blocked", None):
             show_warning("无法更新", plan.blocked[0])
             return
+        if getattr(plan, "offline", False):
+            self.toast("云端连不上，无法更新；先检查网络", "warning")
+            return
         if not plan.has_changes:
             self.toast("已经是最新版本", "success")
             return
@@ -1953,6 +1990,11 @@ class OnlineMixin:
         if getattr(plan, "blocked", None):
             show_warning("无法发布", plan.blocked[0])
             return
+        if getattr(plan, "offline", False):
+            show_warning("云端连不上",
+                         "这次计划来自上次的缓存，可能已经过时。\n"
+                         "先检查网络，重新检查云端后再发布。")
+            return
         selection = online_diff.selection_of(plan, include_deletes=True)
         if not plan.has_changes or not selection:
             self.toast("云端已是最新", "success")
@@ -1986,6 +2028,11 @@ class OnlineMixin:
         if plan is None:
             self._online_check(name, pending="publish")
             self.toast("正在扫描差异…", "info")
+            return
+        if getattr(plan, "offline", False):
+            show_warning("云端连不上",
+                         "这次计划来自上次的缓存，可能已经过时。\n"
+                         "先检查网络，重新检查云端后再发布。")
             return
 
         card = make_card(self, None, width=680)
@@ -2057,6 +2104,9 @@ class OnlineMixin:
                      min_app: str = ""):
         # 最底层再守一道：任何入口（卡片/右键/预览）都不能绕过「先应用」
         if not self._online_guard_applied(name, "发布"):
+            return
+        if getattr(plan, "offline", False):
+            show_warning("云端连不上", "计划来自缓存，不能发布；请先重新检查云端。")
             return
         ref = self._preset_ref(name)
         if ref is None:

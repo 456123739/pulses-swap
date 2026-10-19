@@ -295,6 +295,7 @@ class OnlineService:
              *, cloud_path: str = "", auto_check: bool = True,
              fallback_url: str = "", fallback_password: str = "") -> dict:
         data = self.sources.get(preset)
+        old_url = str((data.get("lanzou") or {}).get("url") or "")
         data.setdefault("lanzou", {})
         data["lanzou"]["url"] = str(url or "").strip()
         data["lanzou"]["password"] = str(password or "")
@@ -309,8 +310,18 @@ class OnlineService:
             data["cloud_path"] = str(cloud_path).strip()
         data["auto_check"] = bool(auto_check)
         self.sources.put(preset, data)
+        # 换了源，旧源留下的云端 manifest 缓存就作废了 —— 拿旧缓存展示
+        # “无法连接 · 用缓存”会让人以为新链接能用
+        if old_url != data["lanzou"]["url"]:
+            self._drop_cloud_cache(preset)
         self._log(f"预设「{preset}」已绑定源", "SUCCESS")
         return data
+
+    def _drop_cloud_cache(self, preset: str) -> None:
+        try:
+            os.unlink(paths.cloud_manifest_path(self.db_path, preset))
+        except OSError:
+            pass
 
     def unbind(self, preset: str) -> None:
         self.sources.remove(preset)
@@ -964,12 +975,16 @@ class OnlineService:
             record.pop(key, None)
         record.pop("lanzou", None)
         self.sources.put(preset, record)
+        self._drop_cloud_cache(preset)
 
     def set_cloud_path(self, preset: str, cloud_path: str) -> None:
         record = self.sources.get(preset)
+        old_path = str(record.get("cloud_path") or "").strip()
         record["cloud_path"] = str(cloud_path or "").strip()
         record.pop("folder_id", None)
         self.sources.put(preset, record)
+        if old_path != record["cloud_path"]:
+            self._drop_cloud_cache(preset)
 
     def _remember_share(self, preset: str, share_url: str,
                         share_password: str = "") -> None:
@@ -1011,6 +1026,7 @@ class OnlineService:
         传重复文件，只是多做几次删除。
         """
         cached = self.load_cloud_manifest(preset)
+        self._cloud_offline = False
 
         # 先看文件夹里到底有没有东西：新建的空文件夹根本不需要去抓分享页，
         # 抓了会走一遍「解析分享页 + 轮询直链」的重试链，表现就是一直"检查中"。
@@ -1023,6 +1039,7 @@ class OnlineService:
             self._log(f"列云端文件失败：{exc}", "WARNING")
             if cached is not None:
                 self._log("改用上次缓存的云端 manifest 进行比对", "WARNING")
+                self._cloud_offline = True
                 return cached
             raise SourceError(f"无法读取云端文件夹：{exc}",
                               hint="检查网络，或确认云端路径还在。") from exc
@@ -1057,6 +1074,7 @@ class OnlineService:
 
         if cached is not None:
             self._log("使用上次缓存的云端 manifest 进行比对", "WARNING")
+            self._cloud_offline = True
             return cached
         return manifest_mod.empty_manifest(preset)
 
@@ -1096,6 +1114,8 @@ class OnlineService:
         plan = diff.compare(local, cloud, role="developer",
                             app_version=self.app_version)
         plan.cloud_name = plan.cloud_name or ref.name
+        # 云端这次没读到时，计划是基于缓存的：可以展示，但不能拿来发布
+        plan.offline = bool(getattr(self, "_cloud_offline", False))
         return plan
 
     def publish(self, ref: PresetRef, plan: diff.Plan, selection,
