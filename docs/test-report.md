@@ -139,7 +139,9 @@
 
 ## 7. 修改文件
 
-- `src/online/service.py`：分享链接持久化、并发读取上限（2.5.5 起）
+- `src/online/publisher.py`：发布改为「先传后删」、manifest 原子切换/失败恢复、唯一云端名与 `cloud` 字段、按 id 清理旧文件
+- `src/online/downloader.py` / `manifest.py`：按 `cloud` 下载、`path` 落盘；manifest 校验 `cloud` 字段
+- `src/online/service.py`：分享链接持久化、发布后本地版本、改名校验/清理、部分同步不推进版本
 - `src/pulses/ui/online.py`：首次同步、线程取值、阶段提示、发布/同步后重算索引
 - `src/pulses/ui/packs.py`：发布按钮启停
 - `src/pulses/ui/transfer.py`：替换后重算索引/复查、失败后刷新、只读保护
