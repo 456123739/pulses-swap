@@ -492,11 +492,16 @@ class HomePageMixin:
             self._publish_now(name)
 
     def _apply_role_actions(self):
-        """身份决定主操作：玩家「一键替换」，开发者「发布到云端」。"""
+        """身份决定主操作：玩家「一键替换」，开发者「发布到云端」。
+
+        没加载整合包时主操作区应当整体收起，而不是留一颗灰按钮。
+        """
         dev = bool(getattr(self, "is_developer", False))
+        loaded = bool(getattr(self, "preset_manager", None)
+                      or getattr(self, "current_pack_path", None))
         try:
             try:
-                if dev:
+                if dev and loaded:
                     self.tacz_head_btn.pack(side=RIGHT, padx=(0, PAD_TIGHT),
                                             before=self.detail_btn)
                 else:
@@ -505,16 +510,24 @@ class HomePageMixin:
                 pass
             if dev:
                 self.apply_btn.place_forget()
-                self.publish_btn.place(relx=0.0, rely=0.0, relwidth=1.0)
                 self.sync_btn.pack_forget()
-                self.apply_alt_btn.pack(side=LEFT, fill=X, expand=True,
-                                        padx=(PAD_TIGHT, 0))
-                self.aux_row.grid()
+                if loaded:
+                    self.publish_btn.place(relx=0.0, rely=0.0, relwidth=1.0)
+                    self.apply_alt_btn.pack(side=LEFT, fill=X, expand=True,
+                                            padx=(PAD_TIGHT, 0))
+                    self.aux_row.grid()
+                else:
+                    self.publish_btn.place_forget()
+                    self.apply_alt_btn.pack_forget()
+                    self.aux_row.grid_remove()
             else:
                 self.publish_btn.place_forget()
-                self.apply_btn.place(relx=0.0, rely=0.0, relwidth=1.0)
                 self.apply_alt_btn.pack_forget()
-                if not self.sync_btn.winfo_ismapped():
+                if loaded:
+                    self.apply_btn.place(relx=0.0, rely=0.0, relwidth=1.0)
+                else:
+                    self.apply_btn.place_forget()
+                if not loaded or not self.sync_btn.winfo_ismapped():
                     self.aux_row.grid_remove()
         except Exception:
             pass

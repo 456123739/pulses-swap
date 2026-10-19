@@ -306,6 +306,7 @@ class PacksMixin:
         self.gunpack_count_label.configure(text="共 0 个枪包")
         self.version_entry.delete(0, END)
         try:
+            self.source_btn.configure(text="填写链接")
             self.sync_btn.pack_forget()
             self.aux_row.grid_remove()
             self.apply_btn.configure(text="一键替换")
@@ -317,6 +318,10 @@ class PacksMixin:
         # 下一个（用户反馈「选择是灰的」）。
         self._disable_buttons(False)
         self._set_pack_dependent_buttons(False)
+        try:
+            self._apply_role_actions()
+        except Exception:
+            pass
         self.log_manager.log("已关闭整合包", 'INFO', verbose=True)
         self._update_sidebar_status()
         self._update_guide()
@@ -426,6 +431,10 @@ class PacksMixin:
         self._stop_loading_dots()
         self._disable_buttons(False)
         self._set_pack_dependent_buttons(True)
+        try:
+            self._apply_role_actions()
+        except Exception:
+            pass
         try:
             self._update_preset_list()
             self.log_manager.log("预设列表刷新完成", 'INFO', verbose=True)
@@ -781,6 +790,12 @@ class PacksMixin:
                     self.preset_status_label.configure(text="未应用")
                     self.preset_online_label.configure(text="未绑定",
                                                        text_color=C_TEXT_MUTED)
+                    try:
+                        self.source_btn.configure(text="填写链接")
+                        self.sync_btn.pack_forget()
+                        self.aux_row.grid_remove()
+                    except Exception:
+                        pass
                     self.version_entry.delete(0, END)
                     self.apply_btn.configure(state="disabled", text="一键替换")
                     self.gunpack_listbox.delete(0, END)
