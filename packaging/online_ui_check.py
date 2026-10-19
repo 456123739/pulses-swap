@@ -211,6 +211,10 @@ def main() -> int:
 
     print("\n[8] 发布框（开发者 + 假计划）")
     app.settings.role = "developer"
+    app._apply_role_actions()
+    app._set_pack_dependent_buttons(True)
+    check(str(app.publish_btn.cget("state")) == "normal",
+          "开发者「发布到云端」按钮可用（不是禁用状态）")
     app.online.set_cloud_path(name, "/PulsesSwap/测试")
     app.online_states[name] = {"phase": "ready", "error": "", "checked_at": time.time(),
                                "plan": _fake_plan(role="developer")}

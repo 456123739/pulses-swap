@@ -720,6 +720,12 @@ class OnlineMixin:
                       prompt: bool = True) -> None:
         if self.online is None:
             return
+        if getattr(self, "is_applying", False):
+            # 正在替换枪包时扫描，结果一定是半截的（文件正被搬来搬去）。
+            # 应用结束会自己补一次检查。
+            self.log_manager.log(f"替换进行中，跳过对「{name}」的检查", 'INFO',
+                                 verbose=True)
+            return
         if name in self.online_checking:
             # 正在检查时又要求检查：记一笔，等这次结束再补一次，
             # 否则刚同步完的卡片会一直停在旧状态上。
@@ -948,12 +954,14 @@ class OnlineMixin:
             pwd_field.set_enabled(False)
             status.configure(text="正在读取云端 manifest…", text_color=C_ACCENT)
             service = self.online
+            # 主线程里先把输入读出来：Tk 变量不能在工作线程里 get()
+            password = pwd_var.get()
 
             def worker():
                 try:
-                    info = service.inspect_share(url, pwd_var.get())
+                    info = service.inspect_share(url, password)
                     ui_call(self.root, self._on_inspect_share, card, info,
-                            url, pwd_var.get(), None)
+                            url, password, None)
                 except OnlineError as exc:
                     ui_call(self.root, fail, str(exc))
 
@@ -1143,6 +1151,12 @@ class OnlineMixin:
                     pass
             try:
                 self._update_preset_list()
+            except Exception:
+                pass
+            # 详情条的版本/名称也要跟着变，否则改完还是显示旧版本
+            try:
+                if target == getattr(self, "current_selected_preset", None):
+                    self.on_preset_selected(target)
             except Exception:
                 pass
             try:
@@ -1430,12 +1444,15 @@ class OnlineMixin:
                 status.configure(text=text, text_color=color)
                 self.log_manager.log(text, 'INFO')
 
+            # 同上：Tk 变量只在主线程读一次
+            test_password = pwd_var.get()
+
             def worker():
                 try:
                     if cloud_only:
                         info = self.online.test_cloud_path(path)
                     else:
-                        info = self.online.test_source(url, pwd_var.get())
+                        info = self.online.test_source(url, test_password)
                     ui_call(self.root, done, info, None)
                 except OnlineError as exc:
                     ui_call(self.root, done, None, exc)
@@ -1563,8 +1580,9 @@ class OnlineMixin:
         """
         if self.online is None:
             return
-        if not self._online_guard_applied(name, "更新"):
-            return
+        # 玩家第一次从云端拉取时，预设必然是空的、也没法「先应用再更新」；
+        # 「先应用才能执行」只约束开发者的发布。同步本身写的是预设目录
+        # （已应用时写 tacz），两种状态都安全。
         state = self._online_state(name)
         plan = state.get("plan")
         if plan is None:

@@ -141,6 +141,13 @@ class DatabaseMixin:
                 pass
         except Exception:
             pass
+        # 设置页是在绑定数据库之前建的，那时 role 还是默认的 player；
+        # 以开发者身份重启时，「数据库管理」那一块会整块缺失。
+        # 绑定数据库后按真实身份重建一次。
+        try:
+            self._rebuild_settings_role_dependent()
+        except Exception:
+            pass
         self.recent_manager = RecentPacksManager(db_path / ".global.json")
         self.db_ready = True
         self.update_recent_list()
@@ -172,6 +179,15 @@ class DatabaseMixin:
         if self.is_applying:
             show_warning("操作进行中", "请等待当前操作完成")
             return
+        if self.settings.storage_mode != "merged":
+            # 独立模式下每个整合包都用自己的 PulsesSwap_database：
+            # 切了位置，重新打开整合包又会切回去，等于白切。
+            show_warning(
+                "当前是独立数据库模式",
+                "每个整合包都用自己的 PulsesSwap_database。\n\n"
+                "要固定使用一个数据库，请先在设置里把存储方式改成"
+                "「合并数据库」，再切换位置。")
+            return
         folder = filedialog.askdirectory(title="选择新的数据库文件夹",
                                           initialdir=str(PROGRAM_DIR))
         if not folder:
@@ -197,6 +213,18 @@ class DatabaseMixin:
                 return
         DatabaseLocator.save_db_path(path)
         self.settings.bind_database(path)
+        # 新库自带的 .settings.json 默认是 isolated：绑定后会把刚才选的
+        # 「合并模式」冲掉，重新打开整合包又回到各自的库。这里按用户的
+        # 选择把模式写回新库。
+        if self.settings.storage_mode != "merged":
+            self.settings.storage_mode = "merged"
+            try:
+                self.settings.save()
+            except Exception:
+                pass
+        # 当前会话也要立刻用新库，否则界面还指着旧路径
+        self.db_path = path
+        self.db_ready = True
         if self.recent_manager:
             self.recent_manager = RecentPacksManager(path / ".global.json")
         self.log_manager.log(f"数据库已切换: {path}", 'SUCCESS')

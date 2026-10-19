@@ -911,6 +911,23 @@ class OnlineService:
         record.pop("folder_id", None)
         self.sources.put(preset, record)
 
+    def _remember_share(self, preset: str, share_url: str,
+                        share_password: str = "") -> None:
+        """把发布后拿到的分享链接同时记进 lanzou.url —— 来源页要显示它。
+
+        只写 top-level 的 share_url 的话，发布完成卡片一关，开发者就再也
+        找不到分享链接了（来源页读的是 lanzou.url）。
+        """
+        if not share_url:
+            return
+        record = self.sources.get(preset)
+        record["share_url"] = str(share_url)
+        record["share_password"] = str(share_password or "")
+        lanzou = record.setdefault("lanzou", {})
+        lanzou["url"] = str(share_url)
+        lanzou["password"] = str(share_password or "")
+        self.sources.put(preset, record)
+
     def _folder_of(self, preset: str, account: LanzouAccount) -> int:
         record = self.sources.get(preset)
         cloud_path = str(record.get("cloud_path") or "").strip()
@@ -961,9 +978,7 @@ class OnlineService:
             share_url = share.get("url") or share_url
             share_password = share.get("password") or share_password
             if share_url:
-                record["share_url"] = share_url
-                record["share_password"] = share_password
-                self.sources.put(preset, record)
+                self._remember_share(preset, share_url, share_password)
         except OnlineError as exc:
             self._log(f"取分享链接失败：{exc}", "WARNING")
 
@@ -1055,6 +1070,9 @@ class OnlineService:
         if result.share_url:
             record["share_url"] = result.share_url
             record["share_password"] = result.share_password
+            lanzou = record.setdefault("lanzou", {})
+            lanzou["url"] = result.share_url
+            lanzou["password"] = result.share_password
         history = list(record.get("history") or [])
         history.insert(0, {"version": result.version,
                            "generation": result.generation,

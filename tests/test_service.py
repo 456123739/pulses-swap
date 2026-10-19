@@ -280,6 +280,22 @@ class ServiceTest(unittest.TestCase):
         self.assertIsInstance(notes, list)
 
 
+class ShareRecordTest(unittest.TestCase):
+    def test_remember_share_fills_source_page_fields(self):
+        temp = tempfile.TemporaryDirectory()
+        try:
+            service = OnlineService(Path(temp.name) / "db")
+            service._remember_share("测试预设", "https://x.lanzoul.com/b123",
+                                    "abcd")
+            source = service.source_of("测试预设")
+            self.assertEqual(source["share_url"], "https://x.lanzoul.com/b123")
+            self.assertEqual(source["lanzou"]["url"],
+                             "https://x.lanzoul.com/b123")
+            self.assertEqual(source["lanzou"]["password"], "abcd")
+        finally:
+            temp.cleanup()
+
+
 class CloudProbeTest(unittest.TestCase):
     """云端读取不能把界面吊死：超时要收手，列目录失败不绕远路。"""
 

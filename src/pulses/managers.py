@@ -813,6 +813,15 @@ class PresetManager:
         protected_all = self.PROTECTED_FILES + self.PROTECTED_DIRS
         try:
             self.log.log(f"开始切换预设: {current_applied or 'None'} -> {preset_name}", 'PROCESS')
+            # 预检：tacz 必须可写。只读目录下如果直接搬，会出现「删不掉旧文件、
+            # 新枪包却移进去、最后还标记成已应用」的半成品状态。
+            probe = self.tacz_path / ".pulses_write_probe"
+            try:
+                probe.write_bytes(b"x")
+                probe.unlink()
+            except OSError as exc:
+                self.log.log(f"tacz 目录不可写，无法替换：{exc}", 'ERROR')
+                return False
             if current_applied and current_applied in self.presets:
                 cur_info = self.presets[current_applied]
                 cur_path = Path(cur_info['path'])
@@ -822,9 +831,17 @@ class PresetManager:
                 self.log.log(f"已回收 {moved} 个枪包到 '{current_applied}'", 'INFO',
                           verbose=True)
             self._clear_dir(self.tacz_path, protected_all)
-            moved = self._move_items(target_path, self.tacz_path,
-                                     ['description.txt', 'index.json', 'version.txt'],
+            leftovers = [p.name for p in Path(self.tacz_path).iterdir()
+                         if p.name not in protected_all]
+            if leftovers:
+                raise OSError(f"tacz 没有被清空（{len(leftovers)} 项删不掉）：{leftovers[:3]}")
+            metadata = ('description.txt', 'index.json', 'version.txt')
+            moved = self._move_items(target_path, self.tacz_path, list(metadata),
                                      progress_callback)
+            remaining = [p.name for p in target_path.iterdir()
+                         if p.name not in metadata]
+            if remaining:
+                raise OSError(f"{len(remaining)} 个枪包没能移入 tacz：{remaining[:3]}")
             target_preset['applied'] = True
             self._update_preset_status(target_path, True)
             self.current_preset = preset_name
@@ -833,6 +850,18 @@ class PresetManager:
             return True
         except Exception as e:
             self.log.log(f"应用预设失败: {e}", 'ERROR')
+            # 保守收尾：半成品不算任何预设「已应用」，让用户能重试
+            try:
+                target_preset['applied'] = False
+                self._update_preset_status(target_path, False)
+                if current_applied and current_applied in self.presets:
+                    cur_info = self.presets[current_applied]
+                    cur_info['applied'] = False
+                    self._update_preset_status(Path(cur_info['path']), False)
+                self.current_preset = None
+                self.save_cache()
+            except Exception:
+                pass
             return False
 
     def _update_preset_status(self, preset_path: Path, applied: bool):

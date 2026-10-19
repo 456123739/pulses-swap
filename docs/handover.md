@@ -1,4 +1,4 @@
-# Pulses Swap 交接文档（v2.5.5）
+# Pulses Swap 交接文档（v2.5.6）
 
 > 给接手的人 / AI 看的：这个软件被拆成了哪些文件、每个文件干什么、
 > 数据怎么流动、改哪里、怎么跑测试、怎么打包。
@@ -12,7 +12,7 @@
 一键把某组枪包换进游戏的 `tacz` 目录；同时把预设发布到**蓝奏云**，
 玩家绑定分享链接后可以增量同步。
 
-- 版本：`2.5.5`（`src/pulses/core/paths.py` 里的 `VERSION`）
+- 版本：`2.5.6`（`src/pulses/core/paths.py` 里的 `VERSION`）
 - 入口：`src/main.py` → `pulses.ui.app.main()`
 - 依赖：`customtkinter` `tkinterdnd2` `watchdog` `Pillow`（见 `requirements.txt`）
 - 不依赖任何第三方网络库（HTTP 全用标准库 `urllib`）
@@ -446,3 +446,20 @@ export DISPLAY=:99          # weston headless + Xwayland
     直接退回缓存（没缓存就明确报错，**不能假装云端为空** —— 否则界面会显示
     「有 N 项待发布」，用户一发布就是整包重传）；界面侧 `_online_check` 有 90s
     看门狗，并把阶段（连接云端 / 读取云端 / 扫描本地）打到卡片和来源页上。
+16. **玩家第一次从云端拉取时，不能要求「先应用再更新」**。那条规则是给开发者发布用的；
+    玩家新建的预设是空的，根本没法先应用。真实联调时这里直接把首次同步拦死，
+    现在 `_sync_now` 不再检查 applied（同步写预设目录；已应用时写 tacz，两种都安全）。
+17. **Tk 变量只能在主线程读**。`open_add_from_cloud` / 来源页「测试连接」的 worker
+    里曾经直接 `pwd_var.get()`，抛 `RuntimeError: main thread is not in main loop`，
+    线程静默死掉，对话框永远停在「正在读取…」。改成主线程先读值、再把普通字符串
+    传进线程。
+18. **按钮的 disabled 状态要有人负责**。`publish_btn` 创建时是 disabled，只有
+    `set_busy_state(False)` 会顺手放开 —— 开发者重启后点「发布到云端」毫无反应。
+    现在它和 `apply_btn` 一起归 `_set_pack_dependent_buttons` / `_disable_buttons` 管。
+19. **应用预设要能失败**。只读的 tacz 下，旧代码会「旧文件删不掉、新枪包移进去、
+    还标记成已应用」。现在先写探针文件检查可写，清空后校验没有残留、移动后校验
+    源目录已空；任何一步失败都把 applied 标记回滚并报错。
+20. **独立数据库模式下「切换数据库」没有意义**：每个整合包都用自己的
+    `PulsesSwap_database`，切了位置、重新打开整合包又会切回去。现在独立模式会
+    明确拒绝并提示先改成「合并数据库」；合并模式切换后会更新 `db_path`，
+    并把 `storage_mode` 写回新库（新库默认是 isolated，不写回会被冲掉）。

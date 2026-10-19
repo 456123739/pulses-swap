@@ -194,6 +194,7 @@ class PacksMixin:
             self.apply_btn.configure(state=state)
             self.select_pack_btn.configure(state=state)
             self.add_cloud_btn.configure(state=state)
+            self.publish_btn.configure(state=state)
         except Exception:
             pass
 
@@ -204,8 +205,8 @@ class PacksMixin:
         否则关掉一个包就再也选不了下一个。
         """
         state = "normal" if enabled else "disabled"
-        for name in ("apply_btn", "create_preset_btn", "add_cloud_btn",
-                     "save_version_btn"):
+        for name in ("apply_btn", "publish_btn", "create_preset_btn",
+                     "add_cloud_btn", "save_version_btn"):
             btn = getattr(self, name, None)
             if btn is not None:
                 try:

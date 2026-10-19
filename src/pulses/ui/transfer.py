@@ -340,12 +340,32 @@ class TransferMixin:
         self.hide_progress()
         self.set_busy_state(False, "")
         if success:
+            # 应用完把预设计数/指纹按 tacz 现状重算一遍：否则预设目录已经空了，
+            # 索引还停在 0 个枪包，下次启动会误报「检测到新增 3 个」。
+            try:
+                if (self.preset_manager and self.preset_manager.current_preset):
+                    self.preset_manager.update_preset_index(
+                        self.preset_manager.current_preset, from_tacz=True)
+            except Exception:
+                pass
             self._update_preset_list()
             self.refresh_gunpacks(use_cache=False)
             if self.preset_manager and self.preset_manager.current_preset:
                 applied = self.preset_manager.current_preset
                 self.preset_cards.select(applied, notify=False)
                 self.on_preset_selected(applied)
+            # 应用把预设目录搬进了 tacz：之前的云端计划是按旧位置算的，
+            # 不复查一次，卡片会挂着「有 N 个更新」这种幽灵状态。
+            try:
+                name_now = (self.preset_manager.current_preset
+                            if self.preset_manager else None)
+                if name_now and self.online is not None and (
+                        self.online.is_bound(name_now)
+                        or (self.is_developer
+                            and self.online.cloud_path_of(name_now))):
+                    self._online_check(name_now)
+            except Exception:
+                pass
             self.log_manager.log("预设应用成功！", 'SUCCESS')
         else:
             show_error("错误", "预设应用失败，请查看日志")
