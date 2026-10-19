@@ -1,4 +1,4 @@
-# Pulses Swap 交接文档（v2.5.9）
+# Pulses Swap 交接文档（v2.5.10）
 
 > 给接手的人 / AI 看的：这个软件被拆成了哪些文件、每个文件干什么、
 > 数据怎么流动、改哪里、怎么跑测试、怎么打包。
@@ -12,7 +12,7 @@
 一键把某组枪包换进游戏的 `tacz` 目录；同时把预设发布到**蓝奏云**，
 玩家绑定分享链接后可以增量同步。
 
-- 版本：`2.5.9`（`src/pulses/core/paths.py` 里的 `VERSION`）
+- 版本：`2.5.10`（`src/pulses/core/paths.py` 里的 `VERSION`）
 - 入口：`src/main.py` → `pulses.ui.app.main()`
 - 依赖：`customtkinter` `tkinterdnd2` `watchdog` `Pillow`（见 `requirements.txt`）
 - 不依赖任何第三方网络库（HTTP 全用标准库 `urllib`）

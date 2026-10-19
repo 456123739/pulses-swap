@@ -696,7 +696,12 @@ class OnlineMixin:
         data = {}
         try:
             data = self._preset_card_data(name)
-            label.configure(text=_short(data.get("status") or "未绑定", 26),
+            text = str(data.get("status") or "未绑定")
+            # 这一行的左边已经写了「云端」，状态里的「云端已是最新」去掉前缀，
+            # 否则会读成「云端 云端已是最新」
+            if text.startswith("云端"):
+                text = text[2:].lstrip(" ·")
+            label.configure(text=_short(text, 26),
                             text_color=data.get("status_color")
                             or C_TEXT_MUTED)
         except Exception:
