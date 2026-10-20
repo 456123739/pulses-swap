@@ -64,7 +64,8 @@ class CanvasSegmented(Canvas):
                  hover_color=C_ACCENT_SOFT, text_color=C_TEXT_MAIN,
                  active_text_color=C_ACCENT, font_size=FS_BODY,
                  bold_active=False, text_anchor="w", text_pad=14,
-                 duration_ms=240, hover_ms=110, width=1, height=None):
+                 duration_ms=240, hover_ms=110, width=1, height=None,
+                 track_color=None):
         # 自绘控件是原始像素：按 config.UI_SCALE 放大，否则系统 125%/150% 下会和
         # CTk 控件错位（CTk 自己会缩放，Canvas 不会）
         item_height = px(item_height)
@@ -96,6 +97,7 @@ class CanvasSegmented(Canvas):
         self._bg = bg_color
         self._pill_color = pill_color
         self._hover_color = hover_color
+        self._track_color = track_color
         self._text_color = text_color
         self._active_text_color = active_text_color
         # 字体族要在构造时取（apply_font_fallbacks 会就地改写全局名）
@@ -123,7 +125,10 @@ class CanvasSegmented(Canvas):
         self._size = (0, 0)
         self._laid_out = False
 
-        # 层级：悬停层 -> 滑块 -> 文字
+        # 层级：轨道 -> 悬停层 -> 滑块 -> 文字
+        self._track_id = self.create_polygon(
+            *self._rect_points((-6, -6, -3, -3)), smooth=True, splinesteps=24,
+            fill=bg_color, outline="")
         self._hover_id = self.create_polygon(
             *self._rect_points((-6, -6, -3, -3)), smooth=True, splinesteps=24,
             fill=bg_color, outline="")
@@ -174,6 +179,21 @@ class CanvasSegmented(Canvas):
                 rects.append((x, y1, x + item_w, y2))
                 x += item_w + self._gap
         self._rects = rects
+        if self._track_color and self._orientation == "horizontal":
+            try:
+                self.coords(self._track_id, *self._rect_points(
+                    self._pad, self._pad,
+                    max(self._pad + 2, width - self._pad),
+                    max(self._pad + 2, height - self._pad)))
+                self.itemconfigure(self._track_id, fill=self._track_color)
+                self.tag_lower(self._track_id)
+            except Exception:
+                pass
+        else:
+            try:
+                self.coords(self._track_id, -8, -8, -4, -4)
+            except Exception:
+                pass
         for index, text_id in enumerate(self._text_ids):
             x1, y1, x2, y2 = rects[index]
             center_y = (y1 + y2) / 2.0

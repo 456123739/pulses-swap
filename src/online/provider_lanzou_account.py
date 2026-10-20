@@ -392,6 +392,25 @@ class LanzouAccount:
             folder = self.ensure_folder(part, folder)
         return folder
 
+    def find_path(self, path: str, root: int = -1):
+        """按路径查找文件夹，不创建。找不到返回 None。
+
+        浏览云端目录时必须用这个：ensure_path 会顺手建目录，
+        用户只是点进一个写错的路径，不该在网盘里留下空文件夹。
+        """
+        folder = root
+        parts = [p for p in str(path or "").replace("\\", "/").split("/") if p]
+        for part in parts:
+            found = None
+            for item in self.list_folders(folder):
+                if item["name"] == part:
+                    found = item["id"]
+                    break
+            if found is None:
+                return None
+            folder = found
+        return folder
+
     def folder_path(self, folder_id: int, root: int = -1) -> str:
         """尽量反查出文件夹路径（用于展示）。失败返回空串。"""
         chain: list[str] = []

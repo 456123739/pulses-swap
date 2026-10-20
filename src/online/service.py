@@ -252,7 +252,8 @@ class OnlineService:
     """在线同步门面。所有方法都是同步的，界面层放到工作线程里跑。"""
 
     def __init__(self, db_path, *, log=None, app_version: str = "",
-                 sleep=None, account_base: str | None = None):
+                 sleep=None, account_base: str | None = None,
+                 account_db: str | None = None):
         self.db_path = str(db_path)
         self.log = log
         self.app_version = app_version
@@ -260,8 +261,16 @@ class OnlineService:
         self.account_base = account_base
         paths.ensure_dirs(self.db_path)
         self.sources = SourceStore(paths.sources_path(self.db_path))
+        # 账号是「本机」级别的，不是「某个预设库」级别的：开发者可以先登录、
+        # 再打开整合包，也可以在多个整合包之间来回切而不用反复登录。
+        account_db = str(account_db or self.db_path)
+        try:
+            os.makedirs(os.path.join(account_db, paths.ONLINE_DIRNAME),
+                        exist_ok=True)
+        except OSError:
+            pass
         self.accounts = AccountStore(
-            os.path.join(self.db_path, paths.ONLINE_DIRNAME, "account.json"))
+            os.path.join(account_db, paths.ONLINE_DIRNAME, "account.json"))
         self._account: LanzouAccount | None = None
 
     # ------------------------------------------------------------------
@@ -909,6 +918,9 @@ class OnlineService:
             if not self.restore_account():
                 raise AuthError("需要先登录蓝奏账号",
                                 hint="在「身份」里切换到开发者并完成认证。")
+            if self._account is None:
+                raise AuthError("登录状态异常",
+                                hint="请重新登录蓝奏账号。")
         return self._account
 
     # ------------------------------------------------------------------
@@ -1094,6 +1106,180 @@ class OnlineService:
         return {"path": path, "files": len(files),
                 "has_manifest": MANIFEST_NAME.lower() in names}
 
+    # ------------------------------------------------------------------
+    # 云端文件管理（管理面板用）
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _clean_cloud_path(path: str) -> str:
+        parts = [p for p in str(path or "").replace("\\", "/").split("/") if p]
+        return "/" + "/".join(parts) if parts else "/"
+
+    def cloud_browse(self, path: str = "") -> dict:
+        """列出一个云端文件夹（不创建任何目录）。
+
+        返回 folders/files 都是网盘接口的原样字段；界面只负责画树。
+        """
+        account = self._require_account()
+        clean = self._clean_cloud_path(path)
+        folder = account.find_path(clean)
+        if folder is None:
+            raise SourceError(
+                f"云端文件夹不存在：{clean}",
+                hint="检查路径拼写，或先在管理面板里新建这个文件夹。")
+        folders = account.list_folders(folder)
+        files = account.list_files(folder)
+        return {"path": clean, "folder_id": folder,
+                "folders": folders, "files": files}
+
+    def cloud_mkdir(self, parent: str, name: str) -> dict:
+        """在 parent 下新建一个文件夹，返回新路径。"""
+        account = self._require_account()
+        name = str(name or "").strip().strip("/")
+        if not name or name in (".", "..") or any(
+                ch in name for ch in '\\/:*?"<>|'):
+            raise SourceError("文件夹名不合法",
+                              hint="不能包含 \\ / : * ? \" < > |")
+        parent_clean = self._clean_cloud_path(parent)
+        folder = account.ensure_path(parent_clean)
+        folder_id = account.ensure_folder(name, folder)
+        path = (parent_clean.rstrip("/") + "/" + name) if parent_clean != "/" \
+            else "/" + name
+        self._log(f"已新建云端文件夹：{path}", "SUCCESS")
+        return {"path": path, "folder_id": folder_id}
+
+    def cloud_upload(self, path: str, local_paths, *, on_item=None,
+                     on_progress=None, cancel=None) -> dict:
+        """把本地文件/文件夹上传到指定云端文件夹（开发者专用）。
+
+        目录会保留相对层级；单个文件失败不终止整批，最后汇总 failed。
+        """
+        account = self._require_account()
+        folder = account.ensure_path(self._clean_cloud_path(path))
+        if callable(cancel) and cancel():
+            raise CancelledError("已取消上传")
+        jobs: list[tuple[str, int, str]] = []
+        for raw in local_paths or []:
+            src = os.path.abspath(str(raw))
+            if os.path.isfile(src):
+                jobs.append((src, folder, os.path.basename(src)))
+            elif os.path.isdir(src):
+                base = os.path.basename(src.rstrip(os.sep)) or "folder"
+                for dirpath, dirnames, filenames in os.walk(src):
+                    dirnames[:] = [d for d in dirnames
+                                   if not d.startswith(".")]
+                    rel = os.path.relpath(dirpath, src)
+                    target = folder
+                    if rel not in (".", ""):
+                        target = account.ensure_path(
+                            "/".join([str(path).strip("/"), base,
+                                      rel.replace(os.sep, "/")]))
+                    elif base:
+                        target = account.ensure_folder(base, folder)
+                    for filename in filenames:
+                        if filename.startswith(".") or filename.endswith(".tmp"):
+                            continue
+                        full = os.path.join(dirpath, filename)
+                        if not os.path.isfile(full):
+                            continue
+                        rel_name = (base + "/" + ("" if rel == "." else rel + "/")
+                                    + filename)
+                        jobs.append((full, target,
+                                     rel_name.replace(os.sep, "/")))
+            else:
+                raise SourceError(f"本地路径不存在：{raw}")
+
+        total_bytes = 0
+        for full, _target, _rel in jobs:
+            try:
+                total_bytes += os.path.getsize(full)
+            except OSError:
+                pass
+        done_bytes = 0
+        uploaded = []
+        failed = []
+        for index, (full, target, rel) in enumerate(jobs, 1):
+            if callable(cancel) and cancel():
+                raise CancelledError("已取消上传")
+            if callable(on_item):
+                try:
+                    on_item(index, len(jobs), rel, "start")
+                except Exception:
+                    pass
+            base_bytes = done_bytes
+            file_size = 0
+            try:
+                file_size = os.path.getsize(full)
+            except OSError:
+                pass
+
+            def progress(sent, _length, _base=base_bytes):
+                if callable(on_progress):
+                    try:
+                        on_progress(min(total_bytes, _base + int(sent)),
+                                    max(1, total_bytes), rel)
+                    except Exception:
+                        pass
+
+            try:
+                info = account.upload(full, target, progress=progress)
+                uploaded.append(info)
+                done_bytes += file_size
+            except CancelledError:
+                raise
+            except OnlineError as exc:
+                failed.append((rel, str(exc)))
+                done_bytes += file_size
+            if callable(on_item):
+                try:
+                    on_item(index, len(jobs), rel, "done")
+                except Exception:
+                    pass
+        self._log(f"云端上传完成：成功 {len(uploaded)} 项，失败 {len(failed)} 项",
+                  "SUCCESS" if not failed else "WARNING")
+        return {"uploaded": uploaded, "failed": failed,
+                "bytes": done_bytes, "path": self._clean_cloud_path(path)}
+
+    def account_quota(self) -> dict:
+        """账号容量（尽力而为）。"""
+        account = self._require_account()
+        return account.quota() or {}
+
+    def upload_count_today(self) -> int:
+        """按本机发布记录估算今天上传了多少项（蓝奏没有公开的每日计数接口）。"""
+        today = time.strftime("%Y-%m-%d")
+        count = 0
+        for record in (getattr(self.sources, "items", {}) or {}).values():
+            for row in (record.get("history") or []):
+                try:
+                    stamp = float(row.get("at") or 0)
+                    if time.strftime("%Y-%m-%d", time.localtime(stamp)) == today:
+                        count += int(row.get("uploaded") or 0)
+                except (TypeError, ValueError, OSError):
+                    continue
+        return count
+
+    def probe_cloud(self) -> dict:
+        """启动连通性探测：有保存的账号就静默恢复，再拉一次根目录。"""
+        if not self.accounts.uid:
+            return {"logged_in": False, "online": False, "quota": {}}
+        restored = self._account is not None
+        if not restored:
+            restored = self.restore_account()
+        if not restored:
+            return {"logged_in": True, "online": False, "quota": {}}
+        started = time.time()
+        try:
+            account = self._require_account()
+            quota = account.quota() or {}
+            folders = account.list_folders(-1)
+            return {"logged_in": True, "online": True, "quota": quota,
+                    "folders": len(folders),
+                    "latency_ms": int((time.time() - started) * 1000)}
+        except OnlineError as exc:
+            self._log(f"云端连通性检测失败：{exc}", "WARNING")
+            return {"logged_in": True, "online": False, "quota": {},
+                    "error": str(exc)}
+
     def publish_plan(self, ref: PresetRef, *, on_phase=None) -> diff.Plan:
         """开发者侧：扫描本地 + 读云端 → 差异计划。"""
         def phase(text: str) -> None:
@@ -1121,7 +1307,9 @@ class OnlineService:
     def publish(self, ref: PresetRef, plan: diff.Plan, selection,
                 *, version: str, notes: str = "", min_app: str = "",
                 on_item=None, on_progress=None,
-                cancel=None) -> PublishResult:
+                cancel=None, role: str = "developer") -> PublishResult:
+        if str(role) != "developer":
+            raise AuthError("只有开发者可以发布到云端")
         account = self._require_account()
         folder = self._folder_of(ref.name, account)
         entries = self.scan(ref)

@@ -77,13 +77,24 @@ class SettingsPage:
         self._loading = False
 
         self.frame = ctk.CTkFrame(parent_frame, fg_color=C_WINDOW_BG)
+        self.frame.grid_columnconfigure(0, weight=1)
+        self.frame.grid_columnconfigure(1, weight=0, minsize=px(370))
+        self.frame.grid_rowconfigure(0, weight=1)
+
+        # 左列：设置本体；右列：运行日志。设置项不再悬在整页中间。
+        self.left_frame = ctk.CTkFrame(self.frame, fg_color="transparent")
+        self.left_frame.grid(row=0, column=0, sticky="nsew",
+                             padx=(0, PAD_GAP))
 
         # ===== 选项卡头部：自绘分段控件（滑块带动画） =====
-        head = ctk.CTkFrame(self.frame, fg_color=C_CARD_BG,
+        head = ctk.CTkFrame(self.left_frame, fg_color=C_CARD_BG,
                              corner_radius=R_CARD, border_width=BORDER_W,
                              border_color=C_BORDER_SOFT, height=H_TAB_HEAD)
         head.pack(fill=X)
         head.pack_propagate(False)
+        make_label(head, text="设置", fg=C_TEXT_MAIN,
+                   font_size=FS_SUBHEAD, bold=True).pack(
+                       side=LEFT, padx=(PAD_CARD_X, 0))
         self.tab_bar = CanvasSegmented(
             head, [("general", "常规"), ("database", "数据库"), ("about", "关于")],
             command=self._on_tab_selected, orientation="horizontal",
@@ -91,11 +102,14 @@ class SettingsPage:
             bg_color=C_CARD_BG, pill_color=C_ACCENT, hover_color=C_ACCENT_SOFT,
             text_color=C_TEXT_SECONDARY, active_text_color=C_TEXT_INVERSE,
             font_size=FS_BODY, bold_active=True, text_anchor="center",
-            duration_ms=240)
-        self.tab_bar.pack(fill=BOTH, expand=True, padx=PAD_XS, pady=PAD_XS)
+            duration_ms=240, width=560, height=H_TAB_HEAD - 8,
+            track_color=C_PANEL_ALT_BG)
+        # 不铺满整条：三个选项卡拉成 1100px 会显得又空又长
+        self.tab_bar.pack(side=LEFT, padx=(PAD_DIALOG, 0), pady=PAD_XS)
 
         # ===== 选项卡内容：Canvas 承载，切换时整块推入/推出 =====
-        self.stack = SlideStack(self.frame, bg_color=C_WINDOW_BG, duration_ms=260)
+        self.stack = SlideStack(self.left_frame, bg_color=C_WINDOW_BG,
+                                 duration_ms=260)
         self.stack.canvas.pack_configure(pady=(PAD_GAP, 0))
 
         self.storage_var = StringVar(value=self.settings.storage_mode)
@@ -112,7 +126,7 @@ class SettingsPage:
         self._build_about(self.tabs["about"])
 
         # ===== 底部按钮条：自动保存状态 + 恢复默认 =====
-        self.btn_bar = ctk.CTkFrame(self.frame, fg_color=C_CARD_BG,
+        self.btn_bar = ctk.CTkFrame(self.left_frame, fg_color=C_CARD_BG,
                                      corner_radius=R_CARD, height=H_BTN_BAR,
                                      border_width=0)
         self.btn_bar.pack(fill=X, pady=(PAD_GAP, 0))
@@ -123,6 +137,29 @@ class SettingsPage:
         self.saved_label = make_label(self.btn_bar, text=self._saved_hint(),
                                        fg=C_TEXT_MUTED, font_size=FS_TINY)
         self.saved_label.pack(side=LEFT, padx=PAD_DIALOG)
+
+        # ===== 右列：运行日志 =====
+        self.log_card = ctk.CTkFrame(self.frame, fg_color=C_CARD_BG,
+                                      corner_radius=R_CARD, border_width=0)
+        self.log_card.grid(row=0, column=1, sticky="nsew")
+        log_head = ctk.CTkFrame(self.log_card, fg_color="transparent")
+        log_head.pack(fill=X, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
+        make_label(log_head, text="运行日志", fg=C_TEXT_SECONDARY,
+                   font_size=FS_SMALL, bold=True).pack(side=LEFT)
+        make_text_button(log_head, "清空",
+                         command=self.app.clear_log).pack(side=RIGHT)
+        self.settings_log_text = ctk.CTkTextbox(
+            self.log_card, fg_color=C_PANEL_BG, border_color=C_BORDER_SOFT,
+            border_width=BORDER_W, corner_radius=R_CONTROL,
+            text_color=C_TEXT_SECONDARY, font=(FONT_FAMILY_MONO, FS_TINY),
+            wrap="word")
+        self.settings_log_text.pack(fill=BOTH, expand=True,
+                                     padx=PAD_CARD_X,
+                                     pady=(0, PAD_CARD_Y))
+        try:
+            self.app.log_manager.attach(self.settings_log_text)
+        except Exception:
+            pass
 
         self.reload()
         # 预热：每个选项卡都先布局一次，避免第一次切换时卡一帧
@@ -165,117 +202,162 @@ class SettingsPage:
         self.tab_bar.select(key, animate=animate, notify=False)
         self.stack.show(key, animate=animate, direction=direction, axis="x")
 
+    # ==================== 选项卡：滚动容器 ====================
+    def _tab_body(self, tab):
+        """每个设置页选项卡都套一层滚动容器。
+
+        需求：设置项必须全部能在界面里找到；窗口高度只有 900，
+        “在线同步”新增几组选项后一屏放不下，不能靠裁切藏掉。
+        """
+        body = getattr(tab, "_scroll_body", None)
+        try:
+            alive = body is not None and body.winfo_exists()
+        except Exception:
+            alive = False
+        if not alive:
+            body = ctk.CTkScrollableFrame(
+                tab, fg_color=C_WINDOW_BG, corner_radius=0,
+                scrollbar_button_color=C_BORDER_SOFT,
+                scrollbar_button_hover_color=C_BORDER)
+            body.pack(fill=BOTH, expand=True)
+            tab._scroll_body = body
+        return body
+
     # ==================== 选项卡：常规 ====================
     def _build_general(self, tab):
-        # 需求：设置项要简洁 —— 不留解释性小字，选项本身就是完整说明；
-        # 选中态用带动画的分段控件（滑块逐帧滑动），切换即可见。
-        make_label(tab, text="存储模式", fg=C_ACCENT,
-                    font_size=FS_SUBHEAD, bold=True).pack(
-                        anchor=W, pady=(PAD_TIGHT, PAD_TIGHT))
-        mode_card = ctk.CTkFrame(tab, fg_color=C_CARD_BG, corner_radius=R_CARD,
-                                  border_width=0)
-        mode_card.pack(fill=X, pady=(0, PAD_DIALOG))
-        attach_hover_glow(mode_card)
+        tab = self._tab_body(tab)
+        holder = ctk.CTkFrame(tab, fg_color="transparent")
+        holder.pack(fill=X)
+        holder.grid_columnconfigure(0, weight=0, minsize=px(620))
+        holder.grid_columnconfigure(1, weight=1)
+        column = ctk.CTkFrame(holder, fg_color="transparent")
+        column.grid(row=0, column=0, sticky="new", padx=(PAD_CARD_X, 0))
+
+        def card():
+            box = ctk.CTkFrame(column, fg_color=C_CARD_BG, corner_radius=R_CARD,
+                                border_width=0)
+            box.pack(fill=X, pady=(0, PAD_DIALOG))
+            return box
+
+        def section(text):
+            make_label(column, text=text, fg=C_ACCENT,
+                       font_size=FS_SMALL, bold=True).pack(
+                           anchor=W, pady=(PAD_TIGHT, PAD_TIGHT))
+
+        def row(parent, title, hint="", width=px(230)):
+            line = ctk.CTkFrame(parent, fg_color="transparent")
+            line.pack(fill=X, padx=PAD_CARD_X, pady=PAD_TIGHT)
+            left = ctk.CTkFrame(line, fg_color="transparent")
+            left.pack(side=LEFT, fill=X, expand=True)
+            make_label(left, text=title, fg=C_TEXT_MAIN,
+                       font_size=FS_SMALL, bold=True).pack(anchor=W)
+            if hint:
+                make_label(left, text=hint, fg=C_TEXT_MUTED,
+                           font_size=FS_TINY).pack(anchor=W, pady=(1, 0))
+            return line, width
+
+        # ---------- 外观 ----------
+        section("外观")
+        box = card()
+        line, width = row(box, "存储模式", "每包独立 / 共用")
         self.mode_seg = CanvasSegmented(
-            mode_card, [("isolated", "隔离存储"), ("merged", "合并存储")],
-            command=self._on_mode_selected, orientation="vertical",
-            item_height=H_NAV, pad=6, gap=PAD_XS, radius=R_CONTROL,
-            bg_color=C_CARD_BG, pill_color=C_ACCENT_SOFT,
-            hover_color=C_ACCENT_SOFT, text_color=C_TEXT_MAIN,
-            active_text_color=C_ACCENT, font_size=FS_BODY, bold_active=True,
-            text_anchor="w", text_pad=16, duration_ms=240,
-            height=px(2 * (H_NAV + PAD_XS) + 12))
-        self.mode_seg.pack(fill=X, padx=PAD_TIGHT, pady=PAD_TIGHT)
-
-        make_label(tab, text="动画", fg=C_ACCENT,
-                    font_size=FS_SUBHEAD, bold=True).pack(
-                        anchor=W, pady=(0, PAD_TIGHT))
-        anim_card = ctk.CTkFrame(tab, fg_color=C_CARD_BG, corner_radius=R_CARD,
-                                  border_width=0)
-        anim_card.pack(fill=X, pady=(0, PAD_DIALOG))
-        attach_hover_glow(anim_card)
+            line, [("isolated", "隔离"), ("merged", "合并")],
+            command=self._on_mode_selected, orientation="horizontal",
+            item_height=30, pad=3, gap=3,
+            radius=R_CONTROL, bg_color=C_CARD_BG, pill_color=C_ACCENT,
+            hover_color=C_ACCENT_SOFT, text_color=C_TEXT_SECONDARY,
+            active_text_color=C_TEXT_INVERSE, font_size=FS_SMALL,
+            bold_active=True, text_anchor="center", duration_ms=220,
+            width=184, height=36, track_color=C_PANEL_ALT_BG)
+        self.mode_seg.pack(side=RIGHT)
+        line, width = row(box, "动画", "关闭后一帧到位")
         self.anim_seg = CanvasSegmented(
-            anim_card, [("on", "流畅"), ("off", "关闭")],
-            command=self._on_anim_selected, orientation="vertical",
-            item_height=H_NAV, pad=6, gap=PAD_XS, radius=R_CONTROL,
-            bg_color=C_CARD_BG, pill_color=C_ACCENT_SOFT,
-            hover_color=C_ACCENT_SOFT, text_color=C_TEXT_MAIN,
-            active_text_color=C_ACCENT, font_size=FS_BODY, bold_active=True,
-            text_anchor="w", text_pad=16, duration_ms=240,
-            height=px(2 * (H_NAV + PAD_XS) + 12))
-        self.anim_seg.pack(fill=X, padx=PAD_TIGHT, pady=PAD_TIGHT)
+            line, [("on", "流畅"), ("off", "关闭")],
+            command=self._on_anim_selected, orientation="horizontal",
+            item_height=30, pad=3, gap=3,
+            radius=R_CONTROL, bg_color=C_CARD_BG, pill_color=C_ACCENT,
+            hover_color=C_ACCENT_SOFT, text_color=C_TEXT_SECONDARY,
+            active_text_color=C_TEXT_INVERSE, font_size=FS_SMALL,
+            bold_active=True, text_anchor="center", duration_ms=220,
+            width=184, height=36, track_color=C_PANEL_ALT_BG)
+        self.anim_seg.pack(side=RIGHT)
 
-        make_label(tab, text="用户身份", fg=C_ACCENT,
-                    font_size=FS_SUBHEAD, bold=True).pack(
-                        anchor=W, pady=(0, PAD_TIGHT))
-        role_card = ctk.CTkFrame(tab, fg_color=C_CARD_BG, corner_radius=R_CARD,
-                                  border_width=0)
-        role_card.pack(fill=X, pady=(0, PAD_DIALOG))
-        attach_hover_glow(role_card)
+        # ---------- 身份 ----------
+        section("身份")
+        box = card()
+        line, width = row(box, "用户身份", "按身份隔离")
         self.role_seg = CanvasSegmented(
-            role_card, [("player", "玩家"), ("developer", "开发者")],
-            command=self._on_role_selected, orientation="vertical",
-            item_height=H_NAV, pad=6, gap=PAD_XS, radius=R_CONTROL,
-            bg_color=C_CARD_BG, pill_color=C_ACCENT_SOFT,
-            hover_color=C_ACCENT_SOFT, text_color=C_TEXT_MAIN,
-            active_text_color=C_ACCENT, font_size=FS_BODY, bold_active=True,
-            text_anchor="w", text_pad=16, duration_ms=380,
-            height=px(2 * (H_NAV + PAD_XS) + 12))
-        self.role_seg.pack(fill=X, padx=PAD_TIGHT, pady=PAD_TIGHT)
+            line, [("player", "玩家"), ("developer", "开发者")],
+            command=self._on_role_selected, orientation="horizontal",
+            item_height=30, pad=3, gap=3,
+            radius=R_CONTROL, bg_color=C_CARD_BG, pill_color=C_ACCENT,
+            hover_color=C_ACCENT_SOFT, text_color=C_TEXT_SECONDARY,
+            active_text_color=C_TEXT_INVERSE, font_size=FS_SMALL,
+            bold_active=True, text_anchor="center", duration_ms=260,
+            width=220, height=36, track_color=C_PANEL_ALT_BG)
+        self.role_seg.pack(side=RIGHT)
 
-        # ===== 在线同步 =====
-        make_label(tab, text="在线同步", fg=C_ACCENT,
-                    font_size=FS_SUBHEAD, bold=True).pack(
-                        anchor=W, pady=(0, PAD_TIGHT))
-        online_card = ctk.CTkFrame(tab, fg_color=C_CARD_BG, corner_radius=R_CARD,
-                                    border_width=0)
-        online_card.pack(fill=X, pady=(0, PAD_DIALOG))
-        attach_hover_glow(online_card)
+        # ---------- 在线同步 ----------
+        section("在线同步")
+        box = card()
+        line, width = row(box, "启动时检查更新", "只检查，不自动下载")
         self.online_auto_seg = CanvasSegmented(
-            online_card, [("on", "启动时检查更新"), ("off", "不自动检查")],
-            command=self._on_online_auto_selected, orientation="vertical",
-            item_height=H_NAV, pad=6, gap=PAD_XS, radius=R_CONTROL,
-            bg_color=C_CARD_BG, pill_color=C_ACCENT_SOFT,
-            hover_color=C_ACCENT_SOFT, text_color=C_TEXT_MAIN,
-            active_text_color=C_ACCENT, font_size=FS_BODY, bold_active=True,
-            text_anchor="w", text_pad=16, duration_ms=240,
-            height=px(2 * (H_NAV + PAD_XS) + 12))
-        self.online_auto_seg.pack(fill=X, padx=PAD_TIGHT, pady=(PAD_TIGHT, PAD_XS))
+            line, [("on", "开启"), ("off", "关闭")],
+            command=self._on_online_auto_selected, orientation="horizontal",
+            item_height=30, pad=3, gap=3,
+            radius=R_CONTROL, bg_color=C_CARD_BG, pill_color=C_ACCENT,
+            hover_color=C_ACCENT_SOFT, text_color=C_TEXT_SECONDARY,
+            active_text_color=C_TEXT_INVERSE, font_size=FS_SMALL,
+            bold_active=True, text_anchor="center", duration_ms=220,
+            width=184, height=36, track_color=C_PANEL_ALT_BG)
+        self.online_auto_seg.pack(side=RIGHT)
 
-        # 「更新时要不要顺手删掉本地多余枪包」——以前这是在同步弹窗里逐个勾的，
-        # 现在同步一键完成，取舍放这里一次性定好。
-        self.online_clean_seg = CanvasSegmented(
-            online_card, [("off", "多余枪包：保留"), ("on", "多余枪包：同步时删除")],
-            command=self._on_online_clean_selected, orientation="vertical",
-            item_height=H_NAV, pad=6, gap=PAD_XS, radius=R_CONTROL,
-            bg_color=C_CARD_BG, pill_color=C_ACCENT_SOFT,
-            hover_color=C_ACCENT_SOFT, text_color=C_TEXT_MAIN,
-            active_text_color=C_ACCENT, font_size=FS_BODY, bold_active=True,
-            text_anchor="w", text_pad=16, duration_ms=240,
-            height=px(2 * (H_NAV + PAD_XS) + 12))
-        self.online_clean_seg.pack(fill=X, padx=PAD_TIGHT, pady=(0, PAD_XS))
+        line, width = row(box, "完整更新前确认", "批量更新再确认")
+        self.online_confirm_seg = CanvasSegmented(
+            line, [("on", "确认"), ("off", "直接执行")],
+            command=self._on_online_confirm_selected,
+            orientation="horizontal", item_height=30, pad=3,
+            gap=3, radius=R_CONTROL, bg_color=C_CARD_BG,
+            pill_color=C_ACCENT, hover_color=C_ACCENT_SOFT,
+            text_color=C_TEXT_SECONDARY, active_text_color=C_TEXT_INVERSE,
+            font_size=FS_SMALL, bold_active=True, text_anchor="center",
+            duration_ms=220, width=220, height=36, track_color=C_PANEL_ALT_BG)
+        self.online_confirm_seg.pack(side=RIGHT)
 
+        line, width = row(box, "发布前预览", "发布前列出变更")
         self.online_preview_seg = CanvasSegmented(
-            online_card, [("off", "发布：直接发"), ("on", "发布：先看差异")],
-            command=self._on_online_preview_selected, orientation="vertical",
-            item_height=H_NAV, pad=6, gap=PAD_XS, radius=R_CONTROL,
-            bg_color=C_CARD_BG, pill_color=C_ACCENT_SOFT,
-            hover_color=C_ACCENT_SOFT, text_color=C_TEXT_MAIN,
-            active_text_color=C_ACCENT, font_size=FS_BODY, bold_active=True,
-            text_anchor="w", text_pad=16, duration_ms=240,
-            height=px(2 * (H_NAV + PAD_XS) + 12))
-        self.online_preview_seg.pack(fill=X, padx=PAD_TIGHT, pady=(0, PAD_TIGHT))
+            line, [("off", "直接发布"), ("on", "先看差异")],
+            command=self._on_online_preview_selected,
+            orientation="horizontal", item_height=30, pad=3,
+            gap=3, radius=R_CONTROL, bg_color=C_CARD_BG,
+            pill_color=C_ACCENT, hover_color=C_ACCENT_SOFT,
+            text_color=C_TEXT_SECONDARY, active_text_color=C_TEXT_INVERSE,
+            font_size=FS_SMALL, bold_active=True, text_anchor="center",
+            duration_ms=220, width=220, height=36, track_color=C_PANEL_ALT_BG)
+        self.online_preview_seg.pack(side=RIGHT)
 
-        cache_row = ctk.CTkFrame(online_card, fg_color="transparent")
-        cache_row.pack(fill=X, padx=PAD_TIGHT, pady=(0, PAD_TIGHT))
-        make_button(cache_row, "清理缓存", command=self._clean_online_cache,
-                    width=88).pack(side=LEFT)
-        self.online_cache_label = make_label(
-            cache_row, text="", fg=C_TEXT_MUTED, font_size=FS_TINY)
-        self.online_cache_label.pack(side=LEFT, padx=PAD_TIGHT)
+        line, width = row(box, "多余枪包", "同步时删除本地多余")
+        self.online_clean_seg = CanvasSegmented(
+            line, [("off", "保留"), ("on", "删除")],
+            command=self._on_online_clean_selected,
+            orientation="horizontal", item_height=30, pad=3,
+            gap=3, radius=R_CONTROL, bg_color=C_CARD_BG,
+            pill_color=C_ACCENT, hover_color=C_ACCENT_SOFT,
+            text_color=C_TEXT_SECONDARY, active_text_color=C_TEXT_INVERSE,
+            font_size=FS_SMALL, bold_active=True, text_anchor="center",
+            duration_ms=220, width=184, height=36)
+        self.online_clean_seg.pack(side=RIGHT)
+
 
     def _on_online_preview_selected(self, key):
         self.app.settings.online_publish_preview = (key == "on")
+        try:
+            self.app.settings.save()
+        except Exception:
+            pass
+
+    def _on_online_confirm_selected(self, key):
+        self.app.settings.online_confirm_full = (key == "on")
         try:
             self.app.settings.save()
         except Exception:
@@ -336,6 +418,7 @@ class SettingsPage:
 
     # ==================== 选项卡：数据库 ====================
     def _build_database(self, tab):
+        tab = self._tab_body(tab)
         make_label(tab, text="数据库位置", fg=C_ACCENT,
                     font_size=FS_SUBHEAD, bold=True).pack(
                         anchor=W, pady=(PAD_TIGHT, PAD_TIGHT))
@@ -347,12 +430,11 @@ class SettingsPage:
         self.db_path_label.configure(wraplength=620, justify=LEFT, anchor=W)
         self.db_path_label.pack(anchor=W, padx=PAD_CARD_X, pady=PAD_CARD_Y)
 
-        # 数据库管理只给开发者：玩家不需要合并库、适配旧版、强制校验这些概念
-        developer = bool(getattr(self.app, "is_developer", False))
-        if developer:
-            make_label(tab, text="数据库管理", fg=C_ACCENT,
-                        font_size=FS_SUBHEAD, bold=True).pack(
-                            anchor=W, pady=(0, PAD_TIGHT))
+        # 数据库操作是本地管理，不属于上传/下载的权限边界；所有身份都显示，
+        # 避免“设置里有些项被藏起来”——需求明确要求设置项全部可见。
+        make_label(tab, text="数据库管理", fg=C_ACCENT,
+                    font_size=FS_SUBHEAD, bold=True).pack(
+                        anchor=W, pady=(0, PAD_TIGHT))
         db_mgr_card = ctk.CTkFrame(tab, fg_color=C_CARD_BG, corner_radius=R_CARD,
                                     border_width=0)
         db_mgr_card.pack(fill=X, pady=(0, PAD_DIALOG))
@@ -361,26 +443,25 @@ class SettingsPage:
         btn_row2.pack(fill=X, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
         make_button(btn_row2, "打开数据库文件夹", command=self.on_open_db).pack(
             side=LEFT, padx=(0, PAD_TIGHT))
-        if developer:
-            make_button(btn_row2, "强制更新校验数据",
-                         command=self.app.force_update_validation).pack(
-                side=LEFT, padx=PAD_TIGHT)
+        make_button(btn_row2, "强制更新校验数据",
+                     command=self.app.force_update_validation).pack(
+            side=LEFT, padx=PAD_TIGHT)
 
-        if developer:
-            btn_row1 = ctk.CTkFrame(db_mgr_card, fg_color="transparent")
-            btn_row1.pack(fill=X, padx=PAD_CARD_X, pady=(0, PAD_TIGHT))
-            make_button(btn_row1, "切换数据库", command=self.on_switch_db).pack(
-                side=LEFT, padx=(0, PAD_TIGHT))
-            make_button(btn_row1, "合并数据库", command=self.on_merge_db).pack(
-                side=LEFT, padx=PAD_TIGHT)
-            make_button(btn_row1, "适配旧版数据库",
-                         command=self.on_migrate_legacy).pack(
-                side=LEFT, padx=PAD_TIGHT)
+        btn_row1 = ctk.CTkFrame(db_mgr_card, fg_color="transparent")
+        btn_row1.pack(fill=X, padx=PAD_CARD_X, pady=(0, PAD_TIGHT))
+        make_button(btn_row1, "切换数据库", command=self.on_switch_db).pack(
+            side=LEFT, padx=(0, PAD_TIGHT))
+        make_button(btn_row1, "合并数据库", command=self.on_merge_db).pack(
+            side=LEFT, padx=PAD_TIGHT)
+        make_button(btn_row1, "适配旧版数据库",
+                     command=self.on_migrate_legacy).pack(
+            side=LEFT, padx=PAD_TIGHT)
         make_label(db_mgr_card, text="", font_size=FS_TINY).pack(
                 anchor=W, padx=PAD_CARD_X, pady=(0, PAD_TIGHT))
 
     # ==================== 选项卡：关于 ====================
     def _build_about(self, tab):
+        tab = self._tab_body(tab)
         make_label(tab, text=f"{PROJECT_NAME} v{VERSION}", fg=C_ACCENT,
                     font_size=FS_TITLE, bold=True).pack(
                         anchor=W, pady=(PAD_TIGHT, PAD_MICRO))
@@ -437,6 +518,10 @@ class SettingsPage:
                              (getattr(self, "online_preview_seg", None),
                               "on" if getattr(self.settings,
                                               "online_publish_preview", False)
+                              else "off"),
+                             (getattr(self, "online_confirm_seg", None),
+                              "on" if getattr(self.settings,
+                                              "online_confirm_full", True)
                               else "off")):
                 if seg is not None and seg.current() != key:
                     seg.select(key, animate=False)

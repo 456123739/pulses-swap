@@ -63,6 +63,7 @@ from ..pages import *
 from .window import WindowMixin
 from .page_home import HomePageMixin
 from .page_log import LogPageMixin
+from .manager import ManagerPageMixin
 from .database import DatabaseMixin
 from .packs import PacksMixin
 from .transfer import TransferMixin
@@ -70,8 +71,9 @@ from .misc import MiscMixin
 from .online import OnlineMixin
 
 
-class PulsesSwapApp(WindowMixin, HomePageMixin, LogPageMixin, DatabaseMixin,
-                    PacksMixin, TransferMixin, MiscMixin, OnlineMixin):
+class PulsesSwapApp(WindowMixin, HomePageMixin, LogPageMixin, ManagerPageMixin,
+                    DatabaseMixin, PacksMixin, TransferMixin, MiscMixin,
+                    OnlineMixin):
     """主窗口：行为分散在 ui/ 下的各个 mixin 里，这里只做装配。"""
 
     def __init__(self, root):
@@ -149,7 +151,9 @@ class PulsesSwapApp(WindowMixin, HomePageMixin, LogPageMixin, DatabaseMixin,
         self.setup_menu()
 
         self._install_opacity_guard()
-        self.root.after(150, self._init_database_flow)
+        # 居中必须在首帧之后：此时 CTk 的缩放/内边距已经算完
+        self.root.after(0, self._center_window)
+        self.root.after(40, self._init_database_flow)
 
 
 def main():

@@ -102,8 +102,16 @@ class SlideStack:
             # 切换动画进行中被重排：轨迹已失效，直接落到终点
             cancel_tween(self.canvas, "slide")
             self._settle()
-        if self.current in self.items:
-            self.canvas.coords(self.items[self.current], 0, 0)
+        # 尺寸变化后必须把所有页重新归位：非当前页要停到新的视口外。
+        # 只摆当前页的话，初始化时尺寸还是 1x1，其它页会全部堆在 x=1，
+        # 之后永远叠在当前页上面（设置页第一次打开显示成“数据库”就是这原因）。
+        park = self._park_position()
+        for key, item in self.items.items():
+            try:
+                self.canvas.coords(item, 0, 0) if key == self.current \
+                    else self.canvas.coords(item, park, 0)
+            except Exception:
+                pass
 
     def _settle(self):
         """把所有页面归位：当前页贴左可见，其余隐藏。"""

@@ -127,11 +127,6 @@ class PacksMixin:
             if self.recent_visible:
                 self.update_recent_list()
 
-        has_presets = any(p.is_dir() for p in pack_db_path.iterdir()
-                          if not p.name.startswith('.'))
-        if not has_presets:
-            self._create_default_preset()
-
         self._start_watcher()
 
         self.loading_presets = True
@@ -143,6 +138,10 @@ class PacksMixin:
     def _load_presets_thread(self):
         try:
             self.preset_manager.load_all_presets(use_cache=True)
+            # 空数据库：默认预设需要扫 tacz 建指纹，也放到工作线程，
+            # 否则第一次选包会在主线程卡一下。
+            if not self.preset_manager.presets:
+                self._create_default_preset()
         except Exception as e:
             safe_print("加载预设线程出错:", traceback.format_exc())
             self.log_manager.log(f"加载预设失败: {e}", 'ERROR')
@@ -274,7 +273,6 @@ class PacksMixin:
             with open(dp / 'index.json', 'w', encoding='utf-8') as f:
                 json.dump(index_data, f, indent=2, ensure_ascii=False)
             self.preset_manager.save_cache()
-            self.pack_name_label.configure(text="当前预设：default")
             self.log_manager.log("默认预设创建成功", 'SUCCESS')
 
     def close_pack(self):
@@ -325,6 +323,13 @@ class PacksMixin:
         self.log_manager.log("已关闭整合包", 'INFO', verbose=True)
         self._update_sidebar_status()
         self._update_guide()
+        # 关包后恢复“无包在线模式”：开发者仍可登录/管理云端
+        try:
+            if self.db_ready:
+                self._init_online(self.db_path)
+                self.root.after(220, self._start_cloud_probe)
+        except Exception:
+            pass
 
     # ==================== TACZ 监控 ====================
     def _start_watcher(self):
@@ -336,9 +341,19 @@ class PacksMixin:
             return
         if not self.tacz_path or not self.tacz_path.exists():
             return
+        extra = []
+        try:
+            if self.preset_manager and self.current_selected_preset:
+                info = self.preset_manager.presets.get(
+                    self.current_selected_preset) or {}
+                if not info.get("applied") and info.get("path"):
+                    extra.append(Path(info["path"]))
+        except Exception:
+            extra = []
         self.tacz_watcher = TaczWatcher(self.tacz_path,
                                          on_change_callback=self._on_tacz_changed,
-                                         log_manager=self.log_manager)
+                                         log_manager=self.log_manager,
+                                         extra_paths=extra)
         self.tacz_watcher.start()
 
     def _stop_watcher(self):
@@ -361,9 +376,42 @@ class PacksMixin:
         if not self.preset_manager or not self.current_selected_preset:
             return
         info = self.preset_manager.presets.get(self.current_selected_preset)
-        if not info or not info.get('applied', False):
+        if not info:
             return
-        self.refresh_gunpacks(use_cache=False)
+        applied = bool(info.get('applied', False))
+        if getattr(self, "_watcher_refreshing", False):
+            self._watcher_refresh_again = True
+            return
+        self._watcher_refreshing = True
+        self._watcher_refresh_again = False
+        name = self.current_selected_preset
+        manager = self.preset_manager
+
+        def worker():
+            try:
+                # 已应用：真相在 tacz；未应用：真相在预设目录。
+                # 两种都要把 index.json 重算一遍，列表才会显示新数量。
+                manager.update_preset_index(name, from_tacz=applied)
+            except Exception as exc:
+                self.log_manager.log(f"文件变化后更新索引失败: {exc}", 'WARNING')
+            ui_call(self.root, self._on_tacz_refreshed)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_tacz_refreshed(self):
+        self._watcher_refreshing = False
+        if self.is_applying:
+            return
+        try:
+            self._update_preset_list()
+            if self.current_selected_preset:
+                self.refresh_gunpacks(use_cache=False)
+            self.set_status("检测到本地文件变化，列表已刷新", "info")
+        except Exception:
+            pass
+        if getattr(self, "_watcher_refresh_again", False):
+            self._watcher_refresh_again = False
+            self.root.after(180, self._do_tacz_refresh)
 
     # ==================== 预设管理 ====================
     def _update_sidebar_status(self):
@@ -452,6 +500,14 @@ class PacksMixin:
             btn.configure(state="normal" if self.tacz_path else "disabled")
         except Exception:
             pass
+        try:
+            self.home_tacz_btn.configure(
+                state="normal" if self.tacz_path else "disabled")
+            if getattr(self, "manage_tacz_btn", None) is not None:
+                self.manage_tacz_btn.configure(
+                    state="normal" if self.tacz_path else "disabled")
+        except Exception:
+            pass
 
     def on_preset_selected(self, name=None):
         if not self.preset_manager or self.loading_presets:
@@ -484,9 +540,19 @@ class PacksMixin:
         else:
             self.apply_btn.configure(state="normal", text="一键替换")
         self.refresh_gunpacks(use_cache=False)
+        # 切到未应用的预设：监控目标要跟着换成它的目录
+        try:
+            if self.tacz_path and not info.get("applied", False):
+                self._start_watcher()
+        except Exception:
+            pass
         self.log_manager.log(f"选择预设: {name}", 'INFO', verbose=True)
         self._update_sidebar_status()
         self._update_guide()
+        try:
+            self._update_manage_pack_list()
+        except Exception:
+            pass
 
     def on_preset_action(self, name, kind):
         """卡片右侧按钮：更新 / 发布 / 绑定 / 检查。"""
@@ -601,10 +667,7 @@ class PacksMixin:
             f"是否继续？"):
             return
 
-        self.progress_bar.pack(fill=X, pady=(0, 4))
-        self.progress_label.pack(fill=X, pady=(0, 4))
-        self.progress_bar.set(0)
-        self.progress_label.configure(text="准备迁移...")
+        self.set_status("准备迁移...", "busy", progress=0.0)
         self._disable_buttons(True)
 
         def worker():
@@ -688,9 +751,8 @@ class PacksMixin:
 
     def _on_migrate_preset_finished(self, success: bool, preset_name: str,
                                      target_db: Path, src_removed: bool):
-        self.progress_bar.pack_forget()
-        self.progress_label.pack_forget()
         self._disable_buttons(False)
+        self.set_status("", "muted")
 
         if success:
             self.log_manager.log(

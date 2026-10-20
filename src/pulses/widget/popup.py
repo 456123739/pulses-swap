@@ -25,7 +25,15 @@ class PopupMenu:
     def __init__(self, host, items, x_root: int, y_root: int, width: int = 150):
         PopupMenu.close_current()
         self.host = host
-        self.root = host.root
+        # 调用方经常直接传按钮（make_menu_button）。CTkButton 没有 .root /
+        # .overlay_host，之前这里抛 AttributeError 又被外层吞掉，表现为
+        # “所有「更多/上传」下拉菜单点了没反应”。统一从 Tk 顶层窗口取 root。
+        try:
+            self.root = host.winfo_toplevel()
+        except Exception:
+            self.root = getattr(host, "root", None)
+        if self.root is None:
+            return
         self._closed = False
 
         holder = getattr(host, "overlay_host", None) or self.root
@@ -86,7 +94,14 @@ class PopupMenu:
         except Exception:
             pass
 
-    def _on_click_outside(self, _event=None):
+    def _on_click_outside(self, event=None):
+        # 点在菜单内部时不能关：root 的 <Button-1> 绑定会先于按钮的
+        # <ButtonRelease> 触发，直接 close 会让所有菜单项都点不中。
+        widget = getattr(event, "widget", None)
+        while widget is not None:
+            if widget is self.panel:
+                return
+            widget = getattr(widget, "master", None)
         self.close()
 
     def _on_escape(self, _event=None):

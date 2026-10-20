@@ -140,8 +140,21 @@ class MiscMixin:
         if self.log_manager:
             self.show_full_log = not self.show_full_log
             self.log_manager.set_show_full(self.show_full_log)
-            self.log_toggle_btn.configure(
-                text="显示单条日志" if self.show_full_log else "显示完整日志")
+            text = "显示单条" if self.show_full_log else "显示完整"
+            for name, fallback in (("log_toggle_btn", None),
+                                   ("home_log_toggle_btn", text)):
+                btn = getattr(self, name, None)
+                if btn is None:
+                    continue
+                try:
+                    if fallback is None:
+                        btn.configure(
+                            text="显示单条日志" if self.show_full_log
+                            else "显示完整日志")
+                    else:
+                        btn.configure(text=fallback)
+                except Exception:
+                    pass
 
     def clear_log(self):
         if self.log_manager:

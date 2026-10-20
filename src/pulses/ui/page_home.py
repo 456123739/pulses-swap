@@ -82,12 +82,13 @@ class HomePageMixin:
         right_panel = ctk.CTkFrame(page, fg_color="transparent")
         right_panel.grid(row=0, column=1, sticky="nsew")
         right_panel.grid_columnconfigure(0, weight=1)
-        right_panel.grid_rowconfigure(0, weight=0)   # 详情条
-        right_panel.grid_rowconfigure(1, weight=0)   # 同步（按需出现）
-        right_panel.grid_rowconfigure(2, weight=0)   # 一键替换
-        right_panel.grid_rowconfigure(3, weight=1)   # 枪包列表
-        right_panel.grid_rowconfigure(4, weight=0)   # 日志标题
-        right_panel.grid_rowconfigure(5, weight=0)   # 日志正文
+        right_panel.grid_rowconfigure(0, weight=0)   # 管理面板
+        right_panel.grid_rowconfigure(1, weight=0)   # 详情条
+        right_panel.grid_rowconfigure(2, weight=0)   # 同步（按需出现）
+        right_panel.grid_rowconfigure(3, weight=0)   # 一键替换
+        right_panel.grid_rowconfigure(4, weight=1)   # 枪包列表
+        right_panel.grid_rowconfigure(5, weight=0)   # 日志标题
+        right_panel.grid_rowconfigure(6, weight=0)   # 日志正文
 
         # ---------- Step 1 · 整合包 ----------
         pack_group = ctk.CTkFrame(left_panel, fg_color=C_CARD_BG,
@@ -99,18 +100,21 @@ class HomePageMixin:
         pack_content.pack(fill=X, padx=PAD_CARD_X, pady=(0, PAD_CARD_Y))
 
         # 大拖入框
+        self.pack_group = pack_group
         self.pack_drop_area = ctk.CTkFrame(pack_content, fg_color=C_INPUT_BG,
                                              corner_radius=R_CONTROL,
                                              border_width=BORDER_W,
-                                             border_color=C_BORDER_SOFT)
+                                             border_color=C_BORDER_SOFT,
+                                             height=px(178))
         self.pack_drop_area.pack(fill=X, pady=(0, PAD_TIGHT))
+        self.pack_drop_area.pack_propagate(False)
         # 拖放目标要有 hover 反馈：鼠标进来描边浮一层强调软色
         attach_hover_glow(self.pack_drop_area, base_color=C_BORDER_SOFT,
                           hover_color=C_ACCENT_SOFT)
 
         self.pack_drop_label = ctk.CTkLabel(
             self.pack_drop_area,
-            text="拖入整合包根目录，或整合包内任意文件（自动定位 tacz）",
+            text="把整合包文件夹拖到这一整块区域\n（包内任意文件也可以，自动定位 tacz）",
             text_color=C_TEXT_SECONDARY, font=(config.FONT_FAMILY, FS_SMALL),
             justify=LEFT, anchor="w", fg_color="transparent")
         self.pack_drop_label.pack(fill=X, padx=PAD_GAP, pady=(PAD_GAP, PAD_XS))
@@ -153,14 +157,31 @@ class HomePageMixin:
             ])
         # 不 pack：鼠标移进这张卡才浮出来（见 _hover_reveal）
 
-        # 绑定 DND 到拖入框和提示文字
+        # 整张「整合包」卡片都是拖放目标：用户不需要精确对准内部小框
+        self._pack_drop_widgets = [pack_group, pack_content,
+                                   self.pack_drop_area, self.pack_drop_label,
+                                   self.pack_path_frame, self.pack_path_label]
         if HAS_DND:
-            for w in (self.pack_drop_area, self.pack_drop_label):
+            # 递归注册整张卡片：拖到标题/状态行/空白处都算落在“整合包”上，
+            # 不再要求用户精确对准内部那个小框。
+            stack = list(self._pack_drop_widgets)
+            while stack:
+                w = stack.pop()
                 try:
                     w.drop_target_register(DND_FILES)
                     w.dnd_bind('<<Drop>>', self.on_pack_drop)
                 except Exception:
                     pass
+                try:
+                    stack.extend(w.winfo_children())
+                except Exception:
+                    pass
+        for w in (self.pack_drop_area, self.pack_drop_label,
+                  self.pack_path_frame, self.pack_path_label):
+            try:
+                w.bind("<Button-1>", self._on_pack_drop_click, add="+")
+            except Exception:
+                pass
 
         # 最近打开：做成「不参与布局」的下拉浮层。
         # 挂在整页上、用 place 定位到按钮行正下方 —— place 不影响 pack/grid
@@ -256,10 +277,75 @@ class HomePageMixin:
         self._hover_reveal(pack_group, self.pack_more_btn)
         self._hover_reveal(preset_group, self.preset_more_btn)
 
-        # ---------- Step 3 · 预设详情（横条，放在右列顶部） ----------
+        # ---------- 管理面板（草图右上）----------
+        manager_group = ctk.CTkFrame(right_panel, fg_color=C_CARD_BG,
+                                      corner_radius=R_CARD, border_width=0)
+        manager_group.grid(row=0, column=0, sticky="ew", pady=(0, PAD_GAP))
+        self.home_manager_group = manager_group
+        manager_head = ctk.CTkFrame(manager_group, fg_color="transparent")
+        manager_head.pack(fill=X, padx=PAD_CARD_X, pady=(PAD_CARD_Y, 0))
+        make_section_header(manager_head, 0, "管理").pack(side=LEFT)
+        self.home_cloud_status = make_label(
+            manager_head, text="云端 · 未登录", fg=C_TEXT_MUTED,
+            font_size=FS_TINY)
+        self.home_cloud_status.pack(side=RIGHT)
+        manager_actions = ctk.CTkFrame(manager_group, fg_color="transparent")
+        manager_actions.pack(fill=X, padx=PAD_CARD_X, pady=(PAD_TIGHT,
+                                                              PAD_CARD_Y))
+        self.home_dev_actions = ctk.CTkFrame(manager_actions,
+                                              fg_color="transparent")
+        self.home_player_actions = ctk.CTkFrame(manager_actions,
+                                                 fg_color="transparent")
+        # 开发者：上传 / 云端文件 / 检查云端 / 刷新
+        # 上传是“下拉菜单”，不是一颗直接弹文件框的按钮：
+        # 文件 / 文件夹 / 新建云端文件夹都在同一个入口里。
+        self.home_upload_btn = make_menu_button(
+            self.home_dev_actions, text="上传 ▾", as_text=True,
+            items=lambda: [
+                ("上传文件…", self._manage_upload_files),
+                ("上传文件夹…", self._manage_upload_folder),
+                None,
+                ("新建云端文件夹…", self._manage_new_folder),
+            ])
+        self.home_upload_btn.pack(side=LEFT)
+        self.home_cloud_btn = make_text_button(
+            self.home_dev_actions, "云端文件",
+            command=lambda: self.show_page("manage"))
+        self.home_cloud_btn.pack(side=LEFT, padx=(PAD_GAP, 0))
+        self.home_check_btn = make_text_button(
+            self.home_dev_actions, "检查云端",
+            command=self._home_check_cloud)
+        self.home_check_btn.pack(side=LEFT, padx=(PAD_GAP, 0))
+        self.home_refresh_btn = make_text_button(
+            self.home_dev_actions, "刷新", command=self.refresh_all)
+        self.home_refresh_btn.pack(side=LEFT, padx=(PAD_GAP, 0))
+        # 玩家：下载 / 同步 / 检查 / 刷新
+        self.home_download_btn = make_button(
+            self.home_player_actions, "下载预设",
+            command=self.open_add_from_cloud, accent=True, height=30,
+            font_size=FS_SMALL, width=92)
+        self.home_download_btn.pack(side=LEFT)
+        self.home_sync_btn = make_text_button(
+            self.home_player_actions, "同步当前",
+            command=self._sync_current_preset)
+        self.home_sync_btn.pack(side=LEFT, padx=(PAD_GAP, 0))
+        self.home_player_check_btn = make_text_button(
+            self.home_player_actions, "检查更新",
+            command=self._home_check_cloud)
+        self.home_player_check_btn.pack(side=LEFT, padx=(PAD_GAP, 0))
+        self.home_player_refresh_btn = make_text_button(
+            self.home_player_actions, "刷新", command=self.refresh_all)
+        self.home_player_refresh_btn.pack(side=LEFT, padx=(PAD_GAP, 0))
+        self.home_tacz_btn = make_text_button(
+            manager_actions, "打开 TACZ", command=self.open_tacz_folder,
+            state="disabled")
+        self.home_tacz_btn.pack(side=RIGHT)
+        self.home_dev_actions.pack(side=LEFT)
+
+        # ---------- Step 3 · 预设详情（横条，放在管理面板下方） ----------
         info_group = ctk.CTkFrame(right_panel, fg_color=C_CARD_BG,
                                    corner_radius=R_CARD, border_width=0)
-        info_group.grid(row=0, column=0, sticky="ew", pady=(0, PAD_GAP))
+        info_group.grid(row=1, column=0, sticky="ew", pady=(0, PAD_GAP))
         info_head = ctk.CTkFrame(info_group, fg_color="transparent")
         info_head.pack(fill=X, padx=PAD_CARD_X, pady=(PAD_CARD_Y, 0))
         make_section_header(info_head, 3, "预设详情").pack(side=LEFT)
@@ -329,7 +415,7 @@ class HomePageMixin:
         # 玩家：一键替换。开发者：发布到云端（外加一颗次要的一键替换）。
         # 身份不同动作本来就不同，只换颜色的话一眼看不出自己在哪个身份。
         self.aux_row = ctk.CTkFrame(right_panel, fg_color="transparent")
-        self.aux_row.grid(row=1, column=0, sticky="ew", pady=(0, PAD_TIGHT))
+        self.aux_row.grid(row=2, column=0, sticky="ew", pady=(0, PAD_TIGHT))
         self.aux_row.grid_remove()
 
         self.sync_btn = make_button(self.aux_row, "同步更新",
@@ -352,7 +438,7 @@ class HomePageMixin:
         self.action_row = ctk.CTkFrame(right_panel, fg_color="transparent",
                                         height=44 + 24)
         self.action_row.grid_propagate(False)
-        self.action_row.grid(row=2, column=0, sticky="ew", pady=(0, PAD_GAP))
+        self.action_row.grid(row=3, column=0, sticky="ew", pady=(0, PAD_GAP))
 
         self.apply_btn = make_button(self.action_row, "一键替换",
                                       command=self.apply_preset,
@@ -380,7 +466,7 @@ class HomePageMixin:
         # ---------- 枪包列表 ----------
         gunpack_group = ctk.CTkFrame(right_panel, fg_color=C_CARD_BG,
                                       corner_radius=R_CARD, border_width=0)
-        gunpack_group.grid(row=3, column=0, sticky="nsew", pady=(0, PAD_GAP))
+        gunpack_group.grid(row=4, column=0, sticky="nsew", pady=(0, PAD_GAP))
         gunpack_head = ctk.CTkFrame(gunpack_group, fg_color="transparent")
         gunpack_head.pack(fill=X, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
         make_section_header(gunpack_head, 4, "枪包列表").pack(side=LEFT)
@@ -425,18 +511,52 @@ class HomePageMixin:
 
         # ---------- 日志 ----------
         log_head = ctk.CTkFrame(right_panel, fg_color="transparent")
-        log_head.grid(row=4, column=0, sticky="ew")
-        make_label(log_head, text="日志", fg=C_TEXT_MUTED,
+        log_head.grid(row=5, column=0, sticky="ew")
+        make_label(log_head, text="完整日志", fg=C_TEXT_MUTED,
                    font_size=FS_TINY).pack(side=LEFT, padx=(PAD_XS, 0))
-        make_text_button(log_head, "清空", command=self.clear_log).pack(side=RIGHT)
+        self.home_log_toggle_btn = make_text_button(
+            log_head, "显示单条", command=self.toggle_log_mode)
+        self.home_log_toggle_btn.pack(side=RIGHT)
+        make_text_button(log_head, "清空", command=self.clear_log).pack(
+            side=RIGHT, padx=(0, PAD_TIGHT))
         self.home_log_text = ctk.CTkTextbox(
             right_panel, height=H_HOME_LOG, fg_color=C_PANEL_BG,
             border_color=C_BORDER_SOFT, border_width=BORDER_W,
             corner_radius=R_CONTROL, text_color=C_TEXT_SECONDARY,
-            font=(FONT_FAMILY_MONO, FS_SMALL), wrap="word")
-        self.home_log_text.grid(row=5, column=0, sticky="ew", pady=(PAD_XS, 0))
+            font=(FONT_FAMILY_MONO, FS_TINY), wrap="word")
+        self.home_log_text.grid(row=6, column=0, sticky="ew", pady=(PAD_XS, 0))
 
+        # 状态行是在拖拽区之后创建的：最后整棵卡片再注册一次，
+        # 保证拖到“未加载/当前预设”这些文字上也识别。
+        if HAS_DND:
+            try:
+                self._register_drop_tree(self.pack_group)
+            except Exception:
+                pass
         return page
+
+    def _register_drop_widget(self, widget):
+        """把外层/内部 canvas 都注册为 drop target（CTk 控件是复合控件）。"""
+        targets = [widget, getattr(widget, "_canvas", None),
+                   getattr(widget, "_label", None)]
+        for target in targets:
+            if target is None:
+                continue
+            try:
+                target.drop_target_register(DND_FILES)
+                target.dnd_bind('<<Drop>>', self.on_pack_drop)
+            except Exception:
+                pass
+
+    def _register_drop_tree(self, widget):
+        stack = [widget]
+        while stack:
+            node = stack.pop()
+            self._register_drop_widget(node)
+            try:
+                stack.extend(node.winfo_children())
+            except Exception:
+                pass
 
     def _hover_reveal(self, host, button, delay_ms=160):
         """卡头按钮常态隐藏，鼠标进入这张卡才浮出（不参与布局，不会顶动行）。"""
@@ -482,6 +602,54 @@ class HomePageMixin:
             except Exception:
                 pass
 
+    def _home_open_upload(self):
+        if not bool(getattr(self, "is_developer", False)):
+            self.toast("上传只对开发者开放", "warning")
+            return
+        self.show_page("manage")
+        self._manage_upload_files()
+
+    def _home_check_cloud(self):
+        name = getattr(self, "current_selected_preset", None)
+        if name:
+            self._online_check(name)
+            return
+        if getattr(self, "online", None) is None:
+            self.toast("在线模块未启用", "warning")
+            return
+        if bool(getattr(self, "is_developer", False)):
+            self._online_check_all()
+        else:
+            self.toast("先选择一个预设", "info")
+
+    def _update_home_cloud_status(self):
+        label = getattr(self, "home_cloud_status", None)
+        if label is None:
+            return
+        online = getattr(self, "online", None)
+        if online is None:
+            label.configure(text="云端 · 未启用", text_color=C_TEXT_MUTED)
+            return
+        if not bool(getattr(self, "is_developer", False)):
+            name = getattr(self, "current_selected_preset", None)
+            if name:
+                data = self._preset_card_data(name)
+                text = str(data.get("status") or "未绑定")
+                color = data.get("status_color") or C_TEXT_MUTED
+            else:
+                text, color = "未绑定", C_TEXT_MUTED
+            label.configure(text=f"云端 · {text}", text_color=color)
+            return
+        state = getattr(self, "_cloud_conn_state", "unknown")
+        info = online.account_info()
+        account = str(info.get("label") or "")
+        if state == "offline":
+            label.configure(text="云端 · 无法连接", text_color=C_ERROR)
+        elif account:
+            label.configure(text=f"云端 · {account}", text_color=C_TEXT_SECONDARY)
+        else:
+            label.configure(text="云端 · 未登录", text_color=C_TEXT_MUTED)
+
     def _publish_current(self):
         name = getattr(self, "current_selected_preset", None)
         if not name:
@@ -499,6 +667,21 @@ class HomePageMixin:
         dev = bool(getattr(self, "is_developer", False))
         loaded = bool(getattr(self, "preset_manager", None)
                       or getattr(self, "current_pack_path", None))
+        try:
+            # 管理面板：上传只给开发者，下载只给玩家；没有整合包时也保留
+            # （开发者可以先登录云端再选包）
+            if dev:
+                self.home_player_actions.pack_forget()
+                self.home_dev_actions.pack(side=LEFT)
+            else:
+                self.home_dev_actions.pack_forget()
+                self.home_player_actions.pack(side=LEFT)
+            self.home_tacz_btn.configure(
+                state="normal" if getattr(self, "tacz_path", None)
+                else "disabled")
+            self._update_home_cloud_status()
+        except Exception:
+            pass
         try:
             try:
                 if dev and loaded:
@@ -582,6 +765,17 @@ class HomePageMixin:
         self.log_manager.log(
             f"从拖入路径定位到整合包: {pack_root}", 'INFO')
         self.load_pack(pack_root)
+
+    def _on_pack_drop_click(self, event=None):
+        """拖入框空白处点一下 = 选整合包；点按钮/最近不抢。"""
+        try:
+            if event is not None and event.widget in (
+                    self.select_pack_btn, self.recent_toggle_btn,
+                    self.pack_more_btn):
+                return
+        except Exception:
+            pass
+        self.select_pack()
 
     # ==================== 打开文件夹 ====================
     def open_pack_folder(self):

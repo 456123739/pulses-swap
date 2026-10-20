@@ -72,10 +72,12 @@ class TransferMixin:
         self._inline_progress(current, total, message)
         if total > 0:
             pct = current / total
-            ui_call(self.root, lambda: self._animate_progress(pct))
-            ui_call(self.root, lambda: self.progress_label.configure(
-                text=f"{message} ({current}/{total})"))
-        ui_call(self.root, lambda: self.root.update_idletasks())
+            self._animate_progress(pct)
+            self.set_status(f"{message} ({current}/{total})", "busy",
+                            progress=pct)
+        else:
+            self.set_status(message or "处理中…", "busy")
+        self.root.update_idletasks()
 
     def _animate_progress(self, target):
         """进度条曲线推进，避免长任务里一格一格地跳。"""
@@ -114,7 +116,6 @@ class TransferMixin:
             pass
 
     def hide_progress(self):
-        ui_call(self.root, lambda: self.progress_bar.pack_forget())
         for name in ("inline_progress", "inline_label"):
             widget = getattr(self, name, None)
             if widget is not None:
@@ -122,9 +123,16 @@ class TransferMixin:
                     widget.place_forget()
                 except Exception:
                     pass
-        ui_call(self.root, lambda: self.progress_label.pack_forget())
-        ui_call(self.root, lambda: setattr(self, "_progress_value", 0.0))
-        ui_call(self.root, lambda: self.root.update_idletasks())
+        self._progress_value = 0.0
+        try:
+            self.progress_bar.pack_forget()
+        except Exception:
+            pass
+        self.set_status("", "muted")
+        try:
+            self.root.update_idletasks()
+        except Exception:
+            pass
 
     def set_busy_state(self, busy, operation=""):
         def _set_state(name, state):
@@ -193,7 +201,13 @@ class TransferMixin:
             pass
 
     def refresh_gunpacks(self, use_cache: bool = False):
-        if not self.preset_manager or not self.current_selected_preset or self.loading_presets:
+        """刷新枪包列表：读盘/比对放工作线程，主线程只做渲染。
+
+        以前这里在主线程 os.walk + 读 fingerprint，TACZ 目录大时点一下
+        预设会卡住整窗；现在先显示「读取中」，结果回来再一次性铺列表。
+        """
+        if (not self.preset_manager or not self.current_selected_preset
+                or self.loading_presets):
             self.gunpack_listbox.delete(0, END)
             self.gunpack_count_label.configure(text="共 0 个枪包")
             self._sync_gunpack_empty()
@@ -206,14 +220,44 @@ class TransferMixin:
             return
 
         self.gunpack_listbox.delete(0, END)
-        info = self.preset_manager.presets[preset_name]
+        self._sync_gunpack_empty()
+        self.gunpack_count_label.configure(text="读取枪包…")
+        seq = int(getattr(self, "_gunpack_seq", 0)) + 1
+        self._gunpack_seq = seq
+        manager = self.preset_manager
+        info = dict(manager.presets.get(preset_name) or {})
+        indexed = dict(info.get("gunpacks") or {})
+        applied = bool(info.get("applied"))
 
-        current = self.preset_manager.get_current_gunpacks_for_preset(
-            preset_name, use_cache=use_cache)
-        if use_cache and not current:
-            current = self.preset_manager.get_current_gunpacks_for_preset(
-                preset_name, use_cache=False)
+        def worker():
+            try:
+                current = manager.get_current_gunpacks_for_preset(
+                    preset_name, use_cache=use_cache)
+                if use_cache and not current:
+                    current = manager.get_current_gunpacks_for_preset(
+                        preset_name, use_cache=False)
+                ui_call(self.root, self._render_gunpacks, seq, preset_name,
+                        current, indexed, applied)
+            except Exception as exc:                # noqa: BLE001
+                ui_call(self.root, self._gunpacks_failed, seq, preset_name, exc)
 
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _gunpacks_failed(self, seq, preset_name, error):
+        if seq != getattr(self, "_gunpack_seq", 0) or \
+                preset_name != self.current_selected_preset:
+            return
+        self.log_manager.log(f"读取枪包列表失败: {error}", 'ERROR')
+        self.gunpack_listbox.delete(0, END)
+        self.gunpack_count_label.configure(text="共 0 个枪包")
+        self._sync_gunpack_empty()
+
+    def _render_gunpacks(self, seq, preset_name, current, indexed, applied):
+        if seq != getattr(self, "_gunpack_seq", 0):
+            return
+        if (preset_name != self.current_selected_preset
+                or not self.preset_manager):
+            return
         if current:
             conv = {}
             for n, v in current.items():
@@ -222,8 +266,6 @@ class TransferMixin:
                 else:
                     conv[n] = v
             current = conv
-
-        indexed = info.get('gunpacks', {})
         if indexed:
             conv = {}
             for n, v in indexed.items():
@@ -233,9 +275,8 @@ class TransferMixin:
                     conv[n] = v
             indexed = conv
 
+        self.gunpack_listbox.delete(0, END)
         if not current and not indexed:
-            # 空列表交给空状态组件，不再塞一行灰字
-            self.gunpack_listbox.delete(0, END)
             self.gunpack_count_label.configure(text="共 0 个枪包")
             self._sync_gunpack_empty()
             return
@@ -245,7 +286,6 @@ class TransferMixin:
             return str(fp.get("type") or "zip")
 
         def label_of(name: str) -> str:
-            # 文件夹型枪包没有扩展名，光看名字分不出和 zip 的区别
             return f"{name}（文件夹）" if kind_of(name) == "folder" else name
 
         cur_names = set(current.keys())
@@ -260,28 +300,29 @@ class TransferMixin:
             else:
                 normal.append(n)
 
-        location = "Tacz文件夹" if info.get('applied', False) else "预设文件夹"
+        location = "Tacz文件夹" if applied else "预设文件夹"
         total = len(missing) + len(extra) + len(modified) + len(normal)
 
         for name in missing:
             self.gunpack_listbox.insert(END, f"× {label_of(name)}")
             i = self.gunpack_listbox.size() - 1
-            self.gunpack_listbox.itemconfig(i, fg=C_STATUS_MISSING, bg=C_STATUS_MISSING_BG)
-
+            self.gunpack_listbox.itemconfig(
+                i, fg=C_STATUS_MISSING, bg=C_STATUS_MISSING_BG)
         for name in extra:
             self.gunpack_listbox.insert(END, f"⊙ {label_of(name)}")
             i = self.gunpack_listbox.size() - 1
-            self.gunpack_listbox.itemconfig(i, fg=C_STATUS_EXTRA, bg=C_STATUS_EXTRA_BG)
-
+            self.gunpack_listbox.itemconfig(
+                i, fg=C_STATUS_EXTRA, bg=C_STATUS_EXTRA_BG)
         for name in modified:
             self.gunpack_listbox.insert(END, f"~ {label_of(name)}")
             i = self.gunpack_listbox.size() - 1
-            self.gunpack_listbox.itemconfig(i, fg=C_STATUS_MODIFIED, bg=C_STATUS_MODIFIED_BG)
-
+            self.gunpack_listbox.itemconfig(
+                i, fg=C_STATUS_MODIFIED, bg=C_STATUS_MODIFIED_BG)
         for name in normal:
             self.gunpack_listbox.insert(END, f"✓ {label_of(name)}")
             i = self.gunpack_listbox.size() - 1
-            self.gunpack_listbox.itemconfig(i, fg=C_STATUS_NORMAL, bg=C_STATUS_NORMAL_BG)
+            self.gunpack_listbox.itemconfig(
+                i, fg=C_STATUS_NORMAL, bg=C_STATUS_NORMAL_BG)
 
         folders = sum(1 for n in list(cur_names | idx_names)
                       if kind_of(n) == "folder")
@@ -312,7 +353,9 @@ class TransferMixin:
                 lines.append(f"  ~ 变更: {len(modified)} 个 ({pv})")
             self.log_manager.log("\n".join(lines), 'WARNING')
         else:
-            self.log_manager.log(f"预设 '{preset_name}' 所有枪包校验通过（共 {total} 个）", 'SUCCESS')
+            self.log_manager.log(
+                f"预设 '{preset_name}' 所有枪包校验通过（共 {total} 个）",
+                'SUCCESS')
 
     # ==================== 预设应用 ====================
     def apply_preset(self):
@@ -336,10 +379,7 @@ class TransferMixin:
 
         self._stop_watcher()
         self.set_busy_state(True, "替换")
-        self.progress_bar.pack(fill=X, pady=(0, 4))
-        self.progress_label.pack(fill=X, pady=(0, 4))
-        self.progress_bar.set(0)
-        self.progress_label.configure(text="准备替换...")
+        self.set_status("准备替换...", "busy", progress=0.0)
 
         def cb(c, t, m):
             self.show_progress(c, t, m)
@@ -384,6 +424,7 @@ class TransferMixin:
             except Exception:
                 pass
             self.log_manager.log("预设应用成功！", 'SUCCESS')
+            self.set_status("预设已应用", "success")
         else:
             # 失败时 apply_preset 会把 applied 标记回滚：界面也必须跟着回到
             # 「未应用」，否则卡片还挂着「已应用」，用户以为换成功了。
@@ -393,6 +434,7 @@ class TransferMixin:
                     self.on_preset_selected(self.current_selected_preset)
             except Exception:
                 pass
+            self.set_status("预设应用失败", "error")
             show_error("错误", "预设应用失败，请查看日志")
         self._start_watcher()
         self._update_guide()

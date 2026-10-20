@@ -566,6 +566,9 @@ class CardList(ctk.CTkFrame):
         self.empty_state = EmptyState(self.empty, empty_text, empty_hint,
                                       bg=bg)
         self.empty_state.pack(expand=True)
+        # 初始没有任何卡片时就要显示空状态；否则列表区是一块纯白，
+        # 用户不知道是“没加载”还是“加载失败”。
+        self.empty.pack(fill="both", expand=True)
 
         self._bind_keys()
 

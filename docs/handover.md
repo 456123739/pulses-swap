@@ -1,4 +1,4 @@
-# Pulses Swap 交接文档（v2.5.12）
+# Pulses Swap 交接文档（v2.6.0）
 
 > 给接手的人 / AI 看的：这个软件被拆成了哪些文件、每个文件干什么、
 > 数据怎么流动、改哪里、怎么跑测试、怎么打包。
@@ -12,7 +12,7 @@
 一键把某组枪包换进游戏的 `tacz` 目录；同时把预设发布到**蓝奏云**，
 玩家绑定分享链接后可以增量同步。
 
-- 版本：`2.5.12`（`src/pulses/core/paths.py` 里的 `VERSION`）
+- 版本：`2.6.0`（`src/pulses/core/paths.py` 里的 `VERSION`）
 - 入口：`src/main.py` → `pulses.ui.app.main()`
 - 依赖：`customtkinter` `tkinterdnd2` `watchdog` `Pillow`（见 `requirements.txt`）
 - 不依赖任何第三方网络库（HTTP 全用标准库 `urllib`）
@@ -485,3 +485,16 @@ export DISPLAY=:99          # weston headless + Xwayland
 27. **`sources.json` 的读改写不要跨网络**：`_folder_of` 在 `ensure_path`（网络）
     之后重新 `get` 再写 `folder_id`，否则会用请求前的旧快照覆盖掉期间写入的
     分享链接/发布历史。
+
+## v2.6.0 新增坑位（务必保留）
+
+1. **侧边栏悬停不能用子控件 Enter/Leave**：Tk 的 crossing 事件被子控件吞掉，只在 `self.sidebar` 上绑定会出现“只有空白背景能展开”。现在用 root `<Motion>` + 指针坐标判定；展开/收起动画由 `sidebar_shell` 的宽度补间驱动。改动时不要退回只绑父控件。
+2. **压暗工作区不能遍历全部页面**：`_dim_content` 只处理 `active_page`，且延迟到宽度动画开始后；遍历四页/同步改色会把动画卡在 60px 半展开态。Windows 用 Toplevel alpha；非 Windows 用颜色压深回退。
+3. **CloudBrowser 不能有 `self._root`**：它会覆盖 Tkinter 的 `_root()` 方法，`winfo_children()`/`theme_widgets()` 直接 TypeError；字段名是 `_root_path`。
+4. **`make_menu_button` 依赖 `popup_menu` 导入**：factory.py 必须 `from .popup import popup_menu`；否则所有“更多/上传”菜单静默失效。PopupMenu 的 host 可能是按钮，root 要从 `winfo_toplevel()` 取，不能假设 `host.root`。
+5. **PopupMenu 外部点击**：root 的 `<Button-1>` 先于按钮 `<ButtonRelease>` 触发，`_on_click_outside` 必须先判断事件控件是否在 panel 内，否则菜单项永远点不中。
+6. **SlideStack 初始化尺寸是 1×1**：`_on_configure` 必须把所有非当前页停到新视口外，不能只摆当前页；否则设置页首次打开会显示成“数据库”页（多页叠在 x=1）。
+7. **CanvasSegmented 的 width/height/item_height 是“未缩放值”**：内部会乘 `px()`；新代码不要再传 `px(...)`，否则 125%/150% 下双倍放大。
+8. **DND 测试必须用 `TkinterDnD.Tk()`**：`ctk.CTk()` 没加载 tkdnd，`drop_target_register` 会静默失败；产品 main() 已用 TkinterDnD.Tk。整卡拖拽要在状态行创建后再次 `_register_drop_tree(pack_group)`，并同时注册 CTk 控件的 `_canvas/_label`。
+9. **设置页/管理页职责**：设置页只放偏好与数据库；管理页是全局预设操作区（总览、行内动作、快捷操作、云端文件、日志）。不要把上传/同步入口塞回设置页。
+10. **角色兜底**：UI 隐藏按钮不够；`_publish_now`/`_run_publish`/`OnlineService.publish(role=...)` 都有开发者守卫，`_run_sync`/`open_sync_dialog` 有玩家守卫。新增入口必须走同一守卫。

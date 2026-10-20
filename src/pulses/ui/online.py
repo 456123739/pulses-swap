@@ -17,6 +17,7 @@ from tkinter import *
 
 from .. import config
 from ..config import *
+from ..core.platform import ROLE_THEME
 from ..utils import *
 from ..animation import *
 from ..widget import *
@@ -131,8 +132,10 @@ class OnlineMixin:
         self.online_db_path = Path(db_path)
         self._preset_size_cache: dict[str, tuple[int, int]] = {}
         try:
+            # 账号文件放在本机公共数据库下，切整合包/切库都不用重新登录
             self.online = OnlineService(
-                db_path, log=self._online_log, app_version=VERSION)
+                db_path, log=self._online_log, app_version=VERSION,
+                account_db=str(DEFAULT_DB_DIR))
         except Exception as exc:
             self.log_manager.log(f"在线模块初始化失败: {exc}", 'ERROR')
             self.online = None
@@ -145,6 +148,7 @@ class OnlineMixin:
             threading.Thread(target=self._restore_account_thread,
                              daemon=True).start()
         self._update_identity_ui()
+        self._update_manage_role()
 
     def _shutdown_online(self):
         """关掉整合包：停掉在线服务，别让后台线程还拿着旧路径。"""
@@ -155,6 +159,11 @@ class OnlineMixin:
         self.online_pending = {}
         self.online_queue = []
         self._refresh_preset_cards()
+        try:
+            self._update_manage_role()
+            self._update_home_cloud_status()
+        except Exception:
+            pass
 
     def _online_log(self, message: str, level: str = "INFO",
                     verbose: bool = False) -> None:
@@ -181,6 +190,8 @@ class OnlineMixin:
             except Exception:
                 pass
         self._update_identity_ui()
+        if ok:
+            self._start_cloud_probe()
 
     # ==================================================================
     # 身份
@@ -195,6 +206,13 @@ class OnlineMixin:
         两套界面的动作语义不同（下载 vs 上传），旧计划必须作废重算。
         """
         new_role = "developer" if str(role).startswith("dev") else "player"
+        # 侧边栏展开时工作区被压暗（非 Windows 是颜色替换），换主题前
+        # 必须先收起并恢复原色，否则会把旧配色写回新主题。
+        try:
+            if getattr(self, "_sidebar_expanded", False):
+                self._sidebar_collapse()
+        except Exception:
+            pass
         previous = getattr(self.settings, "role", "player")
         changed = new_role != previous
         self.settings.role = new_role
@@ -220,6 +238,10 @@ class OnlineMixin:
             except Exception:
                 pass
             self._rebuild_settings_role_dependent()
+            try:
+                self._refresh_role_widgets(new_role)
+            except Exception:
+                pass
         if changed:
             self.online_states = {}
             self._clear_check_timers()
@@ -236,6 +258,21 @@ class OnlineMixin:
             if names:
                 self.online_queue = names
                 self._pump_online_queue()
+
+    def _refresh_role_widgets(self, role):
+        theme = ROLE_THEME.get(role) or ROLE_THEME.get("player", {})
+        accent = theme.get("accent", C_ACCENT)
+        soft = theme.get("accent_soft", C_ACCENT_SOFT)
+        try:
+            self.nav.refresh_colors(
+                bg=C_CARD_BG, pill=soft, hover=soft,
+                text=C_TEXT_MAIN, active=accent)
+        except Exception:
+            pass
+        try:
+            self.role_switch.refresh_colors(bg=C_CARD_BG, accent=accent)
+        except Exception:
+            pass
 
     def _rebuild_settings_role_dependent(self) -> None:
         """身份变了：设置页里的「数据库管理」只对开发者显示，整块重建。"""
@@ -254,54 +291,481 @@ class OnlineMixin:
             pass
 
     def _update_identity_ui(self) -> None:
-        """侧边栏的身份徽标 + 账号（打码）+ 按钮文字。"""
+        """侧边栏身份、账号、云端连接、角色滑块、管理面板一次刷新。"""
+        dev = bool(self.is_developer)
+        role = "developer" if dev else "player"
         account = ""
+        info = {}
         try:
-            if self.is_developer:
-                self.identity_badge.configure(text="开发者",
-                                                text_color=C_ACCENT)
-                if self.online is not None:
-                    account = str(self.online.account_info().get("label") or "")
-            else:
-                self.identity_badge.configure(text="玩家",
-                                                text_color=C_TEXT_SECONDARY)
-            self.identity_btn.configure(text="切换身份")
+            if self.online is not None and dev:
+                info = self.online.account_info()
+                account = str(info.get("label") or "")
+        except Exception:
+            info, account = {}, ""
+        self._show_account_box = dev
+        try:
+            if getattr(self, "_sidebar_expanded", False):
+                self._set_sidebar_sections(True)
         except Exception:
             pass
-        # 账号单独占一行：侧边栏只有 200px，塞进徽标会挤成省略号
+        try:
+            self.identity_badge.configure(
+                text="开发者" if dev else "玩家",
+                text_color=C_ACCENT if dev else C_TEXT_SECONDARY)
+            self.identity_btn.configure(text="账号" if account else "切换身份")
+        except Exception:
+            pass
+        try:
+            # 先把强调色换到目标身份，再让滑块动画滑过去；
+            # 反过来会把动画中途重排掉，看起来像瞬间跳过去。
+            self._refresh_role_widgets(role)
+            if self.role_switch.current() != role:
+                self.role_switch.set_role(role, animate=True)
+        except Exception:
+            pass
+        try:
+            self.sidebar_rail_role.configure(
+                text="开" if dev else "玩",
+                fg_color=C_ACCENT_SOFT if dev else C_PANEL_ALT_BG,
+                text_color=C_ACCENT if dev else C_TEXT_SECONDARY)
+        except Exception:
+            pass
+        # 账号行：有账号才出现；玩家不需要看见一串打码手机号
         try:
             label = getattr(self, "identity_account", None)
             if label is not None:
                 if account:
-                    label.configure(text=account, text_color=C_TEXT_MUTED)
-                    label.pack(anchor=W, padx=PAD_CARD_X,
-                               pady=(0, PAD_GAP))
+                    label.configure(text=account, text_color=C_TEXT_MAIN)
+                    if not label.winfo_manager():
+                        try:
+                            label.pack(anchor=W, padx=PAD_GAP,
+                                       before=self.sb_quota_label)
+                        except Exception:
+                            label.pack(anchor=W, padx=PAD_GAP)
                 else:
-                    label.pack_forget()
+                    if label.winfo_manager():
+                        label.pack_forget()
+        except Exception:
+            pass
+        # 登录/退出按钮：登录永远在；退出只在有账号时出现
+        try:
+            if not dev:
+                # 玩家不需要看见蓝奏账号/退登入口：身份切换交给下面的滑块
+                for btn in (self.sb_login_btn, self.identity_btn,
+                            self.sb_logout_btn):
+                    if btn.winfo_manager():
+                        btn.pack_forget()
+            elif info.get("saved"):
+                self.sb_login_btn.pack_forget()
+                if not self.sb_logout_btn.winfo_manager():
+                    self.sb_logout_btn.pack(side=RIGHT)
+                if not self.identity_btn.winfo_manager():
+                    self.identity_btn.pack(side=LEFT, padx=(PAD_TIGHT, 0))
+            else:
+                if not self.sb_login_btn.winfo_manager():
+                    self.sb_login_btn.pack(side=LEFT)
+                if self.sb_logout_btn.winfo_manager():
+                    self.sb_logout_btn.pack_forget()
+                if self.identity_btn.winfo_manager():
+                    self.identity_btn.pack_forget()
+        except Exception:
+            pass
+        self._update_identity_cloud_text()
+        self._apply_role_actions()
+        try:
+            self._update_manage_role()
         except Exception:
             pass
         try:
-            self._apply_role_actions()
+            self._update_home_cloud_status()
         except Exception:
             pass
         self._refresh_preset_cards()
+        try:
+            self._refresh_sidebar_clouds()
+        except Exception:
+            pass
+
+    def _update_identity_cloud_text(self):
+        dev = bool(self.is_developer)
+        state = getattr(self, "_cloud_conn_state", "unknown")
+        text, color = "未登录", C_TEXT_MUTED
+        if dev and self.online is not None:
+            if state == "online":
+                text, color = "已连接", C_SUCCESS
+            elif state == "offline":
+                text, color = "无法连接", C_ERROR
+            elif self.online.has_account():
+                text, color = "已登录", C_TEXT_SECONDARY
+        elif not dev:
+            text, color = "玩家模式", C_TEXT_MUTED
+        try:
+            self.sb_conn_label.configure(text=text, text_color=color)
+        except Exception:
+            pass
+        quota = getattr(self, "_cloud_quota", {}) or {}
+        count = int(getattr(self, "_uploads_today", 0) or 0)
+        if not dev:
+            qtext = "玩家无需登录"
+        else:
+            used = quota.get("used")
+            total = quota.get("total")
+            if used is not None and total is not None and float(total or 0) > 0:
+                qtext = (f"容量 {_human_size(used)} / {_human_size(total)}"
+                         f" · 今日上传 {count}/1000")
+            elif used is not None:
+                qtext = f"已用 {_human_size(used)} · 今日上传 {count}/1000"
+            else:
+                # 蓝奏 task=1 对部分账号返回失败；不要显示一个假的“容量 --”
+                qtext = f"今日上传 {count}/1000"
+        try:
+            self.sb_quota_label.configure(text=qtext)
+        except Exception:
+            pass
+
+    # ==================================================================
+    # 启动连通性 / 侧边栏云端列表
+    # ==================================================================
+    def _start_cloud_probe(self):
+        """启动后自动探测云端连通性（开发者）或已绑定源（玩家）。
+
+        全部走工作线程；界面只接收最后一次结果。开发者未登录时不去打网络，
+        直接显示「未登录」，避免启动时白等 30 秒。
+        """
+        service = getattr(self, "online", None)
+        if getattr(self, "_cloud_probe_running", False):
+            return
+        if service is None:
+            self._cloud_conn_state = "off"
+            try:
+                self._update_identity_cloud_text()
+            except Exception:
+                pass
+            return
+        dev = bool(self.is_developer)
+        if not dev:
+            self._cloud_conn_state = "player"
+            self._update_identity_cloud_text()
+            self.set_status("玩家模式 · 从分享链接下载", "muted")
+            return
+        if not service.has_account():
+            self._cloud_conn_state = "unknown"
+            self._update_identity_cloud_text()
+            self.set_status("开发者模式 · 未登录蓝奏云", "muted")
+            return
+        self._cloud_probe_running = True
+        self._cloud_conn_state = "checking"
+        self._update_identity_cloud_text()
+        self.set_status("正在检测云端连接…", "busy", progress=0.15)
+
+        def worker():
+            try:
+                result = service.probe_cloud()
+            except Exception as exc:                # noqa: BLE001
+                result = {"logged_in": True, "online": False,
+                          "error": str(exc)}
+            ui_call(self.root, self._on_cloud_probe_done, service, result)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_cloud_probe_done(self, service, result):
+        if self.online is not service:
+            return
+        self._cloud_probe_running = False
+        online = bool(result.get("online"))
+        self._cloud_conn_state = "online" if online else "offline"
+        self._cloud_quota = result.get("quota") or {}
+        try:
+            self._uploads_today = service.upload_count_today()
+        except Exception:
+            self._uploads_today = 0
+        if online:
+            latency = result.get("latency_ms")
+            text = "云端已连接"
+            if latency is not None:
+                text += f" · {latency} ms"
+            self.set_status(text, "success")
+            self.log_manager.log(text, 'INFO', verbose=True)
+        elif result.get("logged_in"):
+            self.set_status("云端无法连接", "error")
+            self.log_manager.log(
+                f"云端无法连接：{result.get('error') or '网络或账号状态异常'}",
+                'WARNING')
+        else:
+            self.set_status("还没有登录蓝奏云", "muted")
+        self._update_identity_ui()
+        self._refresh_sidebar_clouds(force=True)
+
+    def _sidebar_row_data(self):
+        """侧边栏云端列表的数据：优先本地预设，没选包时列云端根目录。"""
+        rows = []
+        if self.preset_manager is not None:
+            for name, info in self.preset_manager.presets.items():
+                if self.online is None:
+                    continue
+                if not (self.online.is_bound(name)
+                        or (self.is_developer
+                            and self.online.cloud_path_of(name))):
+                    continue
+                data = self._preset_card_data(name)
+                meta = str(data.get("meta") or "")
+                try:
+                    cloud_path = self.online.cloud_path_of(name)
+                    if cloud_path:
+                        meta = f"{meta} · {cloud_path}"
+                except Exception:
+                    pass
+                try:
+                    idx = Path(info.get("path") or "") / "index.json"
+                    stamp = idx.stat().st_mtime if idx.exists() else 0
+                    when = time.strftime("%m-%d %H:%M",
+                                         time.localtime(stamp)) if stamp else ""
+                except Exception:
+                    when = ""
+                rows.append({"name": name, "status": data.get("status") or "",
+                             "color": data.get("status_color") or C_TEXT_MUTED,
+                             "meta": meta, "date": when, "path": "",
+                             "local": True})
+            return rows
+        # 没有整合包：开发者列出云端根目录的文件夹（只读、可点进管理页）
+        if self.is_developer and self.online is not None:
+            for item in list(getattr(self, "_cloud_root_cache", []) or []):
+                cloud_path = "/" + str(item.get("name") or "")
+                rows.append({"name": str(item.get("name") or ""),
+                             "status": "云端文件夹", "color": C_INFO,
+                             "meta": cloud_path, "date": "", "path": cloud_path,
+                             "local": False})
+        return rows
+
+    def _refresh_sidebar_clouds(self, force=False):
+        box = getattr(self, "sb_cloud_scroll", None)
+        if box is None:
+            return
+        rows = self._sidebar_row_data()
+        signature = tuple((r["name"], r["status"], r["meta"], r["date"])
+                          for r in rows)
+        if not force and signature == getattr(self, "_sidebar_cloud_sig", None):
+            return
+        self._sidebar_cloud_sig = signature
+        for child in list(box.winfo_children()):
+            if child is getattr(self, "sb_cloud_empty", None):
+                continue
+            try:
+                child.destroy()
+            except Exception:
+                pass
+        try:
+            self.sb_cloud_count.configure(text=f"{len(rows)} 个")
+        except Exception:
+            pass
+        if not rows:
+            try:
+                if self.is_developer:
+                    self.sb_cloud_empty_hint.configure(
+                        text="登录并发布后，预设会出现在这里")
+                    self.sb_cloud_empty_btn.configure(
+                        text="去管理", command=lambda: self.show_page("manage"))
+                else:
+                    self.sb_cloud_empty_hint.configure(
+                        text="从分享链接添加，或先加载整合包")
+                    self.sb_cloud_empty_btn.configure(
+                        text="从云端添加", command=self.open_add_from_cloud)
+                self.sb_cloud_empty.place(relx=0.5, rely=0.42, anchor="center")
+            except Exception:
+                pass
+            try:
+                self.sb_cloud_all_btn.configure(
+                    text="全部更新" if not self.is_developer else "全部检查",
+                    state="disabled")
+            except Exception:
+                pass
+            if (self.is_developer and self.online is not None
+                    and not self.preset_manager):
+                self._fetch_cloud_roots()
+            return
+        try:
+            self.sb_cloud_empty.place_forget()
+        except Exception:
+            pass
+        for row in rows:
+            self._make_sidebar_cloud_row(box, row)
+        try:
+            self.sb_cloud_all_btn.configure(
+                text="全部更新" if not self.is_developer else "全部检查",
+                state="normal")
+        except Exception:
+            pass
+
+    def _make_sidebar_cloud_row(self, parent, row):
+        card = ctk.CTkFrame(parent, fg_color=C_CARD_BG,
+                            corner_radius=R_CONTROL, border_width=0,
+                            height=px(52))
+        card.pack(fill=X, pady=(0, PAD_MICRO), padx=0)
+        card.pack_propagate(False)
+        top = ctk.CTkFrame(card, fg_color="transparent")
+        top.pack(fill=X, padx=PAD_TIGHT, pady=(PAD_XS, 0))
+        make_label(top, text=str(row.get("name") or ""), fg=C_TEXT_MAIN,
+                   font_size=FS_SMALL, bold=True).pack(side=LEFT)
+        make_label(top, text=str(row.get("status") or ""),
+                   fg=row.get("color") or C_TEXT_MUTED,
+                   font_size=FS_TINY).pack(side=RIGHT)
+        sub = " · ".join(part for part in (str(row.get("meta") or ""),
+                                           str(row.get("date") or ""))
+                         if part)
+        make_label(card, text=sub, fg=C_TEXT_MUTED,
+                   font_size=FS_TINY).pack(anchor=W, padx=PAD_TIGHT)
+        for widget in (card, top) + tuple(top.winfo_children()) +                 tuple(card.winfo_children()):
+            try:
+                widget.bind("<Button-1>",
+                            lambda e, r=row: self._sidebar_cloud_click(r),
+                            add="+")
+            except Exception:
+                pass
+
+    def _sidebar_cloud_click(self, row):
+        name = row.get("name")
+        if row.get("local") and self.preset_manager is not None:
+            self.show_page("home")
+            self._sidebar_collapse()
+            if name in self.preset_manager.presets:
+                self.preset_cards.select(name, notify=False)
+                self.on_preset_selected(name)
+            return
+        if self.is_developer:
+            path = row.get("path") or ""
+            self.show_page("manage")
+            self._sidebar_collapse()
+            if path:
+                try:
+                    self.manage_browser.set_path(path)
+                    self.manage_path_var.set(path)
+                except Exception:
+                    pass
+
+    def _fetch_cloud_roots(self):
+        if getattr(self, "_cloud_root_loading", False):
+            return
+        service = self.online
+        if service is None or not self.is_developer or not service.has_account():
+            return
+        self._cloud_root_loading = True
+
+        def worker():
+            try:
+                data = service.cloud_browse("/")
+                ui_call(self.root, self._on_cloud_roots, data, None)
+            except Exception as exc:                # noqa: BLE001
+                ui_call(self.root, self._on_cloud_roots, None, exc)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_cloud_roots(self, data, error):
+        self._cloud_root_loading = False
+        if error is not None:
+            self._cloud_root_cache = []
+            return
+        self._cloud_root_cache = list(data.get("folders") or [])
+        self._refresh_sidebar_clouds(force=True)
+        try:
+            self._manage_overview_sig = None
+            self._update_manage_overview()
+            self._update_manage_summary()
+        except Exception:
+            pass
+
+    def _sidebar_update_all(self):
+        """侧边栏底部：玩家全部更新，开发者全部检查。"""
+        if getattr(self, "_sidebar_expanded", False):
+            self._sidebar_collapse()
+        if self.online is None:
+            return
+        if self.is_developer:
+            self._online_check_all()
+            return
+        if not self.preset_manager:
+            self.toast("先加载一个整合包", "info")
+            return
+        names = [n for n in self.preset_manager.presets
+                 if self.online.is_bound(n)]
+        if not names:
+            self.toast("还没有预设绑定云端源", "info")
+            return
+        confirm = bool(getattr(self.settings, "online_confirm_full", True))
+        if confirm and len(names) >= 1 and not ask_yes_no(
+                "全部更新",
+                f"将依次检查并更新 {len(names)} 个云端预设。\n\n"
+                f"更新过程中会写入本地预设/TACZ 目录，确定继续吗？"):
+            return
+        self._bulk_sync_queue = list(names)
+        self.set_status(f"全部更新：0/{len(names)}", "busy", progress=0.0)
+        self._bulk_sync_next()
+
+    def _bulk_sync_next(self):
+        queue = getattr(self, "_bulk_sync_queue", None)
+        if not queue:
+            self._bulk_sync_queue = None
+            self.set_status("全部更新完成", "success")
+            self.toast("全部更新完成", "success")
+            return
+        name = queue.pop(0)
+        self.set_status(f"全部更新：正在检查 {name}", "busy")
+        self._online_check(name, pending="sync")
+
+    def _bulk_after_sync(self, name=""):
+        if getattr(self, "_bulk_sync_queue", None) is None:
+            return
+        try:
+            self.root.after(120, self._bulk_sync_next)
+        except Exception:
+            self._bulk_sync_next()
 
     def open_identity_dialog(self):
+        # 账号/身份不依赖整合包：开发者可以先登录、先看云端，再选包。
+        if getattr(self, "_sidebar_expanded", False):
+            self._sidebar_collapse()
+        if getattr(self, "is_applying", False) or getattr(self, "online_busy",
+                                                           False):
+            self.toast("正在替换/同步，完成后再登录", "warning")
+            return
         if self.online is None:
-            # 还没选整合包时在线服务是空的 —— 这不是"安装不完整"。
-            # 开发者身份要能随时切回玩家，否则一旦以开发者退出就卡住了。
-            if self.is_developer:
-                self._set_role("player")
-                self.toast("已切回玩家", "info")
-                return
-            show_info("先选择一个整合包",
-                      "在线功能要等选好整合包（tacz 所在目录）之后才可用。\n\n"
-                      "选好之后再点这里，就能登录蓝奏云切换为开发者。")
+            show_warning("在线模块不可用",
+                         "在线模块没有加载成功，无法登录蓝奏云。\n"
+                         "请确认打包完整，或查看日志里的错误。")
             return
         if self.is_developer:
             self._open_developer_card()
         else:
             self._open_become_developer_card()
+
+    def _on_role_switch(self, role):
+        """侧边栏滑块点了一下：成功才让滑块停在目标位置。"""
+        if getattr(self, "is_applying", False) or getattr(self, "online_busy",
+                                                           False):
+            self.toast("正在替换/同步，完成后再切换身份", "warning")
+            return
+        target = "developer" if str(role).startswith("dev") else "player"
+        if target == ("developer" if self.is_developer else "player"):
+            return
+        if target == "player":
+            self._set_role("player")
+            self.set_status("已切换为玩家", "info")
+            return
+        if self.online is None:
+            self.toast("在线模块未启用", "warning")
+            return
+        if not self.online.has_account():
+            # 滑块先弹回玩家，登录成功后再由 _set_role 滑过去
+            try:
+                self.role_switch.set_role("player", animate=True)
+            except Exception:
+                pass
+            self._sidebar_collapse()
+            self.open_identity_dialog()
+            return
+        self._set_role("developer")
+        self.set_status("已切换为开发者", "success")
+        self._sidebar_collapse()
+        self.root.after(120, self._start_cloud_probe)
 
     @staticmethod
     def _caps_lock_on() -> bool:
@@ -468,6 +932,8 @@ class OnlineMixin:
         self.log_manager.log("已切换为开发者身份", 'SUCCESS')
         self.toast("已切换为开发者", "success")
         self._refresh_preset_cards()
+        self._refresh_sidebar_clouds(force=True)
+        self._start_cloud_probe()
 
     def _open_developer_card(self):
         card = make_card(self, None, width=460)
@@ -739,6 +1205,7 @@ class OnlineMixin:
             except Exception:
                 pass
         self._update_sync_button(name, data)
+        self._update_home_cloud_status()
 
     def _update_sync_button(self, name, data=None) -> None:
         button = getattr(self, "sync_btn", None)
@@ -797,6 +1264,14 @@ class OnlineMixin:
                 self._update_preset_online_label(self.current_selected_preset)
             except Exception:
                 pass
+        try:
+            self._refresh_sidebar_clouds()
+        except Exception:
+            pass
+        try:
+            self._update_manage_pack_list()
+        except Exception:
+            pass
 
     # ==================================================================
     # 检查更新
@@ -862,12 +1337,14 @@ class OnlineMixin:
                     plan = service.publish_plan(ref, on_phase=on_phase)
                 else:
                     plan = service.check(ref, on_phase=on_phase)
-                ui_call(self.root, self._on_check_done, name, plan, None, run)
+                ui_call(self.root, self._on_check_done, name, plan, None,
+                        run, service)
             except OnlineError as exc:
-                ui_call(self.root, self._on_check_done, name, None, exc, run)
+                ui_call(self.root, self._on_check_done, name, None, exc,
+                        run, service)
             except Exception as exc:                    # noqa: BLE001
                 ui_call(self.root, self._on_check_done, name, None,
-                        OnlineError(f"检查失败：{exc}"), run)
+                        OnlineError(f"检查失败：{exc}"), run, service)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -924,12 +1401,17 @@ class OnlineMixin:
             return
         state = self.online_states.setdefault(name, {})
         state["phase_text"] = text
+        self.set_status(f"{name} · {text}", "busy")
         self._refresh_preset_cards()
 
-    def _on_check_done(self, name, plan, error, run=None):
+    def _on_check_done(self, name, plan, error, run=None, service=None):
         current = getattr(self, "_check_runs", {}).get(name)
         if run is not None and current is not None and run != current:
             # 过期的检查结果：界面/状态已经被新一次检查接管
+            return
+        if service is not None and self.online is not service:
+            # 检查期间关包/换库：旧 service 的结果不能写进新界面
+            self.online_checking.discard(name)
             return
         self._cancel_check_timer(name)
         runs = getattr(self, "_check_runs", None)
@@ -953,6 +1435,7 @@ class OnlineMixin:
             state["error"] = str(error)
             state["plan"] = None
             self.log_manager.log(f"检查更新失败（{name}）：{error}", 'WARNING')
+            self.set_status(f"{name} · 无法连接", "error")
         else:
             state["phase"] = "ready"
             state["error"] = ""
@@ -960,17 +1443,25 @@ class OnlineMixin:
             if plan.has_changes:
                 self.log_manager.log(f"{name}：{plan.summary()}", 'INFO',
                                      verbose=True)
+            summary = self._check_summary(name)
+            self.set_status(f"{name} · {summary or '检查完成'}",
+                            "success" if not plan.has_changes else "warning")
         self._refresh_preset_cards()
 
         if name in self._online_recheck:
             self._online_recheck.discard(name)
             self._online_check(name)
             return
-
         pending = self.online_pending.pop(name, "")
-        if pending == "sync" and error is None:
+        if pending == "sync":
             # 一路走到一键同步：这里再弹「要更新哪些」就又绕回去了
-            self._sync_now(name)
+            if error is None:
+                started = self._sync_now(name)
+                if not started:
+                    self._bulk_after_sync(name)
+            else:
+                # 批量更新时某个预设检查失败：跳过它，继续下一个
+                self._bulk_after_sync(name)
         elif pending == "publish" and error is None:
             if bool(getattr(self.settings, "online_publish_preview", False)):
                 self.open_publish_dialog(name)
@@ -991,6 +1482,7 @@ class OnlineMixin:
             self.toast("还没有预设绑定云端源", "info")
             return
         self.online_queue = list(names)
+        self.set_status(f"正在检查 {len(names)} 个预设…", "busy", progress=0.0)
         self.toast(f"正在检查 {len(names)} 个预设…", "info")
         self._pump_online_queue()
 
@@ -1006,15 +1498,28 @@ class OnlineMixin:
                 continue
             self._online_check(name)
             return
+        if (not self.online_queue and not self.online_pending
+                and not getattr(self, "_bulk_sync_queue", None)
+                and not getattr(self, "online_busy", False)):
+            self.set_status("云端检查完成", "success")
 
     def _online_auto_check(self):
-        """启动后台检查（玩家身份 + 绑定了源 + auto_check）。"""
-        if self.online is None or self.is_developer or not self.preset_manager:
+        """启动后台检查：玩家查已绑定源，开发者查已填云端路径的预设。
+
+        只“检查”，绝不自动下载/自动发布；完整更新由用户点「全部更新」
+        并二次确认，或单张卡片明确点击后才执行。
+        """
+        if self.online is None or not self.preset_manager:
             return
+        developer = self.is_developer
         names = []
         for name in self.preset_manager.presets:
             source = self.online.source_of(name)
-            if not (source.get("lanzou") or {}).get("url"):
+            bound = bool((source.get("lanzou") or {}).get("url"))
+            if developer:
+                if not str(source.get("cloud_path") or "").strip():
+                    continue
+            elif not bound:
                 continue
             default_auto = bool(getattr(self.settings, "online_auto_check",
                                         True))
@@ -1022,8 +1527,11 @@ class OnlineMixin:
                 continue
             names.append(name)
         if not names:
+            if developer:
+                self._start_cloud_probe()
             return
         self.online_queue = names
+        self.set_status(f"启动检查：0/{len(names)} 个预设", "busy", progress=0.0)
         self._pump_online_queue()
 
     # ==================================================================
@@ -1031,6 +1539,9 @@ class OnlineMixin:
     # ==================================================================
     def open_add_from_cloud(self):
         """新玩家没有本地预设时，直接从分享链接建一个。"""
+        if self.is_developer:
+            self.toast("下载/添加云端预设只对玩家开放", "warning")
+            return
         if self.online is None or self.preset_manager is None:
             show_warning("还没加载整合包", "先选一个整合包根目录，再添加云端预设。")
             return
@@ -1737,43 +2248,50 @@ class OnlineMixin:
     def _set_online_busy(self, busy: bool) -> None:
         self.online_busy = bool(busy)
 
-    def _sync_now(self, name: str) -> None:
+    def _sync_now(self, name: str) -> bool:
         """玩家点「更新」= 直接同步，不再弹「要更新哪些」的选择框。
 
-        勾选策略放在设置里（同步时是否清理本地多余），默认只拉需要的东西；
-        单个文件的取舍对普通玩家没有意义，问一次就是多一次操作。
+        返回 True 表示已经启动了后台同步；调用方（批量更新）据此决定
+        是否继续下一个。开发者身份不允许走下载路径。
         """
         if self.online is None:
-            return
+            return False
+        if self.is_developer:
+            self.toast("开发者身份不执行下载，请切换为玩家", "warning")
+            return False
         # 玩家第一次从云端拉取时，预设必然是空的、也没法「先应用再更新」；
         # 「先应用才能执行」只约束开发者的发布。同步本身写的是预设目录
         # （已应用时写 tacz），两种状态都安全。
         if getattr(self, "is_applying", False):
             self.toast("正在替换枪包，完成后再更新", "warning")
-            return
+            return False
         state = self._online_state(name)
         plan = state.get("plan")
         if plan is None:
             self._online_check(name, pending="sync")
             self.toast("正在检查更新…", "info")
-            return
+            return False
         if getattr(plan, "blocked", None):
             show_warning("无法更新", plan.blocked[0])
-            return
+            return False
         if getattr(plan, "offline", False):
             self.toast("云端连不上，无法更新；先检查网络", "warning")
-            return
+            return False
         if not plan.has_changes:
             self.toast("已经是最新版本", "success")
-            return
+            return False
         clean = bool(getattr(self.settings, "online_sync_clean", False))
         selection = online_diff.selection_of(plan, include_deletes=clean)
         if not selection:
             self.toast("没有需要下载的内容", "info")
-            return
+            return False
         self._run_sync(name, plan, selection)
+        return True
 
     def open_sync_dialog(self, name: str):
+        if self.is_developer:
+            self.toast("开发者身份不执行下载，请切换为玩家", "warning")
+            return
         if self.online is None:
             show_warning("在线功能不可用", "在线模块没有加载成功。")
             return
@@ -1824,6 +2342,9 @@ class OnlineMixin:
             side=RIGHT, padx=(0, PAD_TIGHT))
 
     def _run_sync(self, name: str, plan, selection):
+        if self.is_developer:
+            self.toast("开发者身份不执行下载，请切换为玩家", "warning")
+            return
         ref = self._preset_ref(name)
         if ref is None:
             return
@@ -1858,6 +2379,7 @@ class OnlineMixin:
         service = self.online
         self._set_online_busy(True)
         self.set_busy_state(True, "同步")
+        self.set_status(f"正在同步 {name}", "busy")
 
         def worker():
             try:
@@ -1888,9 +2410,11 @@ class OnlineMixin:
         if error is not None:
             show_error("同步失败", str(error))
             self.log_manager.log(f"同步失败（{name}）：{error}", 'ERROR')
+            self._bulk_after_sync(name)
             return
         if result is None:
             self.toast("已取消同步", "info")
+            self._bulk_after_sync(name)
             return
         if result.failed:
             detail = "\n".join(f"· {path}：{reason}"
@@ -1904,6 +2428,7 @@ class OnlineMixin:
         self.log_manager.log(f"同步完成（{name}）：{result.summary()}",
                              'SUCCESS' if result.ok else 'WARNING')
         self._after_preset_changed(name)
+        self._bulk_after_sync(name)
 
     def _after_preset_changed(self, name: str):
         """同步/发布之后：重读预设、刷新卡片与详情。"""
@@ -1974,6 +2499,9 @@ class OnlineMixin:
 
         要逐项确认可以在设置里打开「发布前预览」。
         """
+        if not self.is_developer:
+            self.toast("发布只对开发者开放", "warning")
+            return
         if self.online is None:
             return
         if getattr(self, "is_applying", False) or getattr(self, "online_busy", False):
@@ -2102,6 +2630,9 @@ class OnlineMixin:
 
     def _run_publish(self, name, plan, selection, version, notes,
                      min_app: str = ""):
+        if not self.is_developer:
+            self.toast("发布只对开发者开放", "warning")
+            return
         # 最底层再守一道：任何入口（卡片/右键/预览）都不能绕过「先应用」
         if not self._online_guard_applied(name, "发布"):
             return
@@ -2137,12 +2668,13 @@ class OnlineMixin:
         service = self.online
         self._set_online_busy(True)
         self.set_busy_state(True, "发布")
+        self.set_status(f"正在发布 {name}", "busy")
 
         def worker():
             try:
                 result = service.publish(
                     ref, plan, selection, version=version, notes=notes,
-                    min_app=min_app,
+                    min_app=min_app, role="developer",
                     on_progress=on_progress,
                     cancel=lambda: cancel_flag["stop"])
                 ui_call(self.root, self._on_publish_done, card, name, result,
@@ -2232,6 +2764,11 @@ class OnlineMixin:
         stage = make_label(frame, text="准备中…", fg=C_TEXT_MAIN,
                            font_size=FS_SMALL)
         stage.pack(anchor=W)
+        # 百分比放右上角，不占布局高度；之前 update() 里引用了未定义的
+        # percent，异常被吞掉，导致进度文字永远不更新。
+        percent = make_label(frame, text="0%", fg=C_TEXT_MUTED,
+                              font_size=FS_TINY)
+        percent.place(in_=frame, relx=1.0, y=0, anchor="ne")
 
         bar = ctk.CTkProgressBar(frame, height=px(H_PROGRESS),
                                  corner_radius=R_PROGRESS,

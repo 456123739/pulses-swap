@@ -9,3 +9,4 @@ from .factory import *      # noqa: F401,F403
 from .cards import *        # noqa: F401,F403
 from .diffrow import *
 from .popup import *      # noqa: F401,F403
+from .sidebar import *    # noqa: F401,F403

@@ -48,6 +48,7 @@ from ..config import *
 from ..utils import *
 from ..animation import *
 from .button import AnimatedButton
+from .popup import popup_menu
 
 # ==================== 控件工厂 ====================
 def make_button(parent, text, command=None, width=None, state="normal",
@@ -125,8 +126,13 @@ def make_menu_button(parent, text=None, items=None, width=None, as_text=False):
             popup_menu(button, entries,
                        button.winfo_rootx(),
                        button.winfo_rooty() + button.winfo_height() + 2)
-        except Exception:
-            pass
+        except Exception as exc:                    # noqa: BLE001
+            # 菜单打不开时不要静默：这是用户能直接看到的失效操作
+            try:
+                import traceback
+                traceback.print_exc()
+            except Exception:
+                pass
         return "break"
 
     button.configure(command=popup)

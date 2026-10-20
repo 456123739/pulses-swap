@@ -110,13 +110,22 @@ def child(scale: float, pack: Path) -> int:
     print(f"\n=== 缩放 {scale:.2f} · UI_SCALE {ps.config.UI_SCALE:.2f} ===")
     check("整合包加载完成", ok_load)
 
-    # 侧边栏
-    sidebar = app.sidebar
-    expect_side = ps.px(ps.SIDEBAR_W)
-    # 高 DPI 下窗口会被屏幕尺寸钳制，侧边栏允许被压缩 10%
-    check(f"侧边栏宽度 {sidebar.winfo_width()} ≥ {expect_side * 0.9:.0f}",
-          sidebar.winfo_width() >= expect_side * 0.9,
-          (sidebar.winfo_width(), expect_side))
+    # 侧边栏：折叠态是 60px 图标栏；展开后是 292px 浮层
+    rail = app.sidebar_shell.winfo_width()
+    expect_rail = ps.px(60)
+    check(f"折叠侧边栏宽度 {rail} ≈ {expect_rail}",
+          abs(rail - expect_rail) <= 3, (rail, expect_rail))
+    app._sidebar_expand("scale")
+    pump(root, 450)
+    opened = app.sidebar_shell.winfo_width()
+    expect_open = ps.px(292)
+    check(f"展开侧边栏宽度 {opened} ≥ {expect_open * 0.85:.0f}",
+          opened >= expect_open * 0.85, (opened, expect_open))
+    check("展开不改变工作区起点",
+          abs(app.content_col.winfo_rootx()
+              - (app.root.winfo_rootx() + expect_rail + ps.px(8))) <= 8)
+    app._sidebar_collapse()
+    pump(root, 350)
 
     # 左列两块（整合包 / 预设管理；详情条已移到右列顶部）
     left = app.pack_drop_area.master.master.master   # page → left_panel
@@ -186,6 +195,24 @@ def child(scale: float, pack: Path) -> int:
               (card_widget.winfo_width(), win_w))
         stack[-1].close(False)
         pump(root, 200)
+
+    # 管理页 / 设置页两栏在高 DPI 下也不能溢出
+    app.show_page("manage")
+    pump(root, 500)
+    body_w = app.manage_body.winfo_width()
+    cloud_w = app.manage_cloud_card.winfo_width()
+    quick_w = app.manage_quick.winfo_width()
+    check(f"管理页两栏 {cloud_w}+{quick_w} ≤ {body_w}",
+          cloud_w > 100 and quick_w > 100 and cloud_w + quick_w <= body_w + 6,
+          (cloud_w, quick_w, body_w))
+    app.show_page("settings")
+    pump(root, 500)
+    left_w = app.settings_page.left_frame.winfo_width()
+    log_w = app.settings_page.log_card.winfo_width()
+    frame_w = app.settings_page.frame.winfo_width()
+    check(f"设置页两栏 {left_w}+{log_w} ≤ {frame_w}",
+          left_w > 100 and log_w > 100 and left_w + log_w <= frame_w + 6,
+          (left_w, log_w, frame_w))
 
     try:
         root.destroy()

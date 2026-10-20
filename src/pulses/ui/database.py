@@ -127,6 +127,8 @@ class DatabaseMixin:
         不重刷就会出现「身份是开发者、设置页却没有数据库管理」这类错乱。
         """
         try:
+            if getattr(self, "_sidebar_expanded", False):
+                self._sidebar_collapse()
             role = getattr(self.settings, "role", "player")
             previous = getattr(config, "UI_ROLE", "player")
             config.UI_ROLE = role
@@ -159,6 +161,12 @@ class DatabaseMixin:
         self._apply_role_from_settings()
         self.recent_manager = RecentPacksManager(db_path / ".global.json")
         self.db_ready = True
+        # 在线服务在没选整合包时也要存在：开发者可以先登录、先管云端。
+        # 账号文件走本机公共库（见 _init_online 的 account_base）。
+        try:
+            self._init_online(db_path)
+        except Exception as exc:
+            self.log_manager.log(f"在线模块初始化失败: {exc}", 'ERROR')
         self.update_recent_list()
         self.log_manager.log(f"{PROJECT_NAME} v{VERSION} 启动成功，作者: {AUTHOR}", 'SUCCESS')
         self.log_manager.log(f"数据库位置: {db_path}", 'INFO', verbose=True)
@@ -182,6 +190,11 @@ class DatabaseMixin:
                                  verbose=True)
         self.log_manager.log("Step 1 · 拖入整合包根目录（或整合包内任意文件）", 'GUIDE')
         self._update_guide()
+        # 启动连通性检测放在主循环空闲后，不拖慢首帧
+        try:
+            self.root.after(260, self._start_cloud_probe)
+        except Exception:
+            pass
 
     # ==================== 数据库管理 ====================
     def switch_database(self):
@@ -336,19 +349,15 @@ class DatabaseMixin:
         if not after_mode:
             return
 
-        self.progress_bar.pack(fill=X, pady=(0, 4))
-        self.progress_label.pack(fill=X, pady=(0, 4))
-        self.progress_bar.set(0)
-        self.progress_label.configure(text="准备适配...")
+        self.set_status("准备适配...", "busy", progress=0.0)
         self._disable_buttons(True)
         self.select_pack_btn.configure(state="disabled")
 
         def progress_cb(c, t, m):
             if t > 0:
                 pct = c / t
-                ui_call(self.root, lambda p=pct: self.progress_bar.set(p))
-                ui_call(self.root, lambda m=m, c=c, t=t: self.progress_label.configure(
-                    text=f"{m} ({c}/{t})"))
+                ui_call(self.root, self.set_status,
+                        f"{m} ({c}/{t})", "busy", pct)
             # 只处理重绘空闲任务：原来用 update() 会连带处理用户事件，
             # 拖拽窗口大小时每个进度回调都会重入一次完整事件循环，明显卡顿
             ui_call(self.root, lambda: self.root.update_idletasks())
@@ -371,9 +380,8 @@ class DatabaseMixin:
         threading.Thread(target=worker, daemon=True).start()
 
     def _on_migrate_finished(self, stats: dict, after_mode: str):
-        self.progress_bar.pack_forget()
-        self.progress_label.pack_forget()
         self._disable_buttons(False)
+        self.set_status("", "muted")
         self.select_pack_btn.configure(state="normal")
 
         disposed = stats.get('disposed', 'none')

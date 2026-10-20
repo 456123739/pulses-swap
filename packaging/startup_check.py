@@ -72,6 +72,15 @@ if root is not None:
     check("窗口不透明（-alpha = 1.0）", abs(alpha - 1.0) < 1e-6, alpha)
     check("窗口有实际尺寸", root.winfo_width() > 400 and root.winfo_height() > 300,
           (root.winfo_width(), root.winfo_height()))
+    try:
+        sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+        cx = root.winfo_rootx() + root.winfo_width() // 2
+        cy = root.winfo_rooty() + root.winfo_height() // 2
+        check(f"窗口基本居中（中心 {cx},{cy} / 屏幕 {sw},{sh}）",
+              abs(cx - sw // 2) <= 50 and abs(cy - sh // 2) <= 60,
+              (cx, cy, sw, sh))
+    except Exception:
+        pass
 
 check("CTk 的自动 DPI 轮询已关闭",
       ctk.ScalingTracker.deactivate_automatic_dpi_awareness is True)

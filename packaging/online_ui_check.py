@@ -134,8 +134,10 @@ def main() -> int:
     _close_top_card(root)
     app.settings.role = "developer"
     app.online.accounts.set("4654636", "secret", username="18651999816")
+    # 侧边栏是折叠图标栏：账号行只在展开态可见，先展开再断言
+    app._sidebar_expand("test")
     app._update_identity_ui()
-    pump(root, 150)
+    pump(root, 350)
     check(app.identity_badge.cget("text") == "开发者",
           f"身份徽标：{app.identity_badge.cget('text')}")
     check(app.identity_account.winfo_ismapped() == 1
@@ -148,6 +150,8 @@ def main() -> int:
     pump(root, 120)
     check(app.identity_account.winfo_ismapped() == 0,
           "玩家身份不显示账号行")
+    app._sidebar_collapse()
+    pump(root, 250)
 
     print("\n[5] 来源框")
     name = list(app.preset_manager.presets)[0]

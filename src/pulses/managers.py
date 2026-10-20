@@ -66,6 +66,8 @@ class AppSettings:
         self.online_sync_clean = False
         # 开发者发布前要不要先看差异清单（默认直接发）
         self.online_publish_preview = False
+        # 批量/完整更新前二次确认（需求：完整更新必须有确认）
+        self.online_confirm_full = True
         self._settings_file: Path | None = None
 
     def bind_database(self, db_path: Path):
@@ -87,6 +89,8 @@ class AppSettings:
                     data.get('online_sync_clean', False))
                 self.online_publish_preview = bool(
                     data.get('online_publish_preview', False))
+                self.online_confirm_full = bool(
+                    data.get('online_confirm_full', True))
             except Exception:
                 pass
 
@@ -101,7 +105,8 @@ class AppSettings:
                            'animations': self.animations,
                            'online_auto_check': self.online_auto_check,
                            'online_sync_clean': self.online_sync_clean,
-                           'online_publish_preview': self.online_publish_preview},
+                           'online_publish_preview': self.online_publish_preview,
+                           'online_confirm_full': self.online_confirm_full},
                           f, indent=2, ensure_ascii=False)
             return True
         except Exception as e:
@@ -169,6 +174,10 @@ class LogManager:
         timestamp = datetime.now().strftime('%H:%M:%S')
         log_line = f"[{timestamp}] [{level}] {message}\n"
         self.full_log.append((log_line, level, bool(verbose)))
+        # 完整日志长时间运行会无限长；保留最近 4000 行足够排障，
+        # 也避免每次追加都把整块文本重绘一遍。
+        if len(self.full_log) > 4000:
+            del self.full_log[:1000]
         if threading.current_thread() is threading.main_thread():
             self._update_display()
         else:
@@ -176,6 +185,11 @@ class LogManager:
 
     def set_show_full(self, show_full: bool):
         self.show_full = show_full
+        for widget in list(self.widgets):
+            try:
+                widget._log_seen = -1
+            except Exception:
+                pass
         if threading.current_thread() is threading.main_thread():
             self._update_display()
         else:
@@ -196,9 +210,30 @@ class LogManager:
 
     def _render(self, widget):
         try:
+            if self.show_full:
+                # 追加模式：完整日志只写新增的那一行，不再清空重绘。
+                seen = int(getattr(widget, "_log_seen", -1))
+                total = len(self.full_log)
+                if seen > total:
+                    seen = -1
+                if seen == total:
+                    return
+                if seen >= 0 and seen == total - 1:
+                    log_line, level, _verbose = self.full_log[-1]
+                    self._insert_log(widget, log_line, level)
+                    widget._log_seen = total
+                    widget.see(END)
+                    return
+                widget.delete("1.0", END)
+                for log_line, level, _verbose in self.full_log:
+                    self._insert_log(widget, log_line, level)
+                widget._log_seen = total
+                widget.see(END)
+                return
             widget.delete("1.0", END)
             for log_line, level in self._visible_entries():
                 self._insert_log(widget, log_line, level)
+            widget._log_seen = -1
             widget.see(END)
         except Exception:
             pass
@@ -220,6 +255,7 @@ class LogManager:
         for widget in list(self.widgets):
             try:
                 widget.delete("1.0", END)
+                widget._log_seen = 0
             except Exception:
                 pass
 
@@ -397,12 +433,14 @@ class _TaczEventHandler(FileSystemEventHandler):
 
 
 class TaczWatcher:
-    DEBOUNCE_SEC = 0.8
+    DEBOUNCE_SEC = 0.45
 
-    def __init__(self, tacz_path: Path, on_change_callback, log_manager=None):
+    def __init__(self, tacz_path: Path, on_change_callback, log_manager=None,
+                 extra_paths=None):
         self.tacz_path = tacz_path
         self.on_change_callback = on_change_callback
         self.log = log_manager
+        self.extra_paths = [Path(p) for p in (extra_paths or []) if p]
         self.observer = None
         self._timer: threading.Timer | None = None
         self._lock = threading.Lock()
@@ -421,7 +459,19 @@ class TaczWatcher:
             handler = _TaczEventHandler(self._schedule)
             self.observer = Observer()
             self.observer.daemon = True
-            self.observer.schedule(handler, str(self.tacz_path), recursive=True)
+            roots = [self.tacz_path] + list(self.extra_paths)
+            seen = set()
+            for root in roots:
+                try:
+                    key = str(Path(root).resolve()).lower()
+                except Exception:
+                    key = str(root).lower()
+                if key in seen or not Path(root).exists():
+                    continue
+                seen.add(key)
+                self.observer.schedule(handler, str(root), recursive=True)
+            if not seen:
+                return False
             self.observer.start()
             self._active = True
             if self.log:
