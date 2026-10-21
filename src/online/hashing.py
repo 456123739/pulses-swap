@@ -32,19 +32,33 @@ IGNORED_SUFFIX = (".tmp", ".part", ".crdownload", ".swp", ".bak")
 EXCLUDED_NAMES = {
     "index.json", "version.txt", "description.txt",
     "tacz-pre.toml", "blacklist.txt",
+    # 云端 manifest 自己（正常不会出现在预设目录里，防止手工放进去被当枪包）
+    "_pulses_manifest.cfg", "_pulses_manifest.txt",
 }
-EXCLUDED_DIRS = {"tacz_default_gun", "__pycache__"}
+# TACZ 自己创建的默认枪目录：不上传、不下载、不进 manifest。
+# 真实目录名是 tacz_default_gun；带连字符的写法也一并兼容，避免用户手工
+# 改名后被当成枪包内容。
+EXCLUDED_DIRS = {"tacz_default_gun", "tacz-default-gun", "__pycache__"}
+
+_IGNORED_NAMES_LOWER = {name.lower() for name in IGNORED_NAMES}
+_EXCLUDED_NAMES_LOWER = {name.lower() for name in EXCLUDED_NAMES}
+_EXCLUDED_DIRS_LOWER = {name.lower() for name in EXCLUDED_DIRS}
+# 这几个文件即使在子目录里也不该进入枪包内容（manifest 自己）
+_TREE_EXCLUDED_NAMES = {"_pulses_manifest.cfg", "_pulses_manifest.txt"}
 
 
 def _is_ignored(name: str) -> bool:
-    if name in IGNORED_NAMES or name.startswith("."):
+    lowered = str(name).lower()
+    if lowered in _IGNORED_NAMES_LOWER or str(name).startswith("."):
         return True
-    return name.lower().endswith(IGNORED_SUFFIX)
+    return lowered.endswith(IGNORED_SUFFIX)
 
 
 def is_metadata_name(name: str) -> bool:
     """这个名字是不是"程序自己维护的、不参与同步"的东西。"""
-    return (name in EXCLUDED_NAMES or name in EXCLUDED_DIRS
+    lowered = str(name).lower()
+    return (lowered in _EXCLUDED_NAMES_LOWER
+            or lowered in _EXCLUDED_DIRS_LOWER
             or _is_ignored(name))
 
 
@@ -67,9 +81,11 @@ def iter_tree(folder: str):
     folder = os.path.abspath(folder)
     items = []
     for dirpath, dirnames, filenames in os.walk(folder):
-        dirnames[:] = sorted(d for d in dirnames if not _is_ignored(d))
+        dirnames[:] = sorted(
+            d for d in dirnames
+            if not _is_ignored(d) and d.lower() not in _EXCLUDED_DIRS_LOWER)
         for name in sorted(filenames):
-            if _is_ignored(name):
+            if _is_ignored(name) or name.lower() in _TREE_EXCLUDED_NAMES:
                 continue
             full = os.path.join(dirpath, name)
             try:
@@ -295,7 +311,7 @@ def scan_local(root: str, cache: HashCache | None = None, *,
     for name in names:
         if should_stop is not None and should_stop():
             raise CancelledError("扫描已取消")
-        if name in EXCLUDED_NAMES or name in EXCLUDED_DIRS or _is_ignored(name):
+        if is_metadata_name(name):
             continue
         full = os.path.join(root, name)
         if os.path.isdir(full):
@@ -328,7 +344,8 @@ def scan_local(root: str, cache: HashCache | None = None, *,
                             "type": "zip" if name.lower().endswith(".zip")
                             else "file",
                             "size": st.st_size, "sha256": digest,
-                            "packed_size": st.st_size})
+                            "packed_size": st.st_size,
+                            "packed_sha256": digest})
             if progress is not None:
                 progress(name)
     if cache is not None:

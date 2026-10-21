@@ -182,6 +182,15 @@ class Downloader:
                     raw_id=info.get("raw_id"),
                     progress=progress, cancel=self.cancel,
                     expected_size=expected)
+                packed_expect = str(entry.get("packed_sha256") or "").lower()
+                if packed_expect:
+                    packed_actual = sha256_file(download_target)
+                    if packed_actual != packed_expect:
+                        raise IntegrityError(
+                            f"传输包校验不通过：{path}",
+                            detail=f"期望 {packed_expect[:16]}…，"
+                                   f"实际 {packed_actual[:16]}…",
+                            hint="已自动重下一次；仍失败说明云端文件损坏。")
                 if is_folder:
                     if os.path.isdir(dest):
                         shutil.rmtree(dest, ignore_errors=True)

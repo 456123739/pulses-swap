@@ -1,9 +1,12 @@
 # 更新日志
 
-## v2.6.1（2026-10-21）
+## v2.7.0（2026-10-21）
 
 - 折叠侧栏底部显示**当前身份**：玩家 `Ply`（青色）/ 开发者 `Dev`（石板蓝），下方小字写全称；展开后显示「切换为开发者身份 / 切换为玩家身份」，标题对齐到目标选项上方。
-- 仅此一项界面调整，其余功能与 2.6.0 相同。
+- 云端 manifest 从 `_pulses_manifest.txt` 升级为 `_pulses_manifest.cfg`（**内容仍是 JSON**，只为绕开蓝奏扩展名白名单，schema 2）：每个枪包带 `sha256` / `packed_sha256`，整份 manifest 带 `manifest_sha256`；旧 `.txt` 仍可读，发布后自动迁移。
+- `tacz_default_gun` / `tacz-default-gun` 在任意层级都不扫描、不打包、不进 manifest；TACZ 默认枪由游戏自己创建。
+- 2.7.0 暂不构建 macOS；Release 只包含 Windows 绿色版 / 安装器和 Linux 版，源码包一并上传。
+- 其余功能与 2.6.0 相同。
 
 ## v2.6.0（2026-10-21）
 

@@ -22,14 +22,15 @@ from . import diff, hashing, manifest as manifest_mod, paths, trash, updater
 from .downloader import Downloader
 from .errors import (AuthError, CancelledError, ManifestError, NetworkError,
                      OnlineError, SourceError)
-from .provider_lanzou import MANIFEST_NAME, LanzouShare
+from .provider_lanzou import LanzouShare, is_manifest_name
 from .provider_lanzou_account import LanzouAccount
 from .publisher import PublishResult, Publisher
 
 # 与主程序 PresetManager 的排除规则保持一致，否则「有改动」会误报
 PROTECTED_FILES = {"tacz-pre.toml", ".export-state.json", "blacklist.txt"}
-PROTECTED_DIRS = {"tacz_default_gun"}
-META_FILES = {"index.json", "version.txt", "description.txt"}
+PROTECTED_DIRS = {"tacz_default_gun", "tacz-default-gun"}
+META_FILES = {"index.json", "version.txt", "description.txt",
+              "_pulses_manifest.cfg", "_pulses_manifest.txt"}
 
 MANIFEST_LIMIT = 8 * 1024 * 1024
 
@@ -383,7 +384,7 @@ class OnlineService:
     # manifest 缓存
     # ------------------------------------------------------------------
     def _fetch_manifest(self, share: LanzouShare) -> dict:
-        found = share.find_file(MANIFEST_NAME)
+        found = share.find_manifest()
         if not found:
             raise SourceError(
                 "云端还没有发布内容",
@@ -391,11 +392,19 @@ class OnlineService:
         raw = share.fetch_bytes(found["file_id"], raw_id=found["raw_id"],
                                 limit=MANIFEST_LIMIT)
         try:
-            data = json.loads(raw.decode("utf-8"))
-        except (ValueError, UnicodeDecodeError) as exc:
-            raise ManifestError("云端 manifest 不是合法 JSON",
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise ManifestError("云端 manifest 不是 UTF-8 文本",
                                 detail=str(exc)) from exc
-        return manifest_mod.normalize(data)
+        try:
+            return manifest_mod.loads(
+                text, fmt="cfg" if found["name"].lower().endswith(".cfg")
+                else "")
+        except ManifestError:
+            raise
+        except Exception as exc:                    # noqa: BLE001
+            raise ManifestError("云端 manifest 读不出来",
+                                detail=str(exc)) from exc
 
     def _fetch_manifest_bounded(self, share: LanzouShare,
                                 timeout: float = 25.0) -> dict:
@@ -658,7 +667,8 @@ class OnlineService:
             return out
         for name in names:
             if name in META_FILES or name in PROTECTED_FILES \
-                    or name in PROTECTED_DIRS or name.startswith("."):
+                    or name in PROTECTED_DIRS or name.startswith(".") \
+                    or hashing.is_metadata_name(name):
                 continue
             fingerprint = hashing.item_fingerprint(os.path.join(root, name))
             if fingerprint:
@@ -1057,7 +1067,7 @@ class OnlineService:
                               hint="检查网络，或确认云端路径还在。") from exc
 
         names = {str(f.get("name") or "").lower() for f in files}
-        if not names or MANIFEST_NAME.lower() not in names:
+        if not names or not any(is_manifest_name(name) for name in names):
             # 空目录，或只有半成品（没 manifest）→ 视为云端为空，
             # 让发布把本地全量传上去
             return manifest_mod.empty_manifest(preset)
@@ -1104,7 +1114,7 @@ class OnlineService:
         names = {str(f.get("name") or "").lower() for f in files}
         self._log(f"云端路径可用：{path}（{len(files)} 个文件）", "SUCCESS")
         return {"path": path, "files": len(files),
-                "has_manifest": MANIFEST_NAME.lower() in names}
+                "has_manifest": any(is_manifest_name(name) for name in names)}
 
     # ------------------------------------------------------------------
     # 云端文件管理（管理面板用）

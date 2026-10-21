@@ -32,6 +32,8 @@ class PackTest(unittest.TestCase):
         write(self.root / "textures" / "a.png", b"PNGDATA")
         write(self.root / "textures" / "b.png", b"PNGDATA2")
         write(self.root / ".DS_Store", b"junk")
+        write(self.root / "tacz_default_gun" / "default.json", b"{}")
+        write(self.root / "tacz-default-gun" / "default2.json", b"{}")
         self.zip = Path(self.temp.name) / "gun.zip"
 
     def tearDown(self):
@@ -49,6 +51,8 @@ class PackTest(unittest.TestCase):
         with zipfile.ZipFile(self.zip) as zf:
             names = zf.namelist()
         self.assertNotIn(".DS_Store", names)
+        self.assertFalse(any("tacz_default_gun" in n for n in names))
+        self.assertFalse(any("tacz-default-gun" in n for n in names))
         self.assertIn("pack.json", names)
         self.assertIn("textures/a.png", names)
 

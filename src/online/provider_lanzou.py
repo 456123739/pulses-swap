@@ -40,9 +40,20 @@ DOMAIN_POOL = ("lanzoul.com", "lanzou.com", "lanzoux.com", "lanzoui.com",
                "lanzoub.com", "lanzoue.com", "lanzoup.com", "lanzouj.com",
                "lanzouy.com", "lanzouw.com")
 
-# 蓝奏对扩展名有白名单，.json 不在里面（上传会报"不能上传.json格式"），
-# 所以 manifest 用 .txt 后缀，内容仍然是 JSON。
-MANIFEST_NAME = "_pulses_manifest.txt"
+# 蓝奏对扩展名有白名单。真实账号实测：.json / .yaml / .toml / .ini /
+# .xml 都会被拒绝，.cfg 可以上传。manifest 因此用 .cfg 后缀、JSON 内容，
+# 读取时同时兼容旧版的 _pulses_manifest.txt（同样是 JSON）。
+MANIFEST_NAME = "_pulses_manifest.cfg"
+LEGACY_MANIFEST_NAMES = ("_pulses_manifest.txt",)
+MANIFEST_NAMES = (MANIFEST_NAME,) + LEGACY_MANIFEST_NAMES
+
+
+def is_manifest_name(name: str) -> bool:
+    """这个名字是不是云端 manifest（新版 .cfg 或旧版 .txt）。"""
+    lowered = str(name or "").lower()
+    return any(lowered == item.lower() for item in MANIFEST_NAMES)
+
+
 DOWNLOAD_CHUNK = 256 * 1024
 
 
@@ -363,6 +374,15 @@ class LanzouShare:
                 return item
         return None
 
+    def find_manifest(self) -> dict | None:
+        """按优先级找 manifest：新版 .cfg 优先，旧版 .txt 兜底。"""
+        by_name = {item["name"].lower(): item for item in self.list_files()}
+        for name in MANIFEST_NAMES:
+            found = by_name.get(name.lower())
+            if found is not None:
+                return found
+        return None
+
     # ------------------------------------------------------------------
     # ③④⑤ 直链解析
     # ------------------------------------------------------------------
@@ -587,12 +607,16 @@ class LanzouShare:
     def probe(self) -> dict:
         """测试连接：返回文件数 / 总体积 / 是否带 manifest。"""
         files = self.list_files(refresh=True)
+        manifest_file = self.find_manifest()
         return {
             "host": self.host_name,
             "count": len(files),
             "total_bytes": sum(f["size_bytes"] for f in files),
-            "has_manifest": any(f["name"].lower() == MANIFEST_NAME
-                                for f in files),
+            "has_manifest": manifest_file is not None,
+            "manifest_name": manifest_file["name"] if manifest_file else "",
+            "manifest_legacy": bool(
+                manifest_file and
+                manifest_file["name"].lower() != MANIFEST_NAME.lower()),
             "files": files,
         }
 

@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mock_lanzou_account import MockLanzouAccount
 from online import diff, hashing
 from online.errors import AuthError, SourceError
+from online.manifest import loads
 from online.provider_lanzou import MANIFEST_NAME
 from online.service import OnlineService, PresetRef
 
@@ -163,7 +164,7 @@ class PublishLoopTest(unittest.TestCase):
         self.assertTrue(first.ok, first.failed)
         folder = self._cloud_folder()
         before = self.account_server.files_in(folder)
-        before_manifest = json.loads(before[MANIFEST_NAME].decode("utf-8"))
+        before_manifest = loads(before[MANIFEST_NAME].decode("utf-8"), fmt="cfg")
         old_readme = self._cloud_name(before_manifest, "readme.txt")
         self.assertEqual(before[old_readme], b"hello")
 
@@ -179,7 +180,7 @@ class PublishLoopTest(unittest.TestCase):
         after = self.account_server.files_in(folder)
         # 旧文件没有被提前删除，旧 manifest 也还在
         self.assertEqual(after[old_readme], b"hello")
-        manifest = json.loads(after[MANIFEST_NAME].decode("utf-8"))
+        manifest = loads(after[MANIFEST_NAME].decode("utf-8"), fmt="cfg")
         self.assertEqual(manifest["version"], "v1.0.0")
         for entry in manifest["files"]:
             cloud_name = entry.get("cloud") or entry["path"]
@@ -198,6 +199,48 @@ class PublishLoopTest(unittest.TestCase):
         self.assertTrue(result.ok, result.failed)
         self.assertEqual((player_root / "readme.txt").read_bytes(), b"hello")
 
+    def test_legacy_txt_manifest_migrates_to_cfg(self):
+        """旧云端只有 _pulses_manifest.txt 时，仍能读，并在下次发布换成 .cfg。"""
+        self._login()
+        self.dev.set_cloud_path("测试预设", "/PulsesSwap/测试预设")
+        plan = self.dev.publish_plan(self.dev_ref)
+        first = self.dev.publish(self.dev_ref, plan, diff.selection_of(plan),
+                                 version="v1")
+        self.assertTrue(first.ok, first.failed)
+        folder = self._cloud_folder()
+        account = self.dev._require_account()
+        files = self.account_server.files_in(folder)
+        data = loads(files[MANIFEST_NAME].decode("utf-8"), fmt="cfg")
+        legacy = {"schema": 1, "name": data["name"],
+                  "version": data["version"], "generation": data["generation"],
+                  "min_app": data["min_app"], "notes": data["notes"],
+                  "generated_at": data["generated_at"],
+                  "files": [{k: v for k, v in entry.items()
+                             if k in ("path", "type", "target", "size",
+                                      "files", "sha256", "packed_size",
+                                      "cloud")}
+                            for entry in data["files"]]}
+        for info in account.list_files(folder):
+            if info["name"] == MANIFEST_NAME:
+                self.assertTrue(account.delete_file(info["id"]))
+        legacy_path = Path(self.temp.name) / "_pulses_manifest.txt"
+        legacy_path.write_text(json.dumps(legacy, ensure_ascii=False),
+                               encoding="utf-8")
+        account.upload(str(legacy_path), folder)
+
+        plan = self.dev.publish_plan(self.dev_ref)
+        self.assertEqual(plan.cloud_version, "v1")
+        result = self.dev.publish(self.dev_ref, plan, diff.selection_of(plan),
+                                  version="v2")
+        self.assertTrue(result.ok, result.failed)
+        files = self.account_server.files_in(folder)
+        self.assertIn(MANIFEST_NAME, files)
+        self.assertNotIn("_pulses_manifest.txt", files)
+        upgraded = loads(files[MANIFEST_NAME].decode("utf-8"), fmt="cfg")
+        self.assertEqual(upgraded["version"], "v2")
+        self.assertEqual(upgraded["schema"], 2)
+        self.assertTrue(upgraded["manifest_sha256"])
+
     def test_unselected_new_file_is_not_in_manifest(self):
         self._login()
         self.dev.set_cloud_path("测试预设", "/PulsesSwap/测试预设")
@@ -212,7 +255,7 @@ class PublishLoopTest(unittest.TestCase):
         self.assertTrue(result.ok, result.failed)
         folder = self._cloud_folder()
         files = self.account_server.files_in(folder)
-        manifest = json.loads(files[MANIFEST_NAME].decode("utf-8"))
+        manifest = loads(files[MANIFEST_NAME].decode("utf-8"), fmt="cfg")
         paths = {e["path"] for e in manifest["files"]}
         self.assertNotIn("brand_new.zip", paths)
         for entry in manifest["files"]:
@@ -234,7 +277,7 @@ class PublishLoopTest(unittest.TestCase):
         self.assertTrue(second.ok, second.failed)
         folder = self._cloud_folder()
         files = self.account_server.files_in(folder)
-        manifest = json.loads(files[MANIFEST_NAME].decode("utf-8"))
+        manifest = loads(files[MANIFEST_NAME].decode("utf-8"), fmt="cfg")
         entry = next(e for e in manifest["files"] if e["path"] == "readme.txt")
         cloud_name = entry.get("cloud") or entry["path"]
         self.assertIn(cloud_name, files)

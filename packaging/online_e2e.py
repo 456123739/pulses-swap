@@ -28,6 +28,7 @@ import pulses_swap as ps  # noqa: E402
 
 from mock_lanzou_account import MockLanzouAccount  # noqa: E402
 from online import diff, hashing, paths  # noqa: E402
+from online.manifest import loads  # noqa: E402
 from online.provider_lanzou import MANIFEST_NAME  # noqa: E402
 
 FAILURES: list[str] = []
@@ -264,7 +265,8 @@ def main() -> int:
         cloud_files = account.files_in(folder_id) if folder_id else {}
         check("云端有 4 个文件（3 枪包 + manifest）",
               len(cloud_files) == 4, sorted(cloud_files))
-        manifest = json.loads(cloud_files.get(MANIFEST_NAME, b"{}"))
+        manifest = loads(cloud_files.get(MANIFEST_NAME, b"{}").decode("utf-8"),
+                         fmt="cfg")
         check("manifest 版本正确", manifest.get("version") == "v2026.10.18",
               manifest.get("version"))
 

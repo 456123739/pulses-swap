@@ -50,7 +50,8 @@ LOGIN_REF = "lanzoui.com"
 
 UPLOAD_BLOCK = 256 * 1024
 
-# 蓝奏网页上传框里写死的扩展名白名单（.json 不在里面，所以 manifest 用 .txt）
+# 蓝奏网页上传框里写死的扩展名白名单（.json/.toml/.yaml 不在里面，
+# 所以 manifest 用 JSON 内容 + .cfg 后缀）
 ALLOWED_EXTENSIONS = frozenset("""
 apk zip rar txt 7z z e ct doc docx exe ke db tar pdf epub mobi azw azw3 w3x osk
 osz jar xpk cpk lua dmg ppt pptx xls xlsx mp3 gz psd ipa iso ttf txf ttc dwg bat
@@ -478,7 +479,7 @@ class LanzouAccount:
         if not is_allowed_upload(name):
             raise SourceError(
                 f"网盘不接受 .{name.rsplit('.', 1)[-1]} 扩展名：{name}",
-                hint="把这类文件放进 .zip，或改成 .txt 再发布。")
+                hint="把这类文件放进 .zip 再发布。")
         size = os.path.getsize(path)
         boundary = "----PulsesSwap" + str(int(time.time() * 1000))
 

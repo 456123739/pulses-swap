@@ -395,7 +395,7 @@ class RecentPacksManager:
 # ==================== TACZ 文件监控 ====================
 class _TaczEventHandler(FileSystemEventHandler):
     IGNORE_NAMES = {'tacz-pre.toml', '.export-state.json', 'blacklist.txt'}
-    IGNORE_DIRS = {'tacz_default_gun'}
+    IGNORE_DIRS = {'tacz_default_gun', 'tacz-default-gun'}
 
     def __init__(self, trigger):
         super().__init__()
@@ -574,7 +574,7 @@ def safe_preset_name(raw, fallback: str = "云端预设") -> str:
 
 class PresetManager:
     PROTECTED_FILES = ['tacz-pre.toml', '.export-state.json', 'blacklist.txt']
-    PROTECTED_DIRS = ['tacz_default_gun']
+    PROTECTED_DIRS = ['tacz_default_gun', 'tacz-default-gun']
     CACHE_FILE = '.cache.json'
     BATCH_SIZE = 5
     BATCH_DELAY = 0.005

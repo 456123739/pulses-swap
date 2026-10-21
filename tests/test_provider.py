@@ -169,3 +169,38 @@ class SizeTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ManifestLookupTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.cloud = MockLanzou({
+            "_pulses_manifest.txt": b'{"schema":1,"files":[]}',
+            "_pulses_manifest.cfg": b'{"schema":2,"files":[]}',
+        }, password="")
+        cls.cloud.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.cloud.stop()
+
+    def test_prefers_cfg_over_legacy_txt(self):
+        share = LanzouShare(self.cloud.url, "", retries=1,
+                            sleep=lambda _s: None)
+        found = share.find_manifest()
+        self.assertEqual(found["name"], "_pulses_manifest.cfg")
+        self.assertTrue(share.probe()["has_manifest"])
+        self.assertFalse(share.probe()["manifest_legacy"])
+
+    def test_falls_back_to_legacy_txt(self):
+        cloud = MockLanzou({"_pulses_manifest.txt": b'{"schema":1,"files":[]}'},
+                           password="")
+        cloud.start()
+        try:
+            share = LanzouShare(cloud.url, "", retries=1,
+                                sleep=lambda _s: None)
+            found = share.find_manifest()
+            self.assertEqual(found["name"], "_pulses_manifest.txt")
+            self.assertTrue(share.probe()["manifest_legacy"])
+        finally:
+            cloud.stop()

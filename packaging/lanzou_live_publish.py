@@ -35,7 +35,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from online import hashing, packing                              # noqa: E402
 from online.errors import OnlineError                            # noqa: E402
-from online.manifest import normalize, save                      # noqa: E402
+from online.manifest import loads, normalize, save                 # noqa: E402
 from online.provider_lanzou import MANIFEST_NAME, LanzouShare    # noqa: E402
 from online.provider_lanzou_account import LanzouAccount         # noqa: E402
 
@@ -71,12 +71,14 @@ def build_assets(base: Path) -> tuple[Path, Path, list[dict]]:
         {"path": "alpha.zip", "type": "zip",
          "size": raw_zip.stat().st_size,
          "packed_size": raw_zip.stat().st_size,
-         "sha256": hashing.sha256_file(str(raw_zip))},
+         "sha256": hashing.sha256_file(str(raw_zip)),
+         "packed_sha256": hashing.sha256_file(str(raw_zip))},
         {"path": "beta.zip", "type": "folder", "target": "beta",
          "size": hashing.tree_digest(str(folder))[1],
          "files": hashing.tree_digest(str(folder))[2],
          "packed_size": beta_zip.stat().st_size,
-         "sha256": hashing.tree_digest(str(folder))[0]},
+         "sha256": hashing.tree_digest(str(folder))[0],
+         "packed_sha256": hashing.sha256_file(str(beta_zip))},
     ]
     return raw_zip, beta_zip, files
 
@@ -156,7 +158,7 @@ def main() -> int:
         else:
             raw = reader.fetch_bytes(remote_manifest["file_id"],
                                      raw_id=remote_manifest["raw_id"])
-            fetched = normalize(json.loads(raw.decode("utf-8")))
+            fetched = loads(raw.decode("utf-8"), fmt="cfg")
             if fetched["generation"] != 1 or len(fetched["files"]) != 2:
                 print("    失败：manifest 内容不对")
                 ok = False

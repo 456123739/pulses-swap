@@ -239,7 +239,7 @@
 
 | 项目 | 结果 |
 |---|---|
-| 单元测试 | 158 个全部通过（新增云端管理/发布角色守卫测试） |
+| 单元测试 | 172 个全部通过（新增 CFG manifest/完整性/迁移测试） |
 | ui_audit（59 按钮/弹窗/设置/列表/错误/尺寸） | 通过 |
 | online_ui_check | 通过 |
 | startup_check（含居中断言） | 通过 |
@@ -278,7 +278,15 @@
 6. **应用重启/完整重启**：未做真实进程重启全流程；关闭再打开整合包已测。
 
 
-## 8. 2.6.1 小改
+## 8. 2.7.0 小改
 
 - 折叠侧栏显示当前身份：玩家 Ply（青色）/ 开发者 Dev（石板蓝），下方小字全称；展开后标题显示「切换为开发者/玩家身份」并对齐目标选项。
-- 单元测试 158 个、startup_check 通过；其余功能与 2.6.0 相同。
+- 单元测试 172 个、startup_check 通过；其余功能与 2.6.0 相同。
+
+## 9. 2.7.0 manifest 格式升级（CFG）
+
+- 云端 manifest 从 `_pulses_manifest.txt` 改为 `_pulses_manifest.cfg`（后缀 `.cfg`，**内容仍是 JSON**，schema 2）。
+- 每条枪包记录 `sha256`（内容/树摘要）、`packed_sha256`（传输包摘要）、`packed_size`、`cloud` 等；整份 manifest 记录 `manifest_sha256`（完整性校验，不是数字签名）。
+- 读取兼容旧 `.txt`（JSON）；发布时删除旧 manifest，写入 `.cfg`，下次检查自动迁移。
+- 真实蓝奏账号验证：`.cfg` 上传/匿名读取/下载校验通过；完整 `OnlineService.publish` 发布 3 个文件 + CFG manifest，云端读回 schema 2、3 条记录均带 `packed_sha256`，随后清理临时目录。
+- 测试：172 个单元测试、`ui_audit`、`online_ui_check`、`startup_check`、`scale_check`（100/125/150）全部通过。

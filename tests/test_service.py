@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mock_lanzou import MockLanzou
 from online import diff, hashing, packing, paths
 from online.errors import ManifestError, NetworkError, SourceError
-from online.manifest import normalize
+from online.manifest import dumps, normalize
 from online.provider_lanzou import MANIFEST_NAME, LanzouShare
 from online.service import OnlineService, PresetRef
 
@@ -60,8 +60,8 @@ class ServiceTest(unittest.TestCase):
         self.cloud_manifest = normalize({
             "name": "测试预设", "version": "2026.10.18", "generation": 4,
             "files": entries})
-        uploads[MANIFEST_NAME] = json.dumps(
-            self.cloud_manifest, ensure_ascii=False).encode("utf-8")
+        uploads[MANIFEST_NAME] = dumps(
+            self.cloud_manifest, fmt="cfg").encode("utf-8")
 
         self.cloud = MockLanzou(uploads, password="28pm")
         self.cloud.start()

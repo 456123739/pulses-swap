@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mock_lanzou_account import MockLanzouAccount
 from online import diff, hashing
 from online.errors import AuthError, SourceError
-from online.manifest import normalize
+from online.manifest import dumps, loads, normalize
 from online.provider_lanzou import MANIFEST_NAME
 from online.provider_lanzou_account import LanzouAccount
 from online.publisher import Publisher
@@ -59,7 +59,7 @@ class PublisherTest(unittest.TestCase):
     def cloud_manifest(self):
         files = self.server.files_in(self.folder)
         raw = files.get(MANIFEST_NAME)
-        return normalize(json.loads(raw.decode("utf-8"))) if raw else None
+        return loads(raw.decode("utf-8"), fmt="cfg") if raw else None
 
     def publish(self, *, version="1.0.0", selection=None, notes="",
                 generation=0, cancel=None):
@@ -83,7 +83,7 @@ class PublisherTest(unittest.TestCase):
             if info["name"] == MANIFEST_NAME:
                 self.account.delete_file(info["id"])
         path = Path(self.temp.name) / MANIFEST_NAME
-        path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        path.write_text(dumps(data, fmt="cfg"), encoding="utf-8")
         self.account.upload(str(path), self.folder)
 
     # ---------- 用例 ----------
@@ -116,6 +116,7 @@ class PublisherTest(unittest.TestCase):
                          ["alpha.zip", "beta.zip", "readme.txt"])
         self.assertEqual(result.generation, 1)
         self.assertTrue(result.share_url)
+        self.assertTrue(result.manifest.get("manifest_sha256"))
 
         files = self.server.files_in(self.folder)
         expected = {MANIFEST_NAME} | {self._cloud_name(p)
@@ -124,6 +125,8 @@ class PublisherTest(unittest.TestCase):
         self.assertEqual(set(files), expected)
 
         manifest = self.cloud_manifest()
+        self.assertEqual(manifest["schema"], 2)
+        self.assertTrue(manifest["manifest_sha256"])
         self.assertEqual(manifest["version"], "2026.10.18")
         self.assertEqual(manifest["generation"], 1)
         self.assertEqual(manifest["notes"], "首发")
@@ -131,6 +134,8 @@ class PublisherTest(unittest.TestCase):
         self.assertEqual(by_path["beta.zip"]["type"], "folder")
         self.assertEqual(by_path["beta.zip"]["target"], "beta")
         self.assertGreater(by_path["beta.zip"]["packed_size"], 0)
+        self.assertEqual(len(by_path["beta.zip"]["packed_sha256"]), 64)
+        self.assertEqual(len(by_path["readme.txt"]["packed_sha256"]), 64)
 
         # 打出来的包能被解回去，且树摘要对得上
         beta_cloud = by_path["beta.zip"].get("cloud") or "beta.zip"

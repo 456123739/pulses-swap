@@ -17,10 +17,11 @@ import os
 import shutil
 from dataclasses import dataclass, field
 
-from . import diff, packing
+from . import diff, hashing, packing
 from .errors import CancelledError, OnlineError, SourceError
 from .manifest import normalize
-from .provider_lanzou import MANIFEST_NAME, format_size
+from .provider_lanzou import (MANIFEST_NAMES, MANIFEST_NAME,
+                              format_size, is_manifest_name)
 from .provider_lanzou_account import is_allowed_upload
 
 
@@ -120,6 +121,7 @@ class Publisher:
         done_bytes = 0
         packed: dict[str, int] = {}
         uploaded_names: dict[str, str] = {}
+        uploaded_meta: dict[str, dict] = {}
         uploaded_ids: list = []
 
         try:
@@ -134,6 +136,7 @@ class Publisher:
                     key = item.path.lower()
                     uploaded_names[key] = uploaded["name"]
                     packed[key] = uploaded["size"]
+                    uploaded_meta[key] = uploaded
                     if uploaded.get("id"):
                         uploaded_ids.append(uploaded["id"])
                     result.uploaded.append(item.path)
@@ -145,6 +148,10 @@ class Publisher:
                 except CancelledError:
                     raise
                 except OnlineError as exc:
+                    result.failed.append((item.path, str(exc)))
+                    self._log(f"上传失败 {item.path}：{exc}", "ERROR")
+                    phase = "error"
+                except OSError as exc:
                     result.failed.append((item.path, str(exc)))
                     self._log(f"上传失败 {item.path}：{exc}", "ERROR")
                     phase = "error"
@@ -168,7 +175,8 @@ class Publisher:
         self._check_cancel()
         try:
             files = self._build_files(entries, plan, packed, uploaded_names,
-                                      {i.path.lower() for i in deletes})
+                                      {i.path.lower() for i in deletes},
+                                      uploaded_meta=uploaded_meta)
             manifest = normalize({
                 "name": name or plan.cloud_name,
                 "version": result.version,
@@ -183,10 +191,10 @@ class Publisher:
             return result
 
         try:
-            self._upload_manifest(manifest, folder_id, pack_dir, cloud_files,
-                                  previous_manifest=previous_manifest,
-                                  cloud_list=cloud_list)
-        except OnlineError as exc:
+            saved_manifest = self._upload_manifest(
+                manifest, folder_id, pack_dir, cloud_files,
+                previous_manifest=previous_manifest, cloud_list=cloud_list)
+        except (OnlineError, OSError) as exc:
             result.failed.append((MANIFEST_NAME, str(exc)))
             self._log(f"上传 manifest 失败，已尝试恢复旧 manifest：{exc}", "ERROR")
             self._drop_uploads(uploaded_ids)
@@ -203,7 +211,7 @@ class Publisher:
         except OnlineError as exc:
             self._log(f"取分享链接失败：{exc}", "WARNING")
 
-        result.manifest = manifest
+        result.manifest = saved_manifest or manifest
         result.ok = True
         self._log(f"发布完成：v{result.version}（generation "
                   f"{result.generation}，{len(files)} 个文件）", "SUCCESS")
@@ -227,7 +235,7 @@ class Publisher:
         """
         keep = {str(f.get("cloud") or f.get("path") or "").lower()
                 for f in files}
-        keep.add(MANIFEST_NAME.lower())
+        keep.update(name.lower() for name in MANIFEST_NAMES)
         old_names = set()
         for old in (previous_manifest or {}).get("files") or []:
             old_names.add(str(old.get("cloud") or old.get("path") or "").lower())
@@ -277,11 +285,17 @@ class Publisher:
                 on_progress(base_done + min(done, item.size or done),
                             total_bytes, name)
 
+        try:
+            size = os.path.getsize(path)
+            digest = hashing.sha256_file(path)
+        except OSError as exc:
+            raise SourceError(f"读取待上传文件失败：{item.path}",
+                              detail=str(exc)) from exc
         info = self.account.upload(path, folder_id, progress=progress,
                                    cancel=self.cancel)
         returned = str(info.get("name") or cloud_name)
         return {"id": info.get("id"), "name": returned,
-                "size": os.path.getsize(path)}
+                "size": size, "packed_sha256": digest}
 
     def _prepare_upload(self, entry: dict, pack_dir: str,
                         cloud_name: str | None = None) -> str:
@@ -306,7 +320,7 @@ class Publisher:
         if not is_allowed_upload(cloud_name):
             raise SourceError(
                 f"网盘不接受这个扩展名：{entry.get('path')}",
-                hint="把这个文件放进一个 .zip，或改成 .txt 再发布。")
+                hint="把这个文件放进一个 .zip 再发布。")
         target = os.path.join(pack_dir, cloud_name)
         if os.path.abspath(target) != os.path.abspath(source):
             shutil.copyfile(source, target)
@@ -316,7 +330,8 @@ class Publisher:
     def _build_files(self, entries: list[dict], plan: diff.Plan,
                      packed: dict[str, int],
                      uploaded_names: dict[str, str],
-                     deleted_paths: set[str] | None = None) -> list[dict]:
+                     deleted_paths: set[str] | None = None,
+                     uploaded_meta: dict[str, dict] | None = None) -> list[dict]:
         """按“发布完成时云端真实有什么”拼 files 数组。
 
         - 本次上传成功的：用本地条目 + 网盘实际文件名（cloud）
@@ -325,6 +340,7 @@ class Publisher:
         """
         local_by = {str(e.get("path", "")).lower(): e for e in entries}
         deleted_paths = deleted_paths or set()
+        uploaded_meta = uploaded_meta or {}
         out: list[dict] = []
         for item in plan.items:
             key = item.path.lower()
@@ -338,6 +354,9 @@ class Publisher:
                     entry["cloud"] = cloud_name
                 if key in packed:
                     entry["packed_size"] = packed[key]
+                uploaded = uploaded_meta.get(key) or {}
+                if uploaded.get("packed_sha256"):
+                    entry["packed_sha256"] = uploaded["packed_sha256"]
                 out.append(entry)
             elif item.cloud:
                 out.append({k: v for k, v in item.cloud.items()
@@ -348,15 +367,20 @@ class Publisher:
     def _upload_manifest(self, manifest: dict, folder_id: int, pack_dir: str,
                          cloud_files: dict,
                          previous_manifest: dict | None = None,
-                         cloud_list: list[dict] | None = None) -> None:
+                         cloud_list: list[dict] | None = None) -> dict:
         from .manifest import save
         target = os.path.join(pack_dir, MANIFEST_NAME)
-        save(manifest, target)
+        try:
+            saved = save(manifest, target)
+        except OSError as exc:
+            raise SourceError("生成云端 manifest 失败",
+                              detail=str(exc)) from exc
         for entry in cloud_list or []:
-            if str(entry.get("name") or "").lower() == MANIFEST_NAME.lower():
+            if is_manifest_name(entry.get("name")):
                 if not self.account.delete_file(entry["id"]):
                     raise SourceError("旧 manifest 删除失败")
-        cloud_files.pop(MANIFEST_NAME.lower(), None)
+        for name in MANIFEST_NAMES:
+            cloud_files.pop(name.lower(), None)
         try:
             info = self.account.upload(target, folder_id)
             returned = str(info.get("name") or "")
@@ -374,6 +398,7 @@ class Publisher:
                                        cloud_files)
             raise
         self._log("云端 manifest 已更新", "SUCCESS")
+        return saved
 
     def _restore_manifest(self, previous: dict, folder_id: int, pack_dir: str,
                           cloud_files: dict) -> None:

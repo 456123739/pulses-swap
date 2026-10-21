@@ -1,4 +1,4 @@
-# Pulses Swap 交接文档（v2.6.1）
+# Pulses Swap 交接文档（v2.7.0）
 
 > 给接手的人 / AI 看的：这个软件被拆成了哪些文件、每个文件干什么、
 > 数据怎么流动、改哪里、怎么跑测试、怎么打包。
@@ -12,7 +12,7 @@
 一键把某组枪包换进游戏的 `tacz` 目录；同时把预设发布到**蓝奏云**，
 玩家绑定分享链接后可以增量同步。
 
-- 版本：`2.6.1`（`src/pulses/core/paths.py` 里的 `VERSION`）
+- 版本：`2.7.0`（`src/pulses/core/paths.py` 里的 `VERSION`）
 - 入口：`src/main.py` → `pulses.ui.app.main()`
 - 依赖：`customtkinter` `tkinterdnd2` `watchdog` `Pillow`（见 `requirements.txt`）
 - 不依赖任何第三方网络库（HTTP 全用标准库 `urllib`）
@@ -29,7 +29,7 @@ pulses-swap/
 │   ├── pulses/                 界面 + 本地逻辑
 │   └── online/                 在线同步（不依赖 tkinter，可命令行跑）
 ├── packaging/                  打包配置 + 各种验证脚本
-├── tests/                      单元 / 集成测试（139 个）
+├── tests/                      单元 / 集成测试（172 个）
 ├── docs/                       方案、教程、交接文档
 └── requirements.txt
 ```
@@ -128,17 +128,17 @@ pulses-swap/
 | `errors.py` | 113 | 统一异常：`message / detail / hint / retryable` + 11 个子类 |
 | `acw.py` | 71 | 蓝奏 `acw_sc__v2` 人机校验的纯 Python 解法 |
 | `hashing.py` | 336 | 文件 sha256、**树摘要**、`HashCache`、`scan_local` |
-| `manifest.py` | 200 | manifest 规范化 / 校验 / 原子写 / 版本比较 |
+| `manifest.py` | 320 | manifest（JSON-in-CFG）规范化 / 完整性校验 / 原子写 / 版本比较 |
 | `packing.py` | 122 | 确定性打包、防穿越与防炸弹的解包 |
 | `diff.py` | 252 | 两方比对 → `Plan`（角色动作、阻塞项、统计、默认勾选） |
-| `provider_lanzou.py` | 645 | 匿名分享解析：列表 / 直链 / 人机校验 / 流式下载 / 重试 |
+| `provider_lanzou.py` | 669 | 匿名分享解析：列表 / 直链 / 人机校验 / 流式下载 / 重试 |
 | `provider_lanzou_account.py` | 575 | 账号操作：登录 / 建目录 / 流式上传 / 删除 / 分享 |
-| `downloader.py` | 259 | 下载到暂存 + 当场校验 |
+| `downloader.py` | 273 | 下载到暂存 + 当场校验（含传输包摘要） |
 | `updater.py` | 251 | 原子替换、目录两步改名 + journal、崩溃恢复 |
-| `publisher.py` | 301 | 建目录 → 删云端多余 → 上传 → manifest 最后替换 → 取分享 |
+| `publisher.py` | 414 | 建目录 → 删云端多余 → 上传 → manifest 最后替换 → 取分享 |
 | `trash.py` | 139 | 系统回收站（Windows / freedesktop） |
 | `paths.py` | 86 | 状态目录布局（`.online/`） |
-| `service.py` | 929 | 门面：绑定 / 检查 / 同步 / 发布 / 诊断 / 记账 / index.json |
+| `service.py` | 1393 | 门面：绑定 / 检查 / 同步 / 发布 / 诊断 / 记账 / index.json |
 | `__init__.py` | 38 | 公开 API |
 
 ---
@@ -160,7 +160,7 @@ pulses-swap/
 
 ```
 ① check()
-   云端分享 ──list_files──> 找 _pulses_manifest.txt ──fetch──> manifest
+   云端分享 ──list_files──> 找 _pulses_manifest.cfg（旧版 .txt 兜底）──fetch──> manifest
    本地目录 ──scan_local(HashCache)──> files[]
         └── diff.compare(local, cloud, role="player") ──> Plan
 ② sync(plan, selection)
@@ -206,21 +206,51 @@ PulsesSwap_database/.online/
 
 ### 5.1 manifest 格式
 
+云端 manifest 的文件名是 `_pulses_manifest.cfg`，**内容仍然是 JSON**。
+蓝奏的扩展名白名单实测拒绝 `.json` / `.toml` / `.yaml` / `.ini` / `.xml`，
+`.cfg` 可以上传；所以只改后缀，不换格式。解析直接用标准库 `json`
+（C 实现），比 INI/CFG 解析更快，也不会引入第二套结构。旧版
+`_pulses_manifest.txt`（同样 JSON）仍然兼容读取，发布一次后自动换成 `.cfg`。
+
 ```json
-{"schema":1, "name":"SSR预设包", "version":"2026.10.18", "generation":7,
- "min_app":"2.5.0", "notes":"…", "files":[
-   {"path":"gun_alpha.zip","type":"zip","size":41943040,
-    "sha256":"9f2c…","packed_size":41943040},
-   {"path":"gun_beta.zip","type":"folder","target":"gun_beta",
-    "size":52428800,"files":42,"sha256":"7d1a…","packed_size":39800000}]}
+{
+  "format": "pulses-manifest",
+  "schema": 2,
+  "name": "SSR预设包",
+  "version": "2026.10.18",
+  "generation": 7,
+  "min_app": "2.5.0",
+  "generated_at": "2026-10-18T01:00:00Z",
+  "notes": "新增 3 把枪，修贴图",
+  "manifest_sha256": "…",
+  "files": [
+    {"path": "gun_alpha.zip", "type": "zip", "size": 41943040,
+     "sha256": "9f2c…", "packed_size": 41943040,
+     "packed_sha256": "9f2c…"},
+    {"path": "gun_beta.zip", "type": "folder", "target": "gun_beta",
+     "size": 52428800, "files": 42, "sha256": "7d1a…",
+     "packed_size": 39800000, "packed_sha256": "…"}
+  ]
+}
 ```
 
 | 字段 | 含义 |
 |---|---|
+| `format` | 固定 `pulses-manifest`，防止把别的 JSON 误当 manifest |
+| `schema` | 当前 2；高于程序支持版本时提示升级 |
+| `manifest_sha256` | 对整份 manifest（不含本字段）的规范化 sha256，读入时校验 |
 | `path` | 上传到网盘的文件名，**也是比对唯一键**（不区分大小写） |
 | `type` | `zip` 原样 / `folder` 解压到 `target` / `file` 其他 |
 | `sha256` | 内容摘要；`folder` 是**树摘要** |
 | `size` / `packed_size` | 逻辑体积 / 传输体积 |
+| `packed_sha256` | 传输包摘要；`folder` 为 zip 的 sha256，下载后先验包再解压 |
+
+本地缓存 `cloud/<preset>.json` / `local/<preset>.json` 仍然是 JSON（不经过网盘），
+同样带 `manifest_sha256`；旧缓存没有该字段也能读。
+
+> `manifest_sha256` 是**完整性校验**，不是数字签名：能发现传输损坏、误改、
+> 手改漏改，但不能阻止有意的重新计算。真正的防篡改需要服务端签名/私钥，
+> 当前蓝奏分享模式做不到，别把它宣传成"不可伪造"。
 
 ### 5.2 树摘要（folder 类型的 sha256）
 
@@ -235,7 +265,7 @@ for (rel, size, file_sha) in sorted(树里每个文件):
 ### 5.3 不进 manifest 的东西
 
 `index.json` / `version.txt` / `description.txt` / `tacz-pre.toml` / `blacklist.txt` /
-`tacz_default_gun/` / 隐藏文件。见 `hashing.EXCLUDED_NAMES` 与 `service._sanitize_cloud()`。
+`tacz_default_gun/`（兼容 `tacz-default-gun/`）/ `_pulses_manifest.cfg` / `_pulses_manifest.txt` / 隐藏文件。见 `hashing.EXCLUDED_NAMES` 与 `service._sanitize_cloud()`。
 
 ### 5.4 网盘接口（2026 版，已实测）
 
@@ -274,7 +304,7 @@ for (rel, size, file_sha) in sorted(树里每个文件):
 # 源码运行
 python src/main.py
 
-# 单元 + 集成测试（139 个）
+# 单元 + 集成测试（172 个）
 python -m unittest discover -s tests -t .
 
 # 打包：一份 spec 出三端
@@ -380,7 +410,7 @@ export DISPLAY=:99          # weston headless + Xwayland
 | 限制 | 说明 |
 |---|---|
 | 单文件 100MB | 蓝奏免费账号上限，超出会被 `diff` 标红 |
-| 扩展名白名单 | `.json` 等传不上去；manifest 用 `.txt` |
+| 扩展名白名单 | `.json` / `.toml` / `.yaml` 传不上去；manifest 用 `.cfg` 后缀，内容是 JSON |
 | 不支持断点续传 | 蓝奏不给 Range，失败整包重来（文件级重试有） |
 | 文件夹型枪包粒度 | 内容一变就整包重传 |
 | 无玩家回滚 | 设计如此：云端为准，覆盖不备份 |
@@ -486,7 +516,7 @@ export DISPLAY=:99          # weston headless + Xwayland
     之后重新 `get` 再写 `folder_id`，否则会用请求前的旧快照覆盖掉期间写入的
     分享链接/发布历史。
 
-## v2.6.1 新增坑位（务必保留）
+## v2.7.0 新增坑位（务必保留）
 
 1. **侧边栏悬停不能用子控件 Enter/Leave**：Tk 的 crossing 事件被子控件吞掉，只在 `self.sidebar` 上绑定会出现“只有空白背景能展开”。现在用 root `<Motion>` + 指针坐标判定；展开/收起动画由 `sidebar_shell` 的宽度补间驱动。改动时不要退回只绑父控件。
 2. **压暗工作区不能遍历全部页面**：`_dim_content` 只处理 `active_page`，且延迟到宽度动画开始后；遍历四页/同步改色会把动画卡在 60px 半展开态。Windows 用 Toplevel alpha；非 Windows 用颜色压深回退。
@@ -498,3 +528,4 @@ export DISPLAY=:99          # weston headless + Xwayland
 8. **DND 测试必须用 `TkinterDnD.Tk()`**：`ctk.CTk()` 没加载 tkdnd，`drop_target_register` 会静默失败；产品 main() 已用 TkinterDnD.Tk。整卡拖拽要在状态行创建后再次 `_register_drop_tree(pack_group)`，并同时注册 CTk 控件的 `_canvas/_label`。
 9. **设置页/管理页职责**：设置页只放偏好与数据库；管理页是全局预设操作区（总览、行内动作、快捷操作、云端文件、日志）。不要把上传/同步入口塞回设置页。
 10. **角色兜底**：UI 隐藏按钮不够；`_publish_now`/`_run_publish`/`OnlineService.publish(role=...)` 都有开发者守卫，`_run_sync`/`open_sync_dialog` 有玩家守卫。新增入口必须走同一守卫。
+11. **manifest 是 `.cfg` 后缀，内容是 JSON**：蓝奏真实账号实测拒绝 `.json/.toml/.yaml/.ini/.xml`，只接受 `.cfg`；所以只改后缀，解析仍走 `json`（快、只有一套结构）。新发布只写 `_pulses_manifest.cfg`，读取时兼容旧 `_pulses_manifest.txt`（JSON）。`manifest_sha256` 必须校验，`packed_sha256` 必须在解压前校验；不要把 `.cfg` 改成 INI 或别的结构，否则会多一套解析和校验分支。

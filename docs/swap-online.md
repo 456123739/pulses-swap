@@ -11,7 +11,7 @@
 |---|---|
 | 预设 | 一组枪包的集合，本地一个目录 |
 | 源 | 预设绑定的云端位置（蓝奏分享链接 + 密码） |
-| manifest | 一份 JSON，描述预设里有哪些文件（路径 / 大小 / sha256 / 类型） |
+| manifest | 一份 JSON 清单（文件名为 `.cfg` 以通过网盘白名单；兼容旧 `.txt`），描述预设里有哪些文件（路径 / 大小 / sha256 / 类型） |
 | 本地 manifest | 程序扫描本地预设目录算出来的 manifest |
 | 云端 manifest | 开发者发布时自动生成并上传的 manifest |
 | 身份 | 全局角色：玩家 / 开发者 |
@@ -55,27 +55,38 @@
 
 ### 3.1 manifest
 
+云端 manifest 的文件名是 `_pulses_manifest.cfg`，**内容仍然是 JSON**。
+蓝奏不接受 `.json` / `.toml` / `.yaml`，`.cfg` 可以上传；所以只改后缀，
+解析仍走标准库 `json`（C 实现，快且只有一套结构）。旧版
+`_pulses_manifest.txt`（JSON）仍然兼容读取，发布后自动迁移。
+
 ```json
 {
-  "schema": 1,
+  "format": "pulses-manifest",
+  "schema": 2,
   "name": "SSR预设包",
   "version": "2026.10.18",
   "generation": 7,
   "min_app": "2.5.0",
   "generated_at": "2026-10-18T01:00:00Z",
   "notes": "新增 3 把枪，修贴图",
+  "manifest_sha256": "…",
   "files": [
     {"path": "gun_alpha.zip", "type": "zip", "size": 41943040,
-     "sha256": "9f2c…", "packed_size": 41943040},
-    {"path": "gun_beta.zip",  "type": "folder", "target": "gun_beta",
-     "size": 52428800, "files": 42, "sha256": "7d1a…", "packed_size": 39800000}
+     "sha256": "9f2c…", "packed_size": 41943040,
+     "packed_sha256": "9f2c…"},
+    {"path": "gun_beta.zip", "type": "folder", "target": "gun_beta",
+     "size": 52428800, "files": 42, "sha256": "7d1a…",
+     "packed_size": 39800000, "packed_sha256": "…"}
   ]
 }
 ```
 
 | 字段 | 说明 |
 |---|---|
-| `schema` | 只增字段不改语义；高于程序支持版本时提示升级 |
+| `format` | 固定 `pulses-manifest`，防止误读别的 JSON |
+| `schema` | 当前 2；高于程序支持版本时提示升级 |
+| `manifest_sha256` | 整份 manifest（不含本字段）的规范化摘要，读入时校验 |
 | `version` | 展示用版本号（默认日期式） |
 | `generation` | 每次发布自增；客户端结束时校验，防止装出半新半旧 |
 | `min_app` | 低于此版本的程序提示先升级 |
@@ -85,12 +96,16 @@
 | `files[].sha256` | 内容摘要（`folder` 为树摘要，见 4.6），唯一可信标识 |
 | `files[].size` | 逻辑体积；`folder` 为解压后总字节 |
 | `files[].packed_size` | 实际传输体积；`folder` 为打包后 zip 大小 |
+| `files[].packed_sha256` | 传输包摘要；下载后先验包，再解压/落盘 |
 | `files[].files` | 仅 `folder`：文件个数（展示与自检用） |
+
+> `manifest_sha256` 是完整性校验，不是数字签名；能发现损坏/误改，不能阻止
+> 有意的重新计算。真正的防篡改需要服务端签名/私钥，蓝奏分享模式做不到。
 
 **哪些东西不进 manifest**
 
 `index.json` / `version.txt` / `description.txt` 是程序自己维护的预设元数据，
-`tacz-pre.toml` / `blacklist.txt` / `tacz_default_gun` 属于 TACZ 而不是预设。
+`tacz-pre.toml` / `blacklist.txt` / `tacz_default_gun`（兼容 `tacz-default-gun`）属于 TACZ 而不是预设。
 它们都在扫描时被排除——如果云端 manifest 里出现，`check()` 会过滤掉并记一条警告，
 否则会变成"云端有、本地永远没有"的死循环。
 
@@ -425,8 +440,9 @@ Windows 用 `SHFileOperationW`（`FOF_ALLOWUNDO`），Linux/macOS 走 freedeskto
    目录靠表单字段 `folder_id_bb_n` 指定。
 3. **下载要 `websign=2`**：`apifile` 的 `downprocess` 少了这个参数会返回
    "密码错误"（不是密码问题）。
-4. **扩展名白名单**：`.json` 传不上去，所以 manifest 用
-   `_pulses_manifest.txt`（内容仍是 JSON）；发布前会预检查扩展名。
+4. **扩展名白名单**：`.json` / `.toml` / `.yaml` 传不上去，所以 manifest 用
+   `_pulses_manifest.cfg`（后缀是 `.cfg`，内容仍是 JSON，`json` 解析）；旧版
+   `_pulses_manifest.txt`（JSON）仍兼容读取；发布前会预检查扩展名。
 
 ### M3 / M4 / M5 界面（已完成）
 

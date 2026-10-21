@@ -59,6 +59,7 @@ class EndToEndTest(unittest.TestCase):
                                     str(archive))
                 uploads[entry["path"]] = archive.read_bytes()
                 entry["packed_size"] = archive.stat().st_size
+                entry["packed_sha256"] = hashing.sha256_file(str(archive))
             else:
                 uploads[entry["path"]] = (self.dev_root / entry["path"]).read_bytes()
 
@@ -118,6 +119,19 @@ class EndToEndTest(unittest.TestCase):
         self.assertIn("校验", bad[0].error)
         # 其余文件照样成功
         self.assertEqual(len([r for r in results if r.ok]), 2)
+
+    def test_bad_packed_digest_fails_before_unpack(self):
+        entry = next(e for e in self.cloud_manifest["files"]
+                     if e["type"] == "folder")
+        entry["packed_sha256"] = "f" * 64
+        plan = diff.compare([], self.cloud_manifest, role="player")
+        downloader = Downloader(self.share, str(self.staging))
+        results = downloader.run(plan.transfer_items)
+        bad = [r for r in results if not r.ok]
+        self.assertEqual(len(bad), 1)
+        self.assertEqual(bad[0].entry["path"], entry["path"])
+        self.assertIn("传输包校验", bad[0].error)
+        self.assertFalse((Path(self.staging) / "new" / entry["target"]).exists())
 
     def test_cancel_stops(self):
         plan = diff.compare([], self.cloud_manifest, role="player")

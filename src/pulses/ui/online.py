@@ -2884,7 +2884,8 @@ def _safe_config(widget, **kwargs):
 
 
 _META_NAMES = {"index.json", "version.txt", "description.txt",
-               "tacz-pre.toml", "blacklist.txt", "tacz_default_gun"}
+               "tacz-pre.toml", "blacklist.txt", "tacz_default_gun",
+               "tacz-default-gun"}
 _MAX_SCAN_FILES = 20000
 
 

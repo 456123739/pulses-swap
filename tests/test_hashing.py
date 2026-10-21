@@ -82,6 +82,8 @@ class ScanLocalTest(unittest.TestCase):
         write(self.root / "index.json", b"{}")
         write(self.root / "version.txt", b"v1")
         write(self.root / "tacz_default_gun" / "x.json", b"{}")
+        write(self.root / "beta" / "tacz_default_gun" / "hidden.json", b"{}")
+        write(self.root / "beta" / "tacz-default-gun" / "hidden2.json", b"{}")
 
     def tearDown(self):
         self.temp.cleanup()
@@ -97,6 +99,9 @@ class ScanLocalTest(unittest.TestCase):
         self.assertEqual(beta["target"], "beta")
         self.assertEqual(beta["files"], 2)
         self.assertEqual(beta["size"], 3)
+        # 嵌套的 TACZ 默认枪目录也不能进树摘要 / 打包
+        digest, size, count = hashing.tree_digest(str(self.root / "beta"))
+        self.assertEqual((size, count), (3, 2))
 
     def test_folder_name_collision(self):
         write(self.root / "beta.zip", b"also a zip")

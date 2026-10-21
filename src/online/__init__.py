@@ -24,15 +24,17 @@ from __future__ import annotations
 from .errors import (AuthError, CancelledError, CaptchaError, DiskSpaceError,
                      IntegrityError, ManifestError, NetworkError, OnlineError,
                      PackError, SourceError, UnsupportedError)
-from .manifest import (SCHEMA, empty_manifest, index_by_path, is_newer, load,
-                       normalize, save, total_size, version_tuple)
+from .manifest import (FORMAT, SCHEMA, dumps, empty_manifest,
+                       index_by_path, is_newer, load, loads, normalize,
+                       save, total_size, version_tuple)
 from .service import OnlineService, PresetRef, SourceStore, SyncResult
 
 __all__ = [
     "OnlineError", "NetworkError", "AuthError", "SourceError", "CaptchaError",
     "IntegrityError", "DiskSpaceError", "ManifestError", "PackError",
     "CancelledError", "UnsupportedError",
-    "SCHEMA", "empty_manifest", "index_by_path", "is_newer", "load",
-    "normalize", "save", "total_size", "version_tuple",
+    "SCHEMA", "FORMAT", "empty_manifest", "index_by_path", "is_newer",
+    "load", "loads", "dumps", "normalize", "save", "total_size",
+    "version_tuple",
     "OnlineService", "PresetRef", "SourceStore", "SyncResult",
 ]
