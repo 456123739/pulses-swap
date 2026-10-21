@@ -324,10 +324,38 @@ class OnlineMixin:
         except Exception:
             pass
         try:
-            self.sidebar_rail_role.configure(
-                text="开" if dev else "玩",
-                fg_color=C_ACCENT_SOFT if dev else C_PANEL_ALT_BG,
-                text_color=C_ACCENT if dev else C_TEXT_SECONDARY)
+            if dev:
+                # 折叠按钮显示当前身份：开发者 Dev（石板蓝）
+                target = ROLE_THEME.get("developer", {})
+                self.sidebar_rail_role.configure(
+                    text="Dev",
+                    fg_color=target.get("accent", "#4E5F84"),
+                    hover_color=target.get("accent_hover", "#42506F"),
+                    text_color=C_TEXT_INVERSE)
+                self.sidebar_rail_role_label.configure(text="开发者")
+                self.sb_role_title.configure(text="切换为玩家身份")
+                try:
+                    self.sb_role_title.pack_configure(anchor="w", padx=(0, 0))
+                except Exception:
+                    pass
+                self.sb_role_hint.configure(text="当前：开发者")
+            else:
+                # 折叠按钮显示当前身份：玩家 Ply（青色）
+                target = ROLE_THEME.get("player", {})
+                self.sidebar_rail_role.configure(
+                    text="Ply",
+                    fg_color=target.get("accent", C_ACCENT),
+                    hover_color=target.get("accent_hover", C_ACCENT_HOVER),
+                    text_color=C_TEXT_INVERSE)
+                self.sidebar_rail_role_label.configure(text="玩家")
+                self.sb_role_title.configure(text="切换为开发者身份")
+                try:
+                    # 目标“开发者”在滑块右半，标题右对齐到右半上方
+                    self.sb_role_title.pack_configure(
+                        anchor="e", padx=(0, px(12)))
+                except Exception:
+                    pass
+                self.sb_role_hint.configure(text="当前：玩家")
         except Exception:
             pass
         # 账号行：有账号才出现；玩家不需要看见一串打码手机号
@@ -382,7 +410,9 @@ class OnlineMixin:
             pass
         self._refresh_preset_cards()
         try:
-            self._refresh_sidebar_clouds()
+            # 身份变了，空态 CTA 的文案/动作也要重算
+            self._sidebar_cloud_sig = None
+            self._refresh_sidebar_clouds(force=True)
         except Exception:
             pass
 

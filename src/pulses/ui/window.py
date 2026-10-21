@@ -53,6 +53,7 @@ from ..animation import *
 from ..widget import *
 from ..dialogs import *
 from ..dialogs import _OVERLAY_STACK
+from ..core.platform import ROLE_THEME
 from ..managers import *
 from ..pages import *
 
@@ -301,15 +302,17 @@ class WindowMixin:
         role_box.pack_propagate(False)
         role_box.pack(fill=X, padx=PAD_GAP, pady=(PAD_TIGHT, PAD_GAP))
         self.role_box = role_box
-        make_label(role_box, text="身份", fg=C_TEXT_MUTED,
-                   font_size=FS_TINY).pack(anchor=W)
+        self.sb_role_title = make_label(
+            role_box, text="切换为开发者身份", fg=C_TEXT_SECONDARY,
+            font_size=FS_TINY, bold=True)
+        self.sb_role_title.pack(anchor=W)
         self.role_switch = RoleSwitch(
             role_box, command=self._on_role_switch,
             role=getattr(self.settings, "role", "player"),
             bg_color=C_CARD_BG)
         self.role_switch.pack(fill=X, pady=(PAD_MICRO, 0))
         self.sb_role_hint = make_label(
-            role_box, text="玩家下载 · 开发者上传", fg=C_TEXT_MUTED,
+            role_box, text="当前：玩家", fg=C_TEXT_MUTED,
             font_size=FS_TINY)
         self.sb_role_hint.pack(anchor=W)
         self._sidebar_sections.append((role_box, dict(
@@ -328,14 +331,19 @@ class WindowMixin:
         except Exception:
             pass
 
-        # 折叠态底部的身份小圆钮：点一下展开
+        # 折叠态底部：按钮显示“当前身份”（玩家 Ply / 开发者 Dev），
+        # 下方小字再写全称；展开后由 role_box 显示“切换为 xx 身份”。
+        _player_theme = ROLE_THEME.get("player", {})
         self.sidebar_rail_role = ctk.CTkButton(
-            sidebar, text="玩", width=px(36), height=px(36),
-            corner_radius=px(18), fg_color=C_ACCENT_SOFT,
-            hover_color=C_ACCENT_SOFT, text_color=C_ACCENT,
+            sidebar, text="Ply", width=px(42), height=px(30),
+            corner_radius=px(10),
+            fg_color=_player_theme.get("accent", C_ACCENT),
+            hover_color=_player_theme.get("accent_hover", C_ACCENT_HOVER),
+            text_color=C_TEXT_INVERSE,
             font=(config.FONT_FAMILY, FS_SMALL, "bold"),
             command=lambda: self._sidebar_expand("rail"))
-        self.sidebar_rail_role.pack(side=BOTTOM, pady=(0, PAD_GAP))
+        self.sidebar_rail_role_label = make_label(
+            sidebar, text="玩家", fg=C_TEXT_MUTED, font_size=FS_TINY)
 
         # 展开态的遮罩：独立 Toplevel + alpha，不参与 Tk 布局，能真正“压暗”工作区
         self._sidebar_dim = None
@@ -566,16 +574,25 @@ class WindowMixin:
                         and not self._show_account_box):
                     continue
                 widget.pack(**opts)
-            if self.sidebar_rail_role.winfo_manager():
-                self.sidebar_rail_role.pack_forget()
+            for widget in (self.sidebar_rail_role,
+                           self.sidebar_rail_role_label):
+                if widget.winfo_manager():
+                    widget.pack_forget()
         else:
             if self.sidebar_brand_text.winfo_manager():
                 self.sidebar_brand_text.pack_forget()
             for widget, _opts in self._sidebar_sections:
                 if widget.winfo_manager():
                     widget.pack_forget()
-            if not self.sidebar_rail_role.winfo_manager():
-                self.sidebar_rail_role.pack(side=BOTTOM, pady=(0, PAD_GAP))
+            for widget in (self.sidebar_rail_role,
+                           self.sidebar_rail_role_label):
+                if widget.winfo_manager():
+                    widget.pack_forget()
+            # 先放小字（贴底），再放按钮（在小字上方）
+            self.sidebar_rail_role_label.pack(
+                side=BOTTOM, pady=(0, PAD_GAP))
+            self.sidebar_rail_role.pack(
+                side=BOTTOM, pady=(0, PAD_MICRO))
             # 预布局阶段可能已经把收起前的文字画到画布上；pack_forget 只
             # unmap，不会主动重绘父级背景，X11 下会留下“残影文字”。
             try:
