@@ -264,7 +264,9 @@ def _fake_plan(role="player"):
     from online import diff
     from online.manifest import normalize
     local = [{"path": "gun_0.zip", "type": "zip", "size": 1024,
-              "sha256": "a" * 64, "packed_size": 1024}]
+              "sha256": "a" * 64, "packed_size": 1024},
+             {"path": "gun_local.zip", "type": "zip", "size": 512,
+              "sha256": "d" * 64, "packed_size": 512}]
     cloud = normalize({"name": "测试", "version": "v9.9", "generation": 3,
                        "files": [
                            {"path": "gun_0.zip", "type": "zip", "size": 1024,
