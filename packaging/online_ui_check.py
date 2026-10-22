@@ -228,6 +228,19 @@ def main() -> int:
     _close_top_card(root)
     app.settings.role = "player"
 
+    print("\n[8b] 同步方式默认完全同步")
+    check(bool(app.settings.online_sync_clean), "设置默认完全同步")
+    app.show_page("settings")
+    pump(root, 400)
+    clean_seg = getattr(app.settings_page, "online_clean_seg", None)
+    check(clean_seg is not None and clean_seg.current() == "on",
+          "设置页选中完全同步")
+    if clean_seg is not None:
+        app.settings_page._on_online_clean_selected("off")
+        check(not app.settings.online_sync_clean, "切到保留多余生效")
+        app.settings_page._on_online_clean_selected("on")
+        check(app.settings.online_sync_clean, "切回完全同步生效")
+
     print("\n[9] 页面切换")
     for page in ("settings", "log", "home"):
         app.show_page(page)

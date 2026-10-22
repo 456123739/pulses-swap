@@ -70,7 +70,11 @@ class DiffItem:
 
     @property
     def default_checked(self) -> bool:
-        """确认框里默认勾不勾。删云端 / 删本地默认不勾。"""
+        """确认框里的基础默认值。
+
+        本地多余（ASK_DELETE_LOCAL）默认不勾；玩家「完全同步」开启时，
+        DiffList 会按设置把这一项预勾上，所以不要只看这个属性判断 UI。
+        """
         return self.action in (DOWNLOAD, UPLOAD, REPAIR)
 
     @property

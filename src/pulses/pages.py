@@ -336,16 +336,16 @@ class SettingsPage:
             duration_ms=220, width=220, height=36, track_color=C_PANEL_ALT_BG)
         self.online_preview_seg.pack(side=RIGHT)
 
-        line, width = row(box, "多余枪包", "同步时删除本地多余")
+        line, width = row(box, "同步方式", "完全同步会删除本地多余（进回收站）")
         self.online_clean_seg = CanvasSegmented(
-            line, [("off", "保留"), ("on", "删除")],
+            line, [("on", "完全同步"), ("off", "保留多余")],
             command=self._on_online_clean_selected,
             orientation="horizontal", item_height=30, pad=3,
             gap=3, radius=R_CONTROL, bg_color=C_CARD_BG,
             pill_color=C_ACCENT, hover_color=C_ACCENT_SOFT,
             text_color=C_TEXT_SECONDARY, active_text_color=C_TEXT_INVERSE,
             font_size=FS_SMALL, bold_active=True, text_anchor="center",
-            duration_ms=220, width=184, height=36)
+            duration_ms=220, width=220, height=36)
         self.online_clean_seg.pack(side=RIGHT)
 
 
@@ -365,6 +365,7 @@ class SettingsPage:
 
     def _on_online_clean_selected(self, key):
         self.app.settings.online_sync_clean = (key == "on")
+        self.app.settings.online_sync_clean_set = True
         try:
             self.app.settings.save()
         except Exception:
@@ -513,7 +514,7 @@ class SettingsPage:
                               else "off"),
                              (getattr(self, "online_clean_seg", None),
                               "on" if getattr(self.settings,
-                                              "online_sync_clean", False)
+                                              "online_sync_clean", True)
                               else "off"),
                              (getattr(self, "online_preview_seg", None),
                               "on" if getattr(self.settings,

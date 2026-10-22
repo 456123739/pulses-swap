@@ -427,10 +427,14 @@ def main() -> int:
         check("readme.txt 被判为本地多余",
               [i.path for i in extra] == ["readme.txt"],
               [i.path for i in extra])
-        check("默认不勾选删除", not extra[0].default_checked if extra else False)
-
-        print("[13] 勾选删除并同步")
+        check("默认完全同步", bool(app.settings.online_sync_clean))
         final_plan = plan_of("玩家预设")
+        check("默认选择包含本地多余",
+              "readme.txt" in diff.selection_of(
+                  final_plan,
+                  include_deletes=bool(app.settings.online_sync_clean)))
+
+        print("[13] 完全同步：删除本地多余并同步")
         selection = diff.selection_of(final_plan, include_deletes=True)
         app._last_sync_result = None
         app._run_sync("玩家预设", final_plan, selection)

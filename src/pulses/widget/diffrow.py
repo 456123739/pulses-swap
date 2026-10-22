@@ -305,7 +305,7 @@ class DiffList(ctk.CTkFrame):
             font=(config.FONT_FAMILY, FS_SMALL))
 
     # ---------- 数据 ----------
-    def set_items(self, items) -> None:
+    def set_items(self, items, *, select_local_deletes: bool = False) -> None:
         for row in self._rows:
             try:
                 row.destroy()
@@ -319,6 +319,8 @@ class DiffList(ctk.CTkFrame):
         self.empty.pack_forget()
         for item in items:
             row = DiffRow(self.area.inner, item, on_toggle=self._toggled)
+            if select_local_deletes and item.action == "ask_delete_local":
+                row.set_checked(True)
             row.pack(fill="x", pady=(0, 2), padx=2)
             self._rows.append(row)
         self._refresh_summary()

@@ -62,8 +62,11 @@ class AppSettings:
         self.animations = True
         self.role = "player"
         self.online_auto_check = True
-        # 同步时要不要顺手删掉本地多余枪包（默认不删，删了不可逆）
-        self.online_sync_clean = False
+        # 同步时要不要顺手删掉本地多余枪包（默认完全同步；删除走回收站）
+        self.online_sync_clean = True
+        # 用户是否在设置里显式改过这一项。旧版本没有这个标记，
+        # 升级时把旧的默认 false 迁移成新的默认 true。
+        self.online_sync_clean_set = False
         # 开发者发布前要不要先看差异清单（默认直接发）
         self.online_publish_preview = False
         # 批量/完整更新前二次确认（需求：完整更新必须有确认）
@@ -85,8 +88,14 @@ class AppSettings:
                 self.animations = bool(data.get('animations', True))
                 self.online_auto_check = bool(
                     data.get('online_auto_check', True))
-                self.online_sync_clean = bool(
-                    data.get('online_sync_clean', False))
+                raw_clean = bool(data.get('online_sync_clean', True))
+                explicit = bool(data.get('online_sync_clean_set', False))
+                if not explicit and 'online_sync_clean' in data:
+                    # 旧版本的 false 只是默认值，不是用户选择；升级后按新默认
+                    self.online_sync_clean = True
+                else:
+                    self.online_sync_clean = raw_clean
+                self.online_sync_clean_set = explicit
                 self.online_publish_preview = bool(
                     data.get('online_publish_preview', False))
                 self.online_confirm_full = bool(
@@ -105,6 +114,7 @@ class AppSettings:
                            'animations': self.animations,
                            'online_auto_check': self.online_auto_check,
                            'online_sync_clean': self.online_sync_clean,
+                           'online_sync_clean_set': self.online_sync_clean_set,
                            'online_publish_preview': self.online_publish_preview,
                            'online_confirm_full': self.online_confirm_full},
                           f, indent=2, ensure_ascii=False)

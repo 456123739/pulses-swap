@@ -1,4 +1,4 @@
-# Pulses Swap 交接文档（v2.7.0）
+# Pulses Swap 交接文档（v2.7.1）
 
 > 给接手的人 / AI 看的：这个软件被拆成了哪些文件、每个文件干什么、
 > 数据怎么流动、改哪里、怎么跑测试、怎么打包。
@@ -12,7 +12,7 @@
 一键把某组枪包换进游戏的 `tacz` 目录；同时把预设发布到**蓝奏云**，
 玩家绑定分享链接后可以增量同步。
 
-- 版本：`2.7.0`（`src/pulses/core/paths.py` 里的 `VERSION`）
+- 版本：`2.7.1`（`src/pulses/core/paths.py` 里的 `VERSION`）
 - 入口：`src/main.py` → `pulses.ui.app.main()`
 - 依赖：`customtkinter` `tkinterdnd2` `watchdog` `Pillow`（见 `requirements.txt`）
 - 不依赖任何第三方网络库（HTTP 全用标准库 `urllib`）
@@ -29,7 +29,7 @@ pulses-swap/
 │   ├── pulses/                 界面 + 本地逻辑
 │   └── online/                 在线同步（不依赖 tkinter，可命令行跑）
 ├── packaging/                  打包配置 + 各种验证脚本
-├── tests/                      单元 / 集成测试（172 个）
+├── tests/                      单元 / 集成测试（178 个）
 ├── docs/                       方案、教程、交接文档
 └── requirements.txt
 ```
@@ -105,8 +105,8 @@ pulses-swap/
 | 文件 | 行数 | 职责 |
 |---|---|---|
 | `dialogs.py` | 1000 | 窗口内覆盖层弹窗（`OverlayCard`）、`show_info/warning/error`、`ask_*`、数据库定位与迁移对话框 |
-| `managers.py` | 1304 | 数据层：`AppSettings` `LogManager` `GuideManager` `RecentPacksManager` `TaczWatcher` `PresetManager` |
-| `pages.py` | 535 | 设置页（常规 / 数据库 / 关于，含「在线同步」分组） |
+| `managers.py` | 1156 | 数据层：`AppSettings` `LogManager` `GuideManager` `RecentPacksManager` `TaczWatcher` `PresetManager` |
+| `pages.py` | 672 | 设置页（常规 / 数据库 / 关于，含「在线同步」分组） |
 | `ui/window.py` | 420 | `WindowMixin`：窗口骨架、侧边栏、页面切换、Win11 不透明防护、菜单 |
 | `ui/page_home.py` | 651 | `HomePageMixin`：主界面三列布局、拖入、最近面板 |
 | `ui/packs.py` | 790 | `PacksMixin`：整合包加载、预设卡片/选中、右键菜单、重命名/删除、TACZ 监控 |
@@ -304,7 +304,7 @@ for (rel, size, file_sha) in sorted(树里每个文件):
 # 源码运行
 python src/main.py
 
-# 单元 + 集成测试（172 个）
+# 单元 + 集成测试（178 个）
 python -m unittest discover -s tests -t .
 
 # 打包：一份 spec 出三端
@@ -516,7 +516,7 @@ export DISPLAY=:99          # weston headless + Xwayland
     之后重新 `get` 再写 `folder_id`，否则会用请求前的旧快照覆盖掉期间写入的
     分享链接/发布历史。
 
-## v2.7.0 新增坑位（务必保留）
+## v2.7.1 新增坑位（务必保留）
 
 1. **侧边栏悬停不能用子控件 Enter/Leave**：Tk 的 crossing 事件被子控件吞掉，只在 `self.sidebar` 上绑定会出现“只有空白背景能展开”。现在用 root `<Motion>` + 指针坐标判定；展开/收起动画由 `sidebar_shell` 的宽度补间驱动。改动时不要退回只绑父控件。
 2. **压暗工作区不能遍历全部页面**：`_dim_content` 只处理 `active_page`，且延迟到宽度动画开始后；遍历四页/同步改色会把动画卡在 60px 半展开态。Windows 用 Toplevel alpha；非 Windows 用颜色压深回退。
@@ -529,3 +529,4 @@ export DISPLAY=:99          # weston headless + Xwayland
 9. **设置页/管理页职责**：设置页只放偏好与数据库；管理页是全局预设操作区（总览、行内动作、快捷操作、云端文件、日志）。不要把上传/同步入口塞回设置页。
 10. **角色兜底**：UI 隐藏按钮不够；`_publish_now`/`_run_publish`/`OnlineService.publish(role=...)` 都有开发者守卫，`_run_sync`/`open_sync_dialog` 有玩家守卫。新增入口必须走同一守卫。
 11. **manifest 是 `.cfg` 后缀，内容是 JSON**：蓝奏真实账号实测拒绝 `.json/.toml/.yaml/.ini/.xml`，只接受 `.cfg`；所以只改后缀，解析仍走 `json`（快、只有一套结构）。新发布只写 `_pulses_manifest.cfg`，读取时兼容旧 `_pulses_manifest.txt`（JSON）。`manifest_sha256` 必须校验，`packed_sha256` 必须在解压前校验；不要把 `.cfg` 改成 INI 或别的结构，否则会多一套解析和校验分支。
+12. **玩家同步默认完全同步**：`AppSettings.online_sync_clean` 默认 `True`，本地多余枪包默认勾选，`service.sync` 走 `Installer.remove_local()` → `trash.delete()`，优先进回收站。`online_sync_clean_set` 用来区分"旧版本默认 false"和"用户显式选了保留"；升级迁移时不要把显式 false 也改掉。设置页文案是「同步方式：完全同步 / 保留多余」。

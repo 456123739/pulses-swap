@@ -239,7 +239,7 @@
 
 | 项目 | 结果 |
 |---|---|
-| 单元测试 | 172 个全部通过（新增 CFG manifest/完整性/迁移测试） |
+| 单元测试 | 178 个全部通过（新增 CFG manifest/完整性/迁移测试） |
 | ui_audit（59 按钮/弹窗/设置/列表/错误/尺寸） | 通过 |
 | online_ui_check | 通过 |
 | startup_check（含居中断言） | 通过 |
@@ -290,3 +290,10 @@
 - 读取兼容旧 `.txt`（JSON）；发布时删除旧 manifest，写入 `.cfg`，下次检查自动迁移。
 - 真实蓝奏账号验证：`.cfg` 上传/匿名读取/下载校验通过；完整 `OnlineService.publish` 发布 3 个文件 + CFG manifest，云端读回 schema 2、3 条记录均带 `packed_sha256`，随后清理临时目录。
 - 测试：172 个单元测试、`ui_audit`、`online_ui_check`、`startup_check`、`scale_check`（100/125/150）全部通过。
+
+## 10. 2.7.1 玩家完全同步
+
+- 玩家同步默认 `online_sync_clean=True`：`ASK_DELETE_LOCAL`（本地多余枪包）默认勾选，`service.sync` 走 `Installer.remove_local()` → `trash.delete()`，优先进系统回收站。
+- 设置 → 在线同步 → 「同步方式」可选「完全同步 / 保留多余」；`online_sync_clean_set` 记录用户是否显式改过，旧配置里的默认 false 会迁移为新的 true。
+- 同步弹窗预勾选本地多余项，并提示会送进回收站。
+- 新增 `tests/test_settings.py` 覆盖新库默认、旧配置迁移、显式保留和保存；`tests/test_sync_selection.py` 覆盖默认选择包含本地多余项、保留模式不包含。单元测试 178 个全部通过。

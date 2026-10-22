@@ -2310,7 +2310,7 @@ class OnlineMixin:
         if not plan.has_changes:
             self.toast("已经是最新版本", "success")
             return False
-        clean = bool(getattr(self.settings, "online_sync_clean", False))
+        clean = bool(getattr(self.settings, "online_sync_clean", True))
         selection = online_diff.selection_of(plan, include_deletes=clean)
         if not selection:
             self.toast("没有需要下载的内容", "info")
@@ -2349,9 +2349,14 @@ class OnlineMixin:
             subtitle += " · 离线（用的是上次缓存）"
         card.add_subtitle(subtitle)
 
+        clean = bool(getattr(self.settings, "online_sync_clean", True))
         listing = DiffList(card.body, height=260)
         listing.pack(fill=BOTH, expand=True, pady=(PAD_TIGHT, 0))
-        listing.set_items(plan.items)
+        listing.set_items(plan.items, select_local_deletes=clean)
+        if clean and any(i.action == online_diff.ASK_DELETE_LOCAL
+                         for i in plan.items):
+            card.add_text("完全同步：本地多出来的枪包会送进回收站。",
+                          fg=C_TEXT_SECONDARY, font_size=FS_TINY)
 
         if plan.cloud_notes:
             card.add_text(f"更新说明：{plan.cloud_notes}",
