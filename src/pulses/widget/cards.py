@@ -4,12 +4,14 @@
 Step 2 原来是一个 tk.Listbox（一行一个名字），放不下版本、体积、更新状态。
 这里换成卡片：状态点 + 名称 + 元信息 + 状态行 + 动作按钮，整块可点选。
 
-滚动用 Canvas 内嵌 frame 实现，滚轮走补间（不是整行跳），
+滚动用 Canvas 内嵌 frame 实现，滚轮直接走 Canvas 原生 yview，
+不做逐事件补间（补间叠加会卡）。
 卡片颜色变化全部走曲线过渡，避免闪烁。
 """
 from __future__ import annotations
 
 import math
+import time
 import tkinter as tk
 from tkinter import Canvas
 
@@ -33,6 +35,25 @@ from .factory import ellipsize
 H_CARD = 92          # 卡片高度（px，未缩放）
 H_CARD_MIN = 78
 DOT_SIZE = 10
+
+# 滚动进行中：卡片 hover 过渡先让路，避免快速滚过几十张卡时
+# 同时启动几十条 140ms 的颜色补间。
+_SCROLL_ACTIVE_UNTIL = 0.0
+
+
+def _scroll_wheel_dispatch(event):
+    """全局滚轮路由：把事件交给指针下最近的 ScrollArea。
+
+    不能在每个 ScrollArea 的 <Enter> 里 bind_all/unbind_all：
+    CTkScrollableFrame 自己也用 bind_all，先离开一个卡片列表就会把
+    设置页/管理页/侧边栏的滚轮绑定一起解掉，表现为“某些列表突然滚不动”。
+    """
+    widget = getattr(event, "widget", None)
+    while widget is not None:
+        if isinstance(widget, ScrollArea):
+            return widget._on_wheel(event)
+        widget = getattr(widget, "master", None)
+    return None
 
 
 class ScrollArea(ctk.CTkFrame):
@@ -59,7 +80,7 @@ class ScrollArea(ctk.CTkFrame):
                                                  anchor="nw")
         self.inner.bind("<Configure>", self._on_inner_configure, add="+")
         self.canvas.bind("<Configure>", self._on_canvas_configure, add="+")
-        self._bind_wheel()
+        self._bind_global_wheel()
 
     # ---------- 布局 ----------
     def _on_inner_configure(self, _event=None):
@@ -75,43 +96,25 @@ class ScrollArea(ctk.CTkFrame):
             pass
 
     # ---------- 滚轮 ----------
-    def _bind_wheel(self):
-        self.canvas.bind("<Enter>", self._grab_wheel, add="+")
-        self.canvas.bind("<Leave>", self._release_wheel, add="+")
-        self.inner.bind("<Enter>", self._grab_wheel, add="+")
-        self.inner.bind("<Leave>", self._release_wheel, add="+")
-
-    def _grab_wheel(self, _event=None):
-        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
-            try:
-                self.canvas.bind_all(seq, self._on_wheel, add="+")
-            except Exception:
-                pass
-
-    def _release_wheel(self, _event=None):
-        # 指针只是移到子控件上时不要解绑（Tk 会发 Leave）
-        if self._pointer_inside():
+    def _bind_global_wheel(self):
+        """每个 Tk root 只装一次全局滚轮路由，不抢占/解绑别人的绑定。"""
+        try:
+            root = self.winfo_toplevel()
+        except Exception:
+            return
+        if getattr(root, "_pulses_scroll_wheel_bound", False):
             return
         for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
             try:
-                self.canvas.unbind_all(seq)
+                root.bind_all(seq, _scroll_wheel_dispatch, add="+")
             except Exception:
                 pass
-
-    def _pointer_inside(self) -> bool:
         try:
-            widget = self.winfo_containing(*self.winfo_pointerxy())
+            root._pulses_scroll_wheel_bound = True
         except Exception:
-            return False
-        while widget is not None:
-            if widget is self:
-                return True
-            widget = getattr(widget, "master", None)
-        return False
+            pass
 
     def _on_wheel(self, event):
-        if not self._pointer_inside():
-            return None
         if getattr(event, "num", None) == 4:
             steps = 1
         elif getattr(event, "num", None) == 5:
@@ -122,7 +125,12 @@ class ScrollArea(ctk.CTkFrame):
         return "break"
 
     def scroll_by(self, units: float) -> None:
-        """按"卡片高度"为单位平滑滚动。"""
+        """按"卡片高度"为单位滚动。
+
+        直接用 Canvas 原生 yview_moveto，不再为每个滚轮事件启动 150ms 补间：
+        连续滚轮时补间会被反复取消/重开，实际只挪一点点，卡片一多就明显卡。
+        """
+        global _SCROLL_ACTIVE_UNTIL
         try:
             first, last = self.canvas.yview()
         except Exception:
@@ -134,14 +142,11 @@ class ScrollArea(ctk.CTkFrame):
         target = min(max(0.0, first + step), max(0.0, 1.0 - visible))
         if abs(target - first) < 1e-6:
             return
-
-        def frame(e, _raw):
-            try:
-                self.canvas.yview_moveto(first + (target - first) * e)
-            except Exception:
-                pass
-
-        tween(self.canvas, "scroll", 150, frame, easing=ease_out_cubic)
+        _SCROLL_ACTIVE_UNTIL = time.monotonic() + 0.16
+        try:
+            self.canvas.yview_moveto(target)
+        except Exception:
+            pass
 
     def scroll_to_top(self) -> None:
         try:
@@ -462,7 +467,7 @@ class PresetCard(ctk.CTkFrame):
 
     def _on_hover(self, event=None):
         """整行 hover：底色在卡片白和输入框灰之间过渡。"""
-        if self._selected:
+        if self._selected or time.monotonic() < _SCROLL_ACTIVE_UNTIL:
             return
         over = bool(event is not None and str(event.type) == "Enter")
         target = C_INPUT_BG if over else C_CARD_BG
@@ -642,7 +647,7 @@ class CardList(ctk.CTkFrame):
                 created = True
             card.update_data(item)
             card.pack(fill="x", pady=0, padx=0)
-            if created and animate_new:
+            if created and animate_new and new_index < 8:
                 card.play_enter(min(240, new_index * 40))
                 new_index += 1
             if name == self._selected:

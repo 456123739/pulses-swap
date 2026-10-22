@@ -558,7 +558,7 @@ def open_url(url: str) -> bool:
 
 
 def make_list_scroll(parent, listbox, width=10):
-    """给 tk.Listbox 配一条细滚动条 + 顺滑滚轮。
+    """给 tk.Listbox 配一条细滚动条 + 跟手滚轮。
 
     tk.Listbox 本身没有滚动条（要自己配），而且默认滚轮是「一格一行」，
     条目多的时候一格一格跳，手感很卡。这里统一滚 3 行/格，
@@ -574,26 +574,16 @@ def make_list_scroll(parent, listbox, width=10):
     listbox.configure(yscrollcommand=bar.set)
 
     def _scroll(units):
-        """逐帧滑过去，而不是整行一跳。
+        """Listbox 原生按行滚动。
 
-        Tk 的 Listbox 只能按「行」滚，直接 yview_scroll 会一顿一顿的；
-        这里把目标位置换算成视图比例，用补间在 140ms 内滑过去。
+        以前每个滚轮事件都起一条 140ms 补间，连续滚动会反复取消/重开，
+        条目一多就“滚不动 + 卡”；Listbox 原生 yview_scroll 很快，
+        直接滚 3 行反而更跟手。
         """
-        total = max(1, listbox.size())
-        first, last = listbox.yview()
-        visible = max(0.0, last - first)
-        start = first
-        target = min(max(0.0, first + units / total), max(0.0, 1.0 - visible))
-        if abs(target - start) < 1e-6:
-            return "break"
-
-        def frame(e, raw):
-            try:
-                listbox.yview_moveto(start + (target - start) * e)
-            except Exception:
-                pass
-
-        tween(listbox, "scroll", 140, frame, easing=ease_out_cubic)
+        try:
+            listbox.yview_scroll(int(units), "units")
+        except Exception:
+            pass
         return "break"
 
     def _on_wheel(event):

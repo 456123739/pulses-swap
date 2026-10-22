@@ -1,4 +1,4 @@
-# Pulses Swap 交接文档（v2.7.1）
+# Pulses Swap 交接文档（v2.7.2）
 
 > 给接手的人 / AI 看的：这个软件被拆成了哪些文件、每个文件干什么、
 > 数据怎么流动、改哪里、怎么跑测试、怎么打包。
@@ -12,7 +12,7 @@
 一键把某组枪包换进游戏的 `tacz` 目录；同时把预设发布到**蓝奏云**，
 玩家绑定分享链接后可以增量同步。
 
-- 版本：`2.7.1`（`src/pulses/core/paths.py` 里的 `VERSION`）
+- 版本：`2.7.2`（`src/pulses/core/paths.py` 里的 `VERSION`）
 - 入口：`src/main.py` → `pulses.ui.app.main()`
 - 依赖：`customtkinter` `tkinterdnd2` `watchdog` `Pillow`（见 `requirements.txt`）
 - 不依赖任何第三方网络库（HTTP 全用标准库 `urllib`）
@@ -516,7 +516,7 @@ export DISPLAY=:99          # weston headless + Xwayland
     之后重新 `get` 再写 `folder_id`，否则会用请求前的旧快照覆盖掉期间写入的
     分享链接/发布历史。
 
-## v2.7.1 新增坑位（务必保留）
+## v2.7.2 新增坑位（务必保留）
 
 1. **侧边栏悬停不能用子控件 Enter/Leave**：Tk 的 crossing 事件被子控件吞掉，只在 `self.sidebar` 上绑定会出现“只有空白背景能展开”。现在用 root `<Motion>` + 指针坐标判定；展开/收起动画由 `sidebar_shell` 的宽度补间驱动。改动时不要退回只绑父控件。
 2. **压暗工作区不能遍历全部页面**：`_dim_content` 只处理 `active_page`，且延迟到宽度动画开始后；遍历四页/同步改色会把动画卡在 60px 半展开态。Windows 用 Toplevel alpha；非 Windows 用颜色压深回退。
@@ -530,3 +530,6 @@ export DISPLAY=:99          # weston headless + Xwayland
 10. **角色兜底**：UI 隐藏按钮不够；`_publish_now`/`_run_publish`/`OnlineService.publish(role=...)` 都有开发者守卫，`_run_sync`/`open_sync_dialog` 有玩家守卫。新增入口必须走同一守卫。
 11. **manifest 是 `.cfg` 后缀，内容是 JSON**：蓝奏真实账号实测拒绝 `.json/.toml/.yaml/.ini/.xml`，只接受 `.cfg`；所以只改后缀，解析仍走 `json`（快、只有一套结构）。新发布只写 `_pulses_manifest.cfg`，读取时兼容旧 `_pulses_manifest.txt`（JSON）。`manifest_sha256` 必须校验，`packed_sha256` 必须在解压前校验；不要把 `.cfg` 改成 INI 或别的结构，否则会多一套解析和校验分支。
 12. **玩家同步默认完全同步**：`AppSettings.online_sync_clean` 默认 `True`，本地多余枪包默认勾选，`service.sync` 走 `Installer.remove_local()` → `trash.delete()`，优先进回收站。`online_sync_clean_set` 用来区分"旧版本默认 false"和"用户显式选了保留"；升级迁移时不要把显式 false 也改掉。设置页文案是「同步方式：完全同步 / 保留多余」。
+13. **ScrollArea 不要 bind_all/unbind_all**：CTkScrollableFrame 自己也用 bind_all 绑滚轮；在 `<Leave>` 里 `unbind_all` 会把设置页/管理页/侧边栏的滚动一起解掉。现在每个 root 只装一次 `_scroll_wheel_dispatch`，按 `event.widget` 的 master 链找最近的 ScrollArea；不要退回按 Enter/Leave 动态绑定的写法。
+14. **卡片滚动不要逐事件补间**：连续滚轮会不断 cancel/restart 150ms 补间，实际只挪一点，卡片一多就卡。现在 `ScrollArea.scroll_by()` 直接 `canvas.yview_moveto(target)`；滚动期间用模块级 `_SCROLL_ACTIVE_UNTIL` 暂停 hover 补间。Listbox 同理用原生 `yview_scroll`。
+15. **启动先 withdraw 再 deiconify**：Tk 创建后默认会先映射小窗口；`main()` 现在先 `root.withdraw()`，`PulsesSwapApp` 建完、`update_idletasks()`、`_center_window()` 后再 `root.deiconify()`。不要在 UI 建好前提前显示窗口。

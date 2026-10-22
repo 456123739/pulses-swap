@@ -297,3 +297,13 @@
 - 设置 → 在线同步 → 「同步方式」可选「完全同步 / 保留多余」；`online_sync_clean_set` 记录用户是否显式改过，旧配置里的默认 false 会迁移为新的 true。
 - 同步弹窗预勾选本地多余项，并提示会送进回收站。
 - 新增 `tests/test_settings.py` 覆盖新库默认、旧配置迁移、显式保留和保存；`tests/test_sync_selection.py` 覆盖默认选择包含本地多余项、保留模式不包含。单元测试 178 个全部通过。
+
+## 11. 2.7.2 滚动与启动闪烁
+
+- 卡片列表：去掉每个滚轮事件重启的 150ms 补间，直接 `Canvas.yview_moveto`；60 张卡片连续 24 次滚轮可到底。
+- 滚轮路由：每个 Tk root 只注册一次全局路由，按指针所在控件找最近的 `ScrollArea`；不再在 `<Leave>` 时 `unbind_all`，避免把 `CTkScrollableFrame` 的滚轮绑定一起解掉。
+- `tk.Listbox`（枪包 / 最近）改回原生 `yview_scroll(3, "units")`，连续滚轮不再被补间拖慢。
+- 滚动期间暂停卡片 hover 过渡；首屏入场动画最多 8 张卡，避免一次创建大量补间。
+- 启动：`Tk()` 创建后立即 `withdraw()`，完整 UI、布局、居中完成后再 `deiconify()`，消除“小白窗 → 展开”。
+- 新增 `packaging/scroll_check.py`：双 ScrollArea 交替、CTk 滚动不解绑、Listbox、60 张卡片到底，全部通过。
+- 单元测试 178 个全部通过；`ui_audit`、`online_ui_check`、`startup_check`、`scale_check`、`online_e2e` 全部通过。

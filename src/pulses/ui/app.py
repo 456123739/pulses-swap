@@ -175,6 +175,13 @@ def main():
     else:
         root = ctk.CTk()
 
+    # 先把窗口藏起来：Tk 创建后默认会立刻映射成一个小白窗，
+    # 等整套 UI 建好、算完尺寸再 deiconify，避免启动时先闪一下小窗口。
+    try:
+        root.withdraw()
+    except Exception:
+        pass
+
     # 窗口图标：源码运行取 packaging/，打包运行取 sys._MEIPASS
     apply_window_icon(root)
 
@@ -224,6 +231,20 @@ def main():
     # ================================================================
 
     app = PulsesSwapApp(root)
+
+    # UI 已建好：先让 Tk 完成布局，再把窗口居中并显示。
+    # 这样首帧就是完整窗口，不会出现“小窗 → 展开”的违和。
+    try:
+        root.update_idletasks()
+        app._center_window()
+        root.deiconify()
+        root.update_idletasks()
+        _disable_dwm(root)
+    except Exception:
+        try:
+            root.deiconify()
+        except Exception:
+            pass
 
     try:
         root.after(80, lambda: _disable_dwm(root))
