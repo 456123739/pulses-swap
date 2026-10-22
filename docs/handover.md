@@ -373,6 +373,7 @@ export DISPLAY=:99          # weston headless + Xwayland
 | `lanzou_live_publish.py` | 真实账号：完整发布闭环 | **是** |
 | `win_dwm_check.py` | Win11 不透明逻辑 | 否 |
 | `startup_check.py` | **走真实入口 `main()`**，确认打包后能启动 | 否 |
+| `scroll_check.py` | 多列表滚轮路由 / CTk 不解绑 / Listbox / 60 张卡片滚动 | 否 |
 | `lanzou_publish_release.py` | 把 dist 里的产物传到网盘下载文件夹（凭据走环境变量） | **是** |
 
 > 界面截图：本机是 weston(headless) + Xwayland，组合器把窗口内容放在自己的
