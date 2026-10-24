@@ -314,3 +314,13 @@
 - 下载引擎：`ThreadPoolExecutor` 4 线程，每线程 `LanzouShare.clone()` 独立 cookie/令牌；结果按输入顺序返回，进度按 `completed + in_flight` 聚合。
 - 新增 `tests/test_downloader_parallel.py`：4 个慢文件重叠下载、顺序保持、单线程回退、并发取消。
 - 单元测试 182 个全部通过；`online_e2e`、`ui_audit`、`online_ui_check`、`startup_check`、`scale_check`、`scroll_check` 全部通过。
+
+## 13. 2.7.4 UI 细节复查
+
+- 截图复查（100%）：首页折叠/展开、管理页玩家/开发者、设置常规/数据库/关于、日志页、同步弹窗。
+- 启动首帧：X11 轮询确认窗口第一次 `IsViewable` 就是 1280x900 居中位置，没有小窗/右下角阶段。
+- 展开侧栏：`sidebar_shell` 提升到内容之上，页面文字不再透出；`_sidebar_dim` 始终为 None（无黑色 Toplevel）。
+- 侧栏空态：隐藏空列表滚动条和「全部更新/全部检查」幽灵文字；有数据时重新 pack。
+- 枪包空状态按上下文显示；同步/发布弹窗宽度 680（150% 下 1020），差异清单按条目数收缩。
+- 设置数据库/关于补充说明卡；高 DPI `wraplength` 跟随缩放。
+- 单元测试 182 个、`ui_audit`、`online_ui_check`、`startup_check`、`scale_check`、`scroll_check`、`online_e2e` 全部通过。

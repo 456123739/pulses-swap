@@ -124,6 +124,7 @@ def child(scale: float, pack: Path) -> int:
     check("展开不改变工作区起点",
           abs(app.content_col.winfo_rootx()
               - (app.root.winfo_rootx() + expect_rail + ps.px(8))) <= 8)
+    check("展开不创建黑色遮罩", getattr(app, "_sidebar_dim", None) is None)
     app._sidebar_collapse()
     pump(root, 350)
 

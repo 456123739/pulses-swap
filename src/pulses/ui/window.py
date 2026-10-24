@@ -631,6 +631,9 @@ class WindowMixin:
 
         tween(self.sidebar_shell, "sidebar_width", 190, frame,
               easing=ease_out_cubic, fps=FPS_MOVE, on_done=done)
+        # 必须把外壳（native Frame）抬起来：只 lift 里面的 CTkFrame 不会改变
+        # shell 与 content_col 的堆叠顺序，页面内容会盖在展开的侧栏上。
+        self.sidebar_shell.lift()
         self.sidebar.lift()
         self._dim_token = int(getattr(self, "_dim_token", 0)) + 1
         token = self._dim_token
@@ -750,39 +753,14 @@ class WindowMixin:
                     pass
 
     def _show_dim(self, show):
-        # Tk 的 Toplevel 在 X11/无合成器环境下 -alpha 可能被忽略，直接变一块
-        # 全黑遮罩。主平台是 Windows，那里 DWM 合成稳定；其它平台宁可不压暗，
-        # 也不能把工作区盖死。
-        if not IS_WINDOWS:
-            return
-        try:
-            if self._sidebar_dim is None:
-                top = Toplevel(self.root)
-                top.overrideredirect(True)
-                top.configure(bg="black")
-                top.withdraw()
-                try:
-                    top.attributes("-alpha", 0.0)
-                    got = float(top.attributes("-alpha"))
-                except Exception:
-                    got = 1.0
-                if got > 0.6:
-                    top.destroy()
-                    return
-                top.bind("<Button-1>", lambda e: self._sidebar_collapse())
-                top.bind("<Enter>", lambda e: self._sidebar_collapse())
-                top.bind("<Motion>", lambda e: self._sidebar_collapse())
-                self._sidebar_dim = top
-            top = self._sidebar_dim
-            if show:
-                self._position_dim()
-                top.deiconify()
-                top.lift()
-                self._dim_to(0.14, 160)
-            else:
-                self._dim_to(0.0, 140, hide=True)
-        except Exception:
-            pass
+        """侧栏展开不做黑色遮罩。
+
+        旧实现用 Toplevel + `-alpha` 做压暗。部分 Windows/DWM 配置下，
+        Toplevel 会先以不透明黑帧映射，再开始 alpha 补间，用户看到的就是
+        “闪黑一下，然后整个工作区重绘”。侧栏自己已有边框/圆角区分层级，
+        这里直接不做遮罩，换展开过程零闪黑。
+        """
+        return
 
     def _position_dim(self):
         top = getattr(self, "_sidebar_dim", None)

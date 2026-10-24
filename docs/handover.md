@@ -1,4 +1,4 @@
-# Pulses Swap 交接文档（v2.7.3）
+# Pulses Swap 交接文档（v2.7.4）
 
 > 给接手的人 / AI 看的：这个软件被拆成了哪些文件、每个文件干什么、
 > 数据怎么流动、改哪里、怎么跑测试、怎么打包。
@@ -12,7 +12,7 @@
 一键把某组枪包换进游戏的 `tacz` 目录；同时把预设发布到**蓝奏云**，
 玩家绑定分享链接后可以增量同步。
 
-- 版本：`2.7.3`（`src/pulses/core/paths.py` 里的 `VERSION`）
+- 版本：`2.7.4`（`src/pulses/core/paths.py` 里的 `VERSION`）
 - 入口：`src/main.py` → `pulses.ui.app.main()`
 - 依赖：`customtkinter` `tkinterdnd2` `watchdog` `Pillow`（见 `requirements.txt`）
 - 不依赖任何第三方网络库（HTTP 全用标准库 `urllib`）
@@ -517,7 +517,7 @@ export DISPLAY=:99          # weston headless + Xwayland
     之后重新 `get` 再写 `folder_id`，否则会用请求前的旧快照覆盖掉期间写入的
     分享链接/发布历史。
 
-## v2.7.3 新增坑位（务必保留）
+## v2.7.4 新增坑位（务必保留）
 
 1. **侧边栏悬停不能用子控件 Enter/Leave**：Tk 的 crossing 事件被子控件吞掉，只在 `self.sidebar` 上绑定会出现“只有空白背景能展开”。现在用 root `<Motion>` + 指针坐标判定；展开/收起动画由 `sidebar_shell` 的宽度补间驱动。改动时不要退回只绑父控件。
 2. **压暗工作区不能遍历全部页面**：`_dim_content` 只处理 `active_page`，且延迟到宽度动画开始后；遍历四页/同步改色会把动画卡在 60px 半展开态。Windows 用 Toplevel alpha；非 Windows 用颜色压深回退。
@@ -536,3 +536,7 @@ export DISPLAY=:99          # weston headless + Xwayland
 15. **启动先 withdraw 再 deiconify**：Tk 创建后默认会先映射小窗口；`main()` 现在先 `root.withdraw()`，`PulsesSwapApp` 建完、`update_idletasks()`、`_center_window()` 后再 `root.deiconify()`。不要在 UI 建好前提前显示窗口。
 16. **旧版预设没有本地 manifest 也要能用**：`OnlineService.scan()` 每次都会扫描当前目录并 `save_local_manifest()`；如果 `.online/local/<preset>.json` 不存在，会现场算一份并落盘（日志可见）。不要改成“只读缓存、缺失就跳过”，否则老预设第一次检查会没有本地清单。
 17. **并发下载每个线程一个 LanzouShare**：`LanzouShare` 内含 cookie、一次性令牌和 `_acw_done`，不能跨线程共用；`Downloader` 用 `threading.local()` + `clone()` 给每个线程独立会话。`ThreadPoolExecutor` 的 `workers` 默认 4，结果必须按输入顺序返回；`on_progress` 要按 `completed + in_flight` 聚合，别让每个线程各报各的。
+18. **展开侧栏要抬 `sidebar_shell`，不是只抬 `sidebar`**：`sidebar` 是 native shell 里的 CTkFrame，页面内容在 `content_col`/stack 里；只 `sidebar.lift()` 不会改变 shell 与 content 的堆叠，展开后页面文字会从侧栏上透出来。现在 `_sidebar_expand()` 同时 `sidebar_shell.lift()`。
+19. **别再给侧栏加黑色 Toplevel 遮罩**：Windows/DWM 下 Toplevel 会先以不透明黑帧映射，再开始 alpha 补间，表现为闪黑/重绘。`_show_dim()` 现在直接 return；侧栏靠边框/圆角区分层级。`scale_check` 断言 `_sidebar_dim is None`。
+20. **OverlayCard 要被宽度撑住**：CTkFrame 的 `width=680` 会被内容反向压成 322；现在 body 里放一条透明宽度撑条，卡片自然高度由内容决定。差异清单高度按条目数收缩，不要固定 260px。
+21. **设置/弹窗的 wraplength 要 `px()`**：150% 下不缩放会在 620px 处提前换行，右边留一大块空白；`pages.py` 和 `dialogs.py` 已改为 `px(...)`。

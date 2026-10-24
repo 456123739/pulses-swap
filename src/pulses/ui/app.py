@@ -89,8 +89,14 @@ class PulsesSwapApp(WindowMixin, HomePageMixin, LogPageMixin, ManagerPageMixin,
         scale = config.UI_SCALE if config.UI_SCALE > 0 else 1.0
         win_w = int(min(WINDOW_W, max(WINDOW_MIN_W, scr_w / scale - 40)))
         win_h = int(min(WINDOW_H, max(WINDOW_MIN_H, scr_h / scale - 90)))
-        self.root.geometry(f"{win_w}x{win_h}")
+        # 关键：窗口首次映射前就带上居中坐标，不能只给宽高让 Tk 用默认位置。
+        # 否则 Windows/Tk 会先在右下角（或上次位置）组装，再被 _center_window
+        # 挪到中间，用户看到的就是“右下角拼好 → 跳回中心”。
+        win_x = max(0, (scr_w - win_w) // 2)
+        win_y = max(0, (scr_h - win_h) // 2 - px(12))
+        self.root.geometry(f"{win_w}x{win_h}+{win_x}+{win_y}")
         self.root.minsize(WINDOW_MIN_W, WINDOW_MIN_H)
+        self._initial_size = (win_w, win_h)
 
         # ==================== Win11 透明修复 ====================
         # 第一件：锁死 CTk 的缩放并摘掉它的 DPI 轮询 —— 那段代码会为了「掩盖

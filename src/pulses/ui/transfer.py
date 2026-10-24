@@ -186,6 +186,20 @@ class TransferMixin:
         try:
             empty = self.gunpack_listbox.size() == 0
             if empty:
+                # 空状态文案跟随当前上下文，不能永远写“先选一个整合包”：
+                # 已经选好预设时，用户需要的是“这个预设还没有枪包”。
+                if not getattr(self, "current_pack_path", None):
+                    title, hint = "还没有枪包", "先选择一个整合包"
+                elif not getattr(self, "current_selected_preset", None):
+                    title, hint = "还没有枪包", "先在左边选择一个预设"
+                elif str(self.gunpack_count_label.cget("text")).startswith("读取"):
+                    title, hint = "正在读取枪包…", ""
+                else:
+                    title, hint = "这个预设还没有枪包", "把 zip 或文件夹拖进来"
+                try:
+                    box.update_text(title, hint)
+                except Exception:
+                    pass
                 self.gunpack_listbox.pack_forget()
                 self.gunpack_scroll.pack_forget()
                 if not box.winfo_ismapped():
@@ -220,8 +234,8 @@ class TransferMixin:
             return
 
         self.gunpack_listbox.delete(0, END)
-        self._sync_gunpack_empty()
         self.gunpack_count_label.configure(text="读取枪包…")
+        self._sync_gunpack_empty()
         seq = int(getattr(self, "_gunpack_seq", 0)) + 1
         self._gunpack_seq = seq
         manager = self.preset_manager

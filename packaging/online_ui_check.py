@@ -211,6 +211,9 @@ def main() -> int:
     app.open_sync_dialog(name)
     pump(root, 300)
     check(True, "同步框构建成功")
+    stack = getattr(ps, "_OVERLAY_STACK", [])
+    check(bool(stack) and stack[-1].card.winfo_width() >= 600,
+          "同步框宽度没有被内容压窄")
     _close_top_card(root)
 
     print("\n[8] 发布框（开发者 + 假计划）")

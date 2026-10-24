@@ -223,7 +223,7 @@ class _OverlayCardBase:
                             fg=C_TEXT_MUTED if fg is None else fg,
                             font_size=FS_SMALL)
         label.configure(
-            wraplength=max(200, self.width - 2 * PAD_DIALOG - 6),
+            wraplength=max(200, px(self.width - 2 * PAD_DIALOG - 6)),
             justify=LEFT, anchor=W)
         label.pack(anchor=W, fill=X, pady=(0, PAD_INNER))
         return label
@@ -239,7 +239,7 @@ class _OverlayCardBase:
                             fg=C_TEXT_MAIN if fg is None else fg,
                             font_size=font_size)
         label.configure(
-            wraplength=max(200, self.width - 2 * PAD_DIALOG - wrap_extra),
+            wraplength=max(200, px(self.width - 2 * PAD_DIALOG - wrap_extra)),
             justify=LEFT, anchor=W)
         label.pack(anchor=W, fill=X, pady=(0, PAD_INNER))
         return label
@@ -299,6 +299,13 @@ class OverlayCard(_OverlayCardBase):
                                   width=width, height=1)
         self.body = ctk.CTkFrame(self.card, fg_color="transparent")
         self.body.pack(fill=BOTH, expand=True, padx=PAD_DIALOG, pady=PAD_DIALOG)
+        # CTkFrame 的 width=680 会被内容反向压窄（同步清单实测只剩 322px）。
+        # 放一条透明的宽度撑条，把 body/card 的请求宽度钉住；高度仍由内容决定。
+        _spacer = ctk.CTkFrame(
+            self.body, width=max(1, width - 2 * PAD_DIALOG), height=1,
+            fg_color="transparent")
+        _spacer.pack(fill=X)
+        _spacer.pack_propagate(False)
 
         try:
             # ESC 走 root 级绑定（子控件拿到焦点后仍然有效），关闭时按 funcid 解绑

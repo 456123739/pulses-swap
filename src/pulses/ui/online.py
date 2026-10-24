@@ -590,6 +590,10 @@ class OnlineMixin:
             pass
         if not rows:
             try:
+                self.sb_cloud_scroll._scrollbar.grid_remove()
+            except Exception:
+                pass
+            try:
                 if self.is_developer:
                     self.sb_cloud_empty_hint.configure(
                         text="登录并发布后，预设会出现在这里")
@@ -604,9 +608,9 @@ class OnlineMixin:
             except Exception:
                 pass
             try:
-                self.sb_cloud_all_btn.configure(
-                    text="全部更新" if not self.is_developer else "全部检查",
-                    state="disabled")
+                # 没有云端预设时不要留一条“全部更新/全部检查”的幽灵文字
+                if self.sb_cloud_all_btn.winfo_manager():
+                    self.sb_cloud_all_btn.pack_forget()
             except Exception:
                 pass
             if (self.is_developer and self.online is not None
@@ -617,12 +621,19 @@ class OnlineMixin:
             self.sb_cloud_empty.place_forget()
         except Exception:
             pass
+        try:
+            self.sb_cloud_scroll._scrollbar.grid()
+        except Exception:
+            pass
         for row in rows:
             self._make_sidebar_cloud_row(box, row)
         try:
             self.sb_cloud_all_btn.configure(
                 text="全部更新" if not self.is_developer else "全部检查",
                 state="normal")
+            if not self.sb_cloud_all_btn.winfo_manager():
+                self.sb_cloud_all_btn.pack(
+                    side=BOTTOM, anchor=W, pady=(PAD_XS, 0))
         except Exception:
             pass
 
@@ -2272,6 +2283,12 @@ class OnlineMixin:
         self.toast("诊断完成：全部通过" if ok else "诊断完成：发现问题",
                    "success" if ok else "warning")
 
+    @staticmethod
+    def _diff_list_height(items) -> int:
+        """按条目数给差异清单一个合适高度，避免 3 行撑出 260px 空白。"""
+        rows = max(1, min(len(items or []), 6))
+        return min(260, max(120, 56 + rows * 32))
+
     # ==================================================================
     # 同步
     # ==================================================================
@@ -2350,7 +2367,7 @@ class OnlineMixin:
         card.add_subtitle(subtitle)
 
         clean = bool(getattr(self.settings, "online_sync_clean", True))
-        listing = DiffList(card.body, height=260)
+        listing = DiffList(card.body, height=self._diff_list_height(plan.items))
         listing.pack(fill=BOTH, expand=True, pady=(PAD_TIGHT, 0))
         listing.set_items(plan.items, select_local_deletes=clean)
         if clean and any(i.action == online_diff.ASK_DELETE_LOCAL
@@ -2363,7 +2380,6 @@ class OnlineMixin:
                           fg=C_TEXT_SECONDARY, font_size=FS_TINY)
 
         bar = self._dialog_bar(card)
-        make_button(bar, "取消", command=lambda: card.close(False)).pack(side=RIGHT)
 
         def start():
             selection = listing.selection()
@@ -2375,6 +2391,8 @@ class OnlineMixin:
 
         make_button(bar, "开始同步", command=start, accent=True).pack(
             side=RIGHT, padx=(0, PAD_TIGHT))
+        make_button(bar, "取消", command=lambda: card.close(False)).pack(
+            side=RIGHT)
 
     def _run_sync(self, name: str, plan, selection):
         if self.is_developer:
@@ -2631,7 +2649,7 @@ class OnlineMixin:
                    placeholder="可留空，例如 2.5.0").pack(
             side=LEFT, padx=(PAD_TIGHT, 0))
 
-        listing = DiffList(card.body, height=240)
+        listing = DiffList(card.body, height=self._diff_list_height(plan.items))
         listing.pack(fill=BOTH, expand=True)
         listing.set_items(plan.items)
 

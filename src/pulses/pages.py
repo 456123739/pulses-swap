@@ -428,7 +428,7 @@ class SettingsPage:
         db_card.pack(fill=X, pady=(0, PAD_DIALOG))
         self.db_path_label = make_label(db_card, text="", fg=C_TEXT_MAIN,
                                         font_size=FS_SMALL)
-        self.db_path_label.configure(wraplength=620, justify=LEFT, anchor=W)
+        self.db_path_label.configure(wraplength=px(620), justify=LEFT, anchor=W)
         self.db_path_label.pack(anchor=W, padx=PAD_CARD_X, pady=PAD_CARD_Y)
 
         # 数据库操作是本地管理，不属于上传/下载的权限边界；所有身份都显示，
@@ -460,6 +460,22 @@ class SettingsPage:
         make_label(db_mgr_card, text="", font_size=FS_TINY).pack(
                 anchor=W, padx=PAD_CARD_X, pady=(0, PAD_TIGHT))
 
+        help_card = ctk.CTkFrame(tab, fg_color=C_CARD_BG, corner_radius=R_CARD,
+                                  border_width=0)
+        help_card.pack(fill=X, pady=(0, PAD_DIALOG))
+        make_label(help_card, text="数据库说明", fg=C_TEXT_SECONDARY,
+                   font_size=FS_SMALL, bold=True).pack(
+                       anchor=W, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
+        help_text = make_label(
+            help_card,
+            text="数据库保存预设、设置与运行日志；切换/合并只改变保存位置，"
+                 "不会删除原数据。\n"
+                 "旧版 FGC_database 或没有本地 manifest 的预设，会在首次检查时"
+                 "自动迁移/现场补算。",
+            fg=C_TEXT_SECONDARY, font_size=FS_SMALL, justify="left")
+        help_text.configure(wraplength=px(620))
+        help_text.pack(anchor=W, padx=PAD_CARD_X, pady=(0, PAD_CARD_Y))
+
     # ==================== 选项卡：关于 ====================
     def _build_about(self, tab):
         tab = self._tab_body(tab)
@@ -476,7 +492,7 @@ class SettingsPage:
         attach_hover_glow(info_card)
         self.about_db_label = make_label(info_card, text="", fg=C_TEXT_MAIN,
                                          font_size=FS_SMALL)
-        self.about_db_label.configure(wraplength=620, justify=LEFT, anchor=W)
+        self.about_db_label.configure(wraplength=px(620), justify=LEFT, anchor=W)
         self.about_db_label.pack(anchor=W, padx=PAD_CARD_X,
                                   pady=(PAD_CARD_Y, PAD_TIGHT))
         self.about_mode_label = make_label(info_card, text="", fg=C_TEXT_SECONDARY,
@@ -494,6 +510,22 @@ class SettingsPage:
         make_button(btn_row, "退出程序",
                      command=self.app.request_exit).pack(
                         side=LEFT, padx=PAD_TIGHT)
+
+        tips_card = ctk.CTkFrame(tab, fg_color=C_CARD_BG, corner_radius=R_CARD,
+                                  border_width=0)
+        tips_card.pack(fill=X, pady=(PAD_DIALOG, 0))
+        make_label(tips_card, text="本版要点", fg=C_TEXT_SECONDARY,
+                   font_size=FS_SMALL, bold=True).pack(
+                       anchor=W, padx=PAD_CARD_X, pady=(PAD_CARD_Y, PAD_TIGHT))
+        tips_text = make_label(
+            tips_card,
+            text="· 玩家同步默认完全同步：本地多余枪包删除到系统回收站，可在设置改回保留。\n"
+                 "· 同步下载 4 线程并发，单个文件失败不会阻塞其它文件。\n"
+                 "· 旧版预设没有本地 manifest 时会现场扫描并保存。\n"
+                 "· 列表滚动与启动窗口已做无闪烁处理。",
+            fg=C_TEXT_SECONDARY, font_size=FS_SMALL, justify="left")
+        tips_text.configure(wraplength=px(620))
+        tips_text.pack(anchor=W, padx=PAD_CARD_X, pady=(0, PAD_CARD_Y))
 
     # ==================== 状态同步 ====================
     def reload(self):
