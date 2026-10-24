@@ -74,6 +74,26 @@ class ServiceTest(unittest.TestCase):
         self.temp.cleanup()
 
     # ------------------------------------------------------------------
+    def test_scan_generates_missing_local_manifest(self):
+        """旧版预设没有 .online/local manifest：现场扫描并保存。"""
+        name = "旧版预设"
+        root = Path(self.temp.name) / "legacy" / name
+        write(root / "old_gun.zip", b"old-gun")
+        write(root / "old_folder" / "pack.json", b"{}")
+        ref = PresetRef(name, str(root), str(root))
+        local_path = paths.local_manifest_path(self.db, name)
+        if local_path.exists():
+            local_path.unlink()
+        self.assertFalse(local_path.exists())
+
+        entries = self.service.scan(ref)
+        self.assertEqual(len(entries), 2)
+        self.assertTrue(local_path.exists())
+        saved = self.service.load_local_manifest(name)
+        self.assertEqual({e["path"] for e in saved},
+                         {"old_gun.zip", "old_folder.zip"})
+        self.assertTrue(all(e.get("sha256") for e in saved))
+
     def test_bind_and_source(self):
         self.assertFalse(self.service.is_bound("测试预设"))
         self.service.bind("测试预设", self.cloud.url, "28pm")

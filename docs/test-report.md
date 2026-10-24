@@ -239,7 +239,7 @@
 
 | 项目 | 结果 |
 |---|---|
-| 单元测试 | 178 个全部通过（新增 CFG manifest/完整性/迁移测试） |
+| 单元测试 | 182 个全部通过（CFG manifest / 完全同步 / 并发下载 / 旧预设） |
 | ui_audit（59 按钮/弹窗/设置/列表/错误/尺寸） | 通过 |
 | online_ui_check | 通过 |
 | startup_check（含居中断言） | 通过 |
@@ -307,3 +307,10 @@
 - 启动：`Tk()` 创建后立即 `withdraw()`，完整 UI、布局、居中完成后再 `deiconify()`，消除“小白窗 → 展开”。
 - 新增 `packaging/scroll_check.py`：双 ScrollArea 交替、CTk 滚动不解绑、Listbox、60 张卡片到底，全部通过。
 - 单元测试 178 个全部通过；`ui_audit`、`online_ui_check`、`startup_check`、`scale_check`、`online_e2e` 全部通过。
+
+## 12. 2.7.3 旧预设适配与并发下载
+
+- 旧版预设没有 `.online/local/<preset>.json`：`OnlineService.scan()` 现场扫描并保存；新增 `test_scan_generates_missing_local_manifest` 覆盖。
+- 下载引擎：`ThreadPoolExecutor` 4 线程，每线程 `LanzouShare.clone()` 独立 cookie/令牌；结果按输入顺序返回，进度按 `completed + in_flight` 聚合。
+- 新增 `tests/test_downloader_parallel.py`：4 个慢文件重叠下载、顺序保持、单线程回退、并发取消。
+- 单元测试 182 个全部通过；`online_e2e`、`ui_audit`、`online_ui_check`、`startup_check`、`scale_check`、`scroll_check` 全部通过。

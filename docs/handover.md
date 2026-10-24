@@ -1,4 +1,4 @@
-# Pulses Swap 交接文档（v2.7.2）
+# Pulses Swap 交接文档（v2.7.3）
 
 > 给接手的人 / AI 看的：这个软件被拆成了哪些文件、每个文件干什么、
 > 数据怎么流动、改哪里、怎么跑测试、怎么打包。
@@ -12,7 +12,7 @@
 一键把某组枪包换进游戏的 `tacz` 目录；同时把预设发布到**蓝奏云**，
 玩家绑定分享链接后可以增量同步。
 
-- 版本：`2.7.2`（`src/pulses/core/paths.py` 里的 `VERSION`）
+- 版本：`2.7.3`（`src/pulses/core/paths.py` 里的 `VERSION`）
 - 入口：`src/main.py` → `pulses.ui.app.main()`
 - 依赖：`customtkinter` `tkinterdnd2` `watchdog` `Pillow`（见 `requirements.txt`）
 - 不依赖任何第三方网络库（HTTP 全用标准库 `urllib`）
@@ -29,7 +29,7 @@ pulses-swap/
 │   ├── pulses/                 界面 + 本地逻辑
 │   └── online/                 在线同步（不依赖 tkinter，可命令行跑）
 ├── packaging/                  打包配置 + 各种验证脚本
-├── tests/                      单元 / 集成测试（178 个）
+├── tests/                      单元 / 集成测试（182 个）
 ├── docs/                       方案、教程、交接文档
 └── requirements.txt
 ```
@@ -304,7 +304,7 @@ for (rel, size, file_sha) in sorted(树里每个文件):
 # 源码运行
 python src/main.py
 
-# 单元 + 集成测试（178 个）
+# 单元 + 集成测试（182 个）
 python -m unittest discover -s tests -t .
 
 # 打包：一份 spec 出三端
@@ -517,7 +517,7 @@ export DISPLAY=:99          # weston headless + Xwayland
     之后重新 `get` 再写 `folder_id`，否则会用请求前的旧快照覆盖掉期间写入的
     分享链接/发布历史。
 
-## v2.7.2 新增坑位（务必保留）
+## v2.7.3 新增坑位（务必保留）
 
 1. **侧边栏悬停不能用子控件 Enter/Leave**：Tk 的 crossing 事件被子控件吞掉，只在 `self.sidebar` 上绑定会出现“只有空白背景能展开”。现在用 root `<Motion>` + 指针坐标判定；展开/收起动画由 `sidebar_shell` 的宽度补间驱动。改动时不要退回只绑父控件。
 2. **压暗工作区不能遍历全部页面**：`_dim_content` 只处理 `active_page`，且延迟到宽度动画开始后；遍历四页/同步改色会把动画卡在 60px 半展开态。Windows 用 Toplevel alpha；非 Windows 用颜色压深回退。
@@ -534,3 +534,5 @@ export DISPLAY=:99          # weston headless + Xwayland
 13. **ScrollArea 不要 bind_all/unbind_all**：CTkScrollableFrame 自己也用 bind_all 绑滚轮；在 `<Leave>` 里 `unbind_all` 会把设置页/管理页/侧边栏的滚动一起解掉。现在每个 root 只装一次 `_scroll_wheel_dispatch`，按 `event.widget` 的 master 链找最近的 ScrollArea；不要退回按 Enter/Leave 动态绑定的写法。
 14. **卡片滚动不要逐事件补间**：连续滚轮会不断 cancel/restart 150ms 补间，实际只挪一点，卡片一多就卡。现在 `ScrollArea.scroll_by()` 直接 `canvas.yview_moveto(target)`；滚动期间用模块级 `_SCROLL_ACTIVE_UNTIL` 暂停 hover 补间。Listbox 同理用原生 `yview_scroll`。
 15. **启动先 withdraw 再 deiconify**：Tk 创建后默认会先映射小窗口；`main()` 现在先 `root.withdraw()`，`PulsesSwapApp` 建完、`update_idletasks()`、`_center_window()` 后再 `root.deiconify()`。不要在 UI 建好前提前显示窗口。
+16. **旧版预设没有本地 manifest 也要能用**：`OnlineService.scan()` 每次都会扫描当前目录并 `save_local_manifest()`；如果 `.online/local/<preset>.json` 不存在，会现场算一份并落盘（日志可见）。不要改成“只读缓存、缺失就跳过”，否则老预设第一次检查会没有本地清单。
+17. **并发下载每个线程一个 LanzouShare**：`LanzouShare` 内含 cookie、一次性令牌和 `_acw_done`，不能跨线程共用；`Downloader` 用 `threading.local()` + `clone()` 给每个线程独立会话。`ThreadPoolExecutor` 的 `workers` 默认 4，结果必须按输入顺序返回；`on_progress` 要按 `completed + in_flight` 聚合，别让每个线程各报各的。

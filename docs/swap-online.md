@@ -426,6 +426,7 @@ Windows 用 `SHFileOperationW`（`FOF_ALLOWUNDO`），Linux/macOS 走 freedeskto
 |---|---|
 | `provider_lanzou_account.py` | 登录、流式 multipart 上传、删除、建目录、分享解析 |
 | `publisher.py` | 建目录 → 删云端多余 → 上传 → manifest 最后替换 → 取分享 |
+| `downloader.py` | 4 线程并发下载（每线程独立会话），按清单顺序汇总 |
 
 关键点：上传前先删同名文件（蓝奏会自动改名成 `name(1).zip`），
 上传后校验返回的文件名；任何一步失败都不替换 manifest。

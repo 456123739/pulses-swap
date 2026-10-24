@@ -125,6 +125,16 @@ class LanzouShare:
         self._files: list[dict] | None = None
         self._acw_done: set[str] = set()
 
+    def clone(self):
+        """复制一个独立会话，给并发下载的每个线程用。
+
+        LanzouShare 内部有 cookie / 一次性令牌 / _acw_done 状态，不能跨线程
+        共用；每个下载线程拿自己的 clone，避免令牌互相覆盖。
+        """
+        return LanzouShare(
+            self.share_url, self.password, timeout=self.timeout,
+            retries=self.retries, sleep=self._sleep, log=self.log)
+
     # ------------------------------------------------------------------
     # 基础请求
     # ------------------------------------------------------------------

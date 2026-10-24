@@ -454,14 +454,15 @@ class OnlineService:
         except (ManifestError, OSError):
             return None
 
-    def save_local_manifest(self, preset: str, entries: list[dict]) -> None:
+    def save_local_manifest(self, preset: str, entries: list[dict]) -> bool:
         path = paths.local_manifest_path(self.db_path, preset)
         data = {"schema": manifest_mod.SCHEMA, "name": preset,
                 "files": entries}
         try:
             manifest_mod.save(data, path)
+            return True
         except (ManifestError, OSError):
-            pass
+            return False
 
     def load_local_manifest(self, preset: str) -> list[dict]:
         path = paths.local_manifest_path(self.db_path, preset)
@@ -505,10 +506,23 @@ class OnlineService:
     # 扫描
     # ------------------------------------------------------------------
     def scan(self, ref: PresetRef, *, should_stop=None) -> list[dict]:
+        """扫描本地预设，并保证本地 manifest 落盘。
+
+        旧版预设可能只有枪包、没有 ``.online/local/<preset>.json``；
+        这里现场算一遍并保存，后续启动/离线展示可以直接读缓存。
+        """
+        manifest_path = paths.local_manifest_path(self.db_path, ref.name)
+        existed = os.path.isfile(manifest_path)
         cache = hashing.HashCache(paths.cache_path(self.db_path, ref.root),
                                   root=ref.root)
         entries = hashing.scan_local(ref.root, cache, should_stop=should_stop)
-        self.save_local_manifest(ref.name, entries)
+        saved = self.save_local_manifest(ref.name, entries)
+        if not existed:
+            if saved:
+                self._log(f"本地预设没有 manifest，已现场扫描并保存："
+                          f"{ref.name}（{len(entries)} 项）", "INFO")
+            else:
+                self._log(f"本地预设 manifest 保存失败：{ref.name}", "WARNING")
         return entries
 
     def inspect_share(self, url: str, password: str = "") -> dict:
