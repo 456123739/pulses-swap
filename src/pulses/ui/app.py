@@ -157,8 +157,10 @@ class PulsesSwapApp(WindowMixin, HomePageMixin, LogPageMixin, ManagerPageMixin,
         self.setup_menu()
 
         self._install_opacity_guard()
-        # 居中必须在首帧之后：此时 CTk 的缩放/内边距已经算完
-        self.root.after(0, self._center_window)
+        # 居中必须在首帧之后：此时 CTk 的缩放/内边距已经算完。
+        # 保存 job：main() 的 show_window 会手动居中，必须取消这条 idle
+        # 回调，否则它会在开窗补间中途把窗口拉回最终矩形。
+        self._center_job = self.root.after(0, self._center_window)
         self.root.after(40, self._init_database_flow)
 
 
@@ -238,24 +240,17 @@ def main():
 
     app = PulsesSwapApp(root)
 
-    # UI 已建好：先让 Tk 完成布局，再把窗口居中并显示。
-    # 这样首帧就是完整窗口，不会出现“小窗 → 展开”的违和。
+    # UI 已建好，交给 app 统一控制显示：
+    # 先算最终矩形，再从「透明 + 略靠下」快速弹到最终位置。
+    # 动画结束后 app 会自己刷一次窗口不透明，避免 80ms 的 DWM 回调
+    # 在补间中途把 alpha 拉回 1.0。
     try:
-        root.update_idletasks()
-        app._center_window()
-        root.deiconify()
-        root.update_idletasks()
-        _disable_dwm(root)
+        app.show_window()
     except Exception:
         try:
             root.deiconify()
         except Exception:
             pass
-
-    try:
-        root.after(80, lambda: _disable_dwm(root))
-    except Exception:
-        pass
 
     def on_closing():
         # 退出语义与界面内的「退出程序」完全一致（见 request_exit）

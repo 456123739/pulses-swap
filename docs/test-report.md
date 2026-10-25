@@ -336,3 +336,13 @@
 - 下载：并发进度串行化且只增不减；新增中途取消、clone 会话、真实 mock 六文件并发；取消同步不再推进版本/manifest。
 
 验证结果：186 个单元测试通过；`ui_audit`、`ui_process_check`、`anim_invariants`、`scale_check`（100/125/150）、`scroll_check`、`startup_check`、`online_ui_check`、`online_e2e` 全部通过。Linux 本机首次展开侧栏时 CTk 首帧排版可能把 190ms 补间压进第一次 `update`；补间仍保留，Windows 实机需再确认帧率。
+
+## 15. 2.7.6 窗口出现 / 关闭动画
+
+- 参考 PCL 主窗口的入场方式：出现时从下方 26px、alpha 0 开始，320ms 上浮淡入，末尾带轻微回弹；关闭时下移 18px、210ms 淡出，结束后 `withdraw()` + `quit()`。
+- Tk 没有 WPF 的 `RenderTransform`，因此不做逐帧缩放：只改窗口 y 和 alpha，避免每次 geometry 尺寸变化触发整棵控件树重排。PCL 的旋转/缩放属于 WPF 合成层效果，Tk 下没有等价且不掉帧的实现。
+- 启动时先画 alpha=0 的起始帧再启动补间，否则首次布局会把前几帧一起吞掉，用户看到的是窗口突然半透明出现。
+- 开窗/关窗期间 `_on_opacity_event` / `_opacity_tick` 暂停 Win11 不透明刷新，防止中间帧 alpha 被拉回 1.0；动画结束再统一刷新。
+- 修复隐藏状态下 `winfo_width()` 为 1 导致 `_center_window()` 按 1x1 计算、窗口显示后偏半个窗口的问题。
+- 验证：`tests/test_window_motion.py` 8 个用例；`packaging/window_anim_check.py` 检查起始透明/位置、结束矩形、关闭淡出与隐藏；`startup_check` 等待开窗动画结束后再断言不透明和居中。
+- 实测（Linux Xvfb，100%）：开窗在首次布局后约 40ms 启动，320ms 收束；关闭约 210ms 完成并隐藏。Windows 实机尚未逐帧验证，CI 只构建安装包；macOS 本期不构建。
