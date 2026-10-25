@@ -296,6 +296,24 @@ class Downloader:
         lock = threading.Lock()
         completed = 0
         in_flight: dict[int, int] = {}
+        # 多个线程各自算进度再回调，回调可能乱序：A 算出 100、B 算出 200，
+        # B 先回调、A 后回调时进度条会从 200 退回 100。用单独的锁串行化
+        # 回调并丢弃倒退值，保证 UI 进度只增不减。
+        progress_lock = threading.Lock()
+        last_progress = {"value": -1}
+
+        def emit_progress(value, index, entry):
+            if on_progress is None:
+                return
+            with progress_lock:
+                value = max(0, int(value))
+                if value < last_progress["value"]:
+                    return
+                last_progress["value"] = value
+                try:
+                    on_progress(value, total_bytes, index, count, entry)
+                except Exception:                   # noqa: BLE001
+                    pass
 
         def report(index: int, entry: dict, done: int) -> None:
             nonlocal completed
@@ -303,11 +321,7 @@ class Downloader:
             with lock:
                 in_flight[index] = min(max(0, int(done)), expected or int(done))
                 current = completed + sum(in_flight.values())
-            if on_progress is not None:
-                try:
-                    on_progress(current, total_bytes, index, count, entry)
-                except Exception:                       # noqa: BLE001
-                    pass
+            emit_progress(current, index, entry)
 
         def emit_item(index: int, entry: dict, phase: str) -> None:
             if on_item is None:
@@ -346,11 +360,7 @@ class Downloader:
             else:
                 self._log(f"下载失败 {entry.get('path')}：{result.error}", "ERROR")
             emit_item(index, entry, "done" if result.ok else "error")
-            if on_progress is not None:
-                try:
-                    on_progress(done, total_bytes, index, count, entry)
-                except Exception:                       # noqa: BLE001
-                    pass
+            emit_progress(done, index, entry)
             return result
 
         cancelled = False

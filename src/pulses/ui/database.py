@@ -349,7 +349,7 @@ class DatabaseMixin:
         if not after_mode:
             return
 
-        self.set_status("准备适配...", "busy", progress=0.0)
+        self.set_status("准备适配…", "busy", progress=0.0)
         self._disable_buttons(True)
         self.select_pack_btn.configure(state="disabled")
 

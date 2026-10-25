@@ -425,16 +425,20 @@ class ManagePresetList(ctk.CTkFrame):
             left.pack(side=LEFT, fill=X, expand=True, padx=PAD_GAP,
                       pady=PAD_TIGHT)
             title = name + ("  · 已应用" if spec.get("applied") else "")
-            make_label(left, text=title, fg=C_TEXT_MAIN,
-                       font_size=FS_SMALL, bold=True).pack(anchor=W)
+            name_font = tk_font(config.FONT_FAMILY, FS_SMALL, "bold")
+            tiny_font = tk_font(config.FONT_FAMILY, FS_TINY)
+            make_label(left, text=ellipsize(title, name_font, px(430)),
+                       fg=C_TEXT_MAIN, font_size=FS_SMALL,
+                       bold=True).pack(anchor=W)
             meta = " · ".join(str(x) for x in (
                 spec.get("version") or "", spec.get("meta") or "",
                 spec.get("path") or "") if x)
-            make_label(left, text=meta or "—", fg=C_TEXT_MUTED,
-                       font_size=FS_TINY).pack(anchor=W, pady=(1, 0))
+            make_label(left, text=ellipsize(meta or "—", tiny_font, px(430)),
+                       fg=C_TEXT_MUTED, font_size=FS_TINY).pack(
+                           anchor=W, pady=(1, 0))
             status = str(spec.get("status") or "")
             if status:
-                make_label(left, text=status,
+                make_label(left, text=ellipsize(status, tiny_font, px(430)),
                            fg=spec.get("color") or C_TEXT_MUTED,
                            font_size=FS_TINY).pack(anchor=W, pady=(1, 0))
             action = str(spec.get("action") or "详情")
@@ -444,13 +448,9 @@ class ManagePresetList(ctk.CTkFrame):
                 self.app._manage_preset_action(n, k))
             btn.pack(side=RIGHT, padx=(0, PAD_GAP))
             for widget in (row, left) + tuple(left.winfo_children()):
-                try:
-                    widget.bind(
-                        "<Button-1>",
-                        lambda e, n=name: self.app._manage_select(n),
-                        add="+")
-                except Exception:
-                    pass
+                bind_event(
+                    widget, "<Button-1>",
+                    lambda e, n=name: self.app._manage_select(n))
             self._rows.append(row)
 
 
@@ -811,7 +811,7 @@ class ManagerPageMixin:
                     bound = bool(self.online and (
                         self.online.is_bound(name)
                         or (self.is_developer and path)))
-                    action = "检查" if bound else "绑定"
+                    action = "检查" if bound else "绑定来源"
                     kind = "check" if bound else "source"
                 rows.append({
                     "name": name,
@@ -917,7 +917,8 @@ class ManagerPageMixin:
                     btn.configure(text="从云端添加", state="normal")
                     self._manage_primary_kind = "add"
             return
-        label.configure(text=name)
+        label.configure(text=ellipsize(
+            name, tk_font(config.FONT_FAMILY, FS_SMALL), px(360)))
         applied = bool(info.get("applied"))
         if name != getattr(self, "_manage_last_preset", None):
             self._manage_last_preset = name

@@ -148,7 +148,7 @@ class TransferMixin:
             _set_state("publish_btn", "disabled")
             _set_state("sync_btn", "disabled")
             _set_state("apply_alt_btn", "disabled")
-            self.apply_btn.configure(state="disabled", text=f"{operation}中...")
+            self.apply_btn.configure(state="disabled", text=f"{operation}中…")
             self.create_preset_btn.configure(state="disabled")
             self.select_pack_btn.configure(state="disabled")
             self.save_version_btn.configure(state="disabled")
@@ -314,7 +314,7 @@ class TransferMixin:
             else:
                 normal.append(n)
 
-        location = "Tacz文件夹" if applied else "预设文件夹"
+        location = "TACZ 目录" if applied else "预设目录"
         total = len(missing) + len(extra) + len(modified) + len(normal)
 
         for name in missing:
@@ -341,11 +341,13 @@ class TransferMixin:
         folders = sum(1 for n in list(cur_names | idx_names)
                       if kind_of(n) == "folder")
         zips = total - folders
-        mix = f"{zips} zip · {folders} 文件夹" if folders else f"{zips} zip"
+        mix = (f"{zips} 个 zip · {folders} 个文件夹" if folders
+               else f"{zips} 个 zip")
         if missing or extra or modified:
             self.gunpack_count_label.configure(
-                text=f"共 {total} 个（{mix}） 正常:{len(normal)} "
-                     f"缺失:{len(missing)} 多余:{len(extra)} 变更:{len(modified)}")
+                text=f"共 {total} 个（{mix}）· 正常 {len(normal)} · "
+                     f"缺失 {len(missing)} · 多余 {len(extra)} · "
+                     f"变更 {len(modified)}")
         else:
             self.gunpack_count_label.configure(
                 text=f"共 {total} 个（{mix}）· 来自 {location}")
@@ -354,16 +356,16 @@ class TransferMixin:
         if missing or extra or modified:
             lines = [f"预设 '{preset_name}' 校验结果 (从{location}读取):"]
             if normal:
-                pv = ', '.join(normal[:5]) + (" ..." if len(normal) > 5 else "")
+                pv = ', '.join(normal[:5]) + (" …" if len(normal) > 5 else "")
                 lines.append(f"  ✓ 正常: {len(normal)} 个 ({pv})")
             if missing:
-                pv = ', '.join(missing[:5]) + (" ..." if len(missing) > 5 else "")
+                pv = ', '.join(missing[:5]) + (" …" if len(missing) > 5 else "")
                 lines.append(f"  × 缺失: {len(missing)} 个 ({pv})")
             if extra:
-                pv = ', '.join(extra[:5]) + (" ..." if len(extra) > 5 else "")
+                pv = ', '.join(extra[:5]) + (" …" if len(extra) > 5 else "")
                 lines.append(f"  ⊙ 多余: {len(extra)} 个 ({pv})")
             if modified:
-                pv = ', '.join(modified[:5]) + (" ..." if len(modified) > 5 else "")
+                pv = ', '.join(modified[:5]) + (" …" if len(modified) > 5 else "")
                 lines.append(f"  ~ 变更: {len(modified)} 个 ({pv})")
             self.log_manager.log("\n".join(lines), 'WARNING')
         else:
@@ -388,12 +390,12 @@ class TransferMixin:
             show_info("提示", f"预设 '{name}' 已经应用")
             return
         if not ask_yes_no("确认替换",
-                f"确定要应用预设 '{name}' 吗？\n\n这将替换Tacz文件夹中的所有枪包！"):
+                f"确定要应用预设 '{name}' 吗？\n\n这将替换 TACZ 文件夹中的所有枪包。"):
             return
 
         self._stop_watcher()
         self.set_busy_state(True, "替换")
-        self.set_status("准备替换...", "busy", progress=0.0)
+        self.set_status("准备替换…", "busy", progress=0.0)
 
         def cb(c, t, m):
             self.show_progress(c, t, m)

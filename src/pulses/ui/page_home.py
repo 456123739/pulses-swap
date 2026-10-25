@@ -108,10 +108,6 @@ class HomePageMixin:
                                              height=px(178))
         self.pack_drop_area.pack(fill=X, pady=(0, PAD_TIGHT))
         self.pack_drop_area.pack_propagate(False)
-        # 拖放目标要有 hover 反馈：鼠标进来描边浮一层强调软色
-        attach_hover_glow(self.pack_drop_area, base_color=C_BORDER_SOFT,
-                          hover_color=C_ACCENT_SOFT)
-
         self.pack_drop_label = ctk.CTkLabel(
             self.pack_drop_area,
             text="把整合包文件夹拖到这一整块区域\n（包内任意文件也可以，自动定位 tacz）",
@@ -157,6 +153,11 @@ class HomePageMixin:
             ])
         # 不 pack：鼠标移进这张卡才浮出来（见 _hover_reveal）
 
+        # 拖放目标要有 hover 反馈：鼠标进来描边浮一层强调软色。
+        # 必须等内部的路径条/按钮都建好后再绑，否则鼠标移到文字上会断。
+        attach_hover_glow(self.pack_drop_area, base_color=C_BORDER_SOFT,
+                          hover_color=C_ACCENT_SOFT)
+
         # 整张「整合包」卡片都是拖放目标：用户不需要精确对准内部小框
         self._pack_drop_widgets = [pack_group, pack_content,
                                    self.pack_drop_area, self.pack_drop_label,
@@ -178,10 +179,7 @@ class HomePageMixin:
                     pass
         for w in (self.pack_drop_area, self.pack_drop_label,
                   self.pack_path_frame, self.pack_path_label):
-            try:
-                w.bind("<Button-1>", self._on_pack_drop_click, add="+")
-            except Exception:
-                pass
+            bind_event(w, "<Button-1>", self._on_pack_drop_click)
 
         # 最近打开：做成「不参与布局」的下拉浮层。
         # 挂在整页上、用 place 定位到按钮行正下方 —— place 不影响 pack/grid
@@ -597,10 +595,9 @@ class HomePageMixin:
                 pass
 
         for seq, fn in (("<Enter>", _show), ("<Leave>", _maybe_hide)):
-            try:
-                host.bind(seq, fn, add="+")
-            except Exception:
-                pass
+            # 卡头有标题/副标题/按钮多个子控件；只绑 host 的内部 Canvas
+            # 时，鼠标一进文字就收不到 Enter，按钮永远不浮出来。
+            bind_event(host, seq, fn, recursive=True)
 
     def _home_open_upload(self):
         if not bool(getattr(self, "is_developer", False)):
@@ -636,6 +633,16 @@ class HomePageMixin:
                 data = self._preset_card_data(name)
                 text = str(data.get("status") or "未绑定")
                 color = data.get("status_color") or C_TEXT_MUTED
+                if text == "未绑定来源":
+                    text = "未绑定"
+                elif text.startswith("连接失败"):
+                    # 右上角只放结论；具体错误在卡片/来源页里看。
+                    text = "连接失败"
+                elif text.startswith("连接云端"):
+                    # 左边已经有「云端 ·」，这里别再重复「云端」。
+                    text = "连接中…"
+                elif text.startswith("读取云端"):
+                    text = "读取中…"
             else:
                 text, color = "未绑定", C_TEXT_MUTED
             label.configure(text=f"云端 · {text}", text_color=color)

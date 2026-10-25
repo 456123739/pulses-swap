@@ -249,9 +249,24 @@ def attach_hover_glow(widget, base_color=None, hover_color=None, duration_ms=130
         except Exception:
             fire()
 
-    try:
-        widget.bind("<Enter>", _on_enter, add="+")
-        widget.bind("<Leave>", _on_leave, add="+")
-    except Exception:
-        pass
+    # CTk 的 bind() 只绑内部 Canvas，指针落在子标签/子按钮上时收不到。
+    # 把实际接收事件的内部控件和现有子控件都绑上，悬停到文字上不会断。
+    targets, stack = [], [widget]
+    while stack:
+        node = stack.pop()
+        for target in (node, getattr(node, "_canvas", None),
+                       getattr(node, "_label", None),
+                       getattr(node, "_text_label", None)):
+            if target is not None and target not in targets:
+                targets.append(target)
+        try:
+            stack.extend(node.winfo_children())
+        except Exception:
+            pass
+    for target in targets:
+        try:
+            target.bind("<Enter>", _on_enter, add="+")
+            target.bind("<Leave>", _on_leave, add="+")
+        except Exception:
+            pass
     return widget

@@ -106,13 +106,13 @@ class MiscMixin:
             self.log_manager.log(f"检测到已应用预设 '{preset_name}' 有未同步的变更:", 'WARNING')
             if changes['added']:
                 self.log_manager.log(f"  新增: {', '.join(changes['added'][:5])}"
-                                      + (" ..." if len(changes['added']) > 5 else ""), 'INFO')
+                                      + (" …" if len(changes['added']) > 5 else ""), 'INFO')
             if changes['removed']:
                 self.log_manager.log(f"  移除: {', '.join(changes['removed'][:5])}"
-                                      + (" ..." if len(changes['removed']) > 5 else ""), 'ERROR')
+                                      + (" …" if len(changes['removed']) > 5 else ""), 'ERROR')
             if changes['modified']:
                 self.log_manager.log(f"  修改: {', '.join(changes['modified'][:5])}"
-                                      + (" ..." if len(changes['modified']) > 5 else ""), 'PROCESS')
+                                      + (" …" if len(changes['modified']) > 5 else ""), 'PROCESS')
             if self.dont_remind_this_session:
                 return
             if self.settings.role == "developer":
@@ -162,7 +162,7 @@ class MiscMixin:
 
     def refresh_all(self):
         if self.loading_presets:
-            show_info("加载中", "预设列表正在加载，请稍候...")
+            show_info("加载中", "预设列表正在加载，请稍候…")
             return
         self.refresh_presets()
         if self.current_selected_preset:

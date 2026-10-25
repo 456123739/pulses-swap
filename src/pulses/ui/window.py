@@ -144,6 +144,8 @@ class WindowMixin:
         self._sidebar_expanded = False
         self._sidebar_jobs = {}
         self._sidebar_sections = []
+        self._sidebar_sections_visible = False
+        self._sidebar_leave_required = False
         self._show_account_box = bool(getattr(self, "is_developer", False))
 
         main_frame.grid_rowconfigure(0, weight=1)
@@ -274,11 +276,9 @@ class WindowMixin:
         self.sb_cloud_all_btn = make_text_button(
             cloud_box, "全部更新", command=self._sidebar_update_all)
         self.sb_cloud_all_btn.pack(side=BOTTOM, anchor=W, pady=(PAD_XS, 0))
-        self.sb_cloud_scroll = ctk.CTkScrollableFrame(
-            cloud_box, fg_color="transparent", corner_radius=0,
-            scrollbar_button_color=C_BORDER_SOFT,
-            scrollbar_button_hover_color=C_BORDER)
-        self.sb_cloud_scroll.pack(fill=BOTH, expand=True)
+        # 云端列表按需创建：空态时连 CTkScrollableFrame 都不要，
+        # 否则侧栏每次展开都要为一条空滚动条重绘 100ms 以上。
+        self.sb_cloud_scroll = None
         # 空态不贴在列表顶部：居中放一张“下一步”卡，留白才不会显得空。
         self.sb_cloud_empty = ctk.CTkFrame(cloud_box, fg_color="transparent")
         make_label(self.sb_cloud_empty, text="还没有云端预设",
@@ -427,6 +427,9 @@ class WindowMixin:
         self._bind_sidebar_events()
         # 启动就是折叠态：账号/云端列表/身份滑块先收起来，只留图标栏
         self._set_sidebar_sections(False)
+        # 装配时抬一次即可：shell 必须盖在 content_col 上。
+        self.sidebar_shell.lift()
+        self.sidebar.lift()
         self._update_nav_state(None, animate=False)
         self.show_page("home", animate=False)
         self._play_entrance()
@@ -448,7 +451,7 @@ class WindowMixin:
         def on_enter(_event=None):
             if not getattr(self, "_sidebar_hover_armed", False):
                 return
-            if _OVERLAY_STACK:
+            if _OVERLAY_STACK or getattr(self, "_sidebar_leave_required", False):
                 return
             self._sidebar_cancel("expand")
             self._sidebar_jobs["expand"] = self.root.after(
@@ -492,8 +495,15 @@ class WindowMixin:
         # 不做 35ms 节流：单次合成 Motion 会被吞掉，表现为“第一次进入
         # 侧栏不展开”。这里只做指针判定和 after 排期，本身很便宜。
         inside = self._pointer_in_sidebar()
+        if not inside:
+            # 指针真正离开过之后，才重新允许 hover 展开。
+            self._sidebar_leave_required = False
         if inside:
             self._sidebar_cancel("collapse")
+            if self._sidebar_leave_required:
+                # 点导航/登录导致收起时，指针通常还在侧栏里；
+                # 这时不能再因为 hover 立刻弹开一次。
+                return
             if not self._sidebar_expanded and "expand" not in self._sidebar_jobs:
                 self._sidebar_jobs["expand"] = self.root.after(
                     80, self._sidebar_maybe_expand)
@@ -538,6 +548,8 @@ class WindowMixin:
         self._sidebar_jobs.pop("expand", None)
         if self._sidebar_expanded or _OVERLAY_STACK:
             return
+        if getattr(self, "_sidebar_leave_required", False):
+            return
         if not self._pointer_in_sidebar():
             return
         self._sidebar_expand("hover")
@@ -561,6 +573,7 @@ class WindowMixin:
         self._sidebar_collapse()
 
     def _set_sidebar_sections(self, visible):
+        self._sidebar_sections_visible = bool(visible)
         if visible:
             if self.sidebar_brand_text.winfo_manager() == "":
                 self.sidebar_brand_text.pack(side=LEFT, padx=(PAD_TIGHT, 0))
@@ -590,9 +603,9 @@ class WindowMixin:
                     widget.pack_forget()
             # 先放小字（贴底），再放按钮（在小字上方）
             self.sidebar_rail_role_label.pack(
-                side=BOTTOM, pady=(0, PAD_GAP))
+                side=BOTTOM, anchor=W, padx=PAD_GAP, pady=(0, PAD_GAP))
             self.sidebar_rail_role.pack(
-                side=BOTTOM, pady=(0, PAD_MICRO))
+                side=BOTTOM, anchor=W, padx=PAD_XS, pady=(0, PAD_MICRO))
             # 预布局阶段可能已经把收起前的文字画到画布上；pack_forget 只
             # unmap，不会主动重绘父级背景，X11 下会留下“残影文字”。
             try:
@@ -611,8 +624,12 @@ class WindowMixin:
         if self._sidebar_expanded and width_now >= target - 2:
             return
         self._sidebar_expanded = True
+        self._sidebar_leave_required = False
         self._sidebar_cancel("collapse")
-        self._set_sidebar_sections(True)
+        # 已经在展开/收起动画中途又展开：内容还在，别重复 pack。
+        # 重复 pack 会把正在收窄的侧栏重新排一次版，第一帧直接卡住。
+        if not getattr(self, "_sidebar_sections_visible", False):
+            self._set_sidebar_sections(True)
         self._show_dim(True)
         start = width_now
 
@@ -628,30 +645,31 @@ class WindowMixin:
                 self.sidebar_shell.place_configure(width=target)
             except Exception:
                 pass
+            try:
+                self._refresh_sidebar_clouds(force=True)
+            except Exception:
+                pass
 
         tween(self.sidebar_shell, "sidebar_width", 190, frame,
               easing=ease_out_cubic, fps=FPS_MOVE, on_done=done)
-        # 必须把外壳（native Frame）抬起来：只 lift 里面的 CTkFrame 不会改变
-        # shell 与 content_col 的堆叠顺序，页面内容会盖在展开的侧栏上。
-        self.sidebar_shell.lift()
-        self.sidebar.lift()
+        # 外壳的层级在装配时已经抬过一次；这里每帧重复 lift 会让
+        # CTk 重新评估整个侧栏的绘制，首帧明显变慢。
         self._dim_token = int(getattr(self, "_dim_token", 0)) + 1
-        token = self._dim_token
-        try:
-            self.root.after(
-                210, lambda: (self._dim_content(True)
-                              if token == self._dim_token
-                              and self._sidebar_expanded else None))
-        except Exception:
-            pass
 
     def _sidebar_collapse(self, *args):
         width_now = self.sidebar_shell.winfo_width() or self.sidebar_open_w
         if not self._sidebar_expanded and width_now <= self.sidebar_rail_w + 2:
             return
         self._sidebar_expanded = False
+        # 只有“指针还在侧栏里就主动收起”才要求先离开一次；
+        # 鼠标移出触发的收起，指针已经在外面，不能把再次悬停也锁死。
+        self._sidebar_leave_required = self._pointer_in_sidebar()
         self._sidebar_cancel("expand")
         self._show_dim(False)
+        # 先收内容再缩宽度：内容留在 292px 里跟着每帧重排，滚动条和
+        # 圆角绘制会把 170ms 的动画压成两三帧（实测）。这里保留图标栏，
+        # 宽度动画只搬空壳，帧率稳定。
+        self._set_sidebar_sections(False)
         start = width_now
         target = self.sidebar_rail_w
 
@@ -671,17 +689,7 @@ class WindowMixin:
 
         tween(self.sidebar_shell, "sidebar_width", 170, frame,
               easing=ease_out_cubic, fps=FPS_MOVE, on_done=done)
-        # 文字先收，避免宽度变窄时文字被裁成半截
-        self._set_sidebar_sections(False)
         self._dim_token = int(getattr(self, "_dim_token", 0)) + 1
-        token = self._dim_token
-        try:
-            self.root.after(
-                190, lambda: (self._dim_content(False)
-                              if token == self._dim_token
-                              and not self._sidebar_expanded else None))
-        except Exception:
-            pass
 
     # 非 Windows 没有可靠的 Toplevel alpha：用“把工作区底色压深一档”
     # 代替黑色遮罩。这样不会盖住内容，也能看出侧边栏是浮在上层的。
@@ -893,6 +901,8 @@ class WindowMixin:
         if name == "manage":
             try:
                 self._update_manage_role()
+                self._manage_overview_sig = None
+                self._update_manage_pack_list()
             except Exception:
                 pass
 
@@ -919,6 +929,13 @@ class WindowMixin:
             # 文字没变只更新进度，避免重复重绘
             if progress is not None:
                 self._set_status_progress(progress)
+            elif self.progress_bar.winfo_manager():
+                # progress=None 的语义是「这一行不该有进度条」；
+                # 仅仅因为文字没变就提前 return 会把旧进度条留在界面上。
+                try:
+                    self.progress_bar.pack_forget()
+                except Exception:
+                    pass
             return
         self._status_text = text
         self._status_kind = kind

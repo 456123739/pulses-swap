@@ -1,4 +1,4 @@
-# Pulses Swap 交接文档（v2.7.4）
+# Pulses Swap 交接文档（v2.7.5）
 
 > 给接手的人 / AI 看的：这个软件被拆成了哪些文件、每个文件干什么、
 > 数据怎么流动、改哪里、怎么跑测试、怎么打包。
@@ -12,7 +12,7 @@
 一键把某组枪包换进游戏的 `tacz` 目录；同时把预设发布到**蓝奏云**，
 玩家绑定分享链接后可以增量同步。
 
-- 版本：`2.7.4`（`src/pulses/core/paths.py` 里的 `VERSION`）
+- 版本：`2.7.5`（`src/pulses/core/paths.py` 里的 `VERSION`）
 - 入口：`src/main.py` → `pulses.ui.app.main()`
 - 依赖：`customtkinter` `tkinterdnd2` `watchdog` `Pillow`（见 `requirements.txt`）
 - 不依赖任何第三方网络库（HTTP 全用标准库 `urllib`）
@@ -520,7 +520,7 @@ export DISPLAY=:99          # weston headless + Xwayland
 ## v2.7.4 新增坑位（务必保留）
 
 1. **侧边栏悬停不能用子控件 Enter/Leave**：Tk 的 crossing 事件被子控件吞掉，只在 `self.sidebar` 上绑定会出现“只有空白背景能展开”。现在用 root `<Motion>` + 指针坐标判定；展开/收起动画由 `sidebar_shell` 的宽度补间驱动。改动时不要退回只绑父控件。
-2. **压暗工作区不能遍历全部页面**：`_dim_content` 只处理 `active_page`，且延迟到宽度动画开始后；遍历四页/同步改色会把动画卡在 60px 半展开态。Windows 用 Toplevel alpha；非 Windows 用颜色压深回退。
+2. **压暗工作区已移除**：`_dim_content` 遍历 CTk 控件换色会在 Linux 上卡 200ms，且 Windows 本来就不走这条路径；现在 `_show_dim()` 直接 return，侧栏靠边框/圆角区分层级。不要恢复黑色 Toplevel/逐控件压暗。
 3. **CloudBrowser 不能有 `self._root`**：它会覆盖 Tkinter 的 `_root()` 方法，`winfo_children()`/`theme_widgets()` 直接 TypeError；字段名是 `_root_path`。
 4. **`make_menu_button` 依赖 `popup_menu` 导入**：factory.py 必须 `from .popup import popup_menu`；否则所有“更多/上传”菜单静默失效。PopupMenu 的 host 可能是按钮，root 要从 `winfo_toplevel()` 取，不能假设 `host.root`。
 5. **PopupMenu 外部点击**：root 的 `<Button-1>` 先于按钮 `<ButtonRelease>` 触发，`_on_click_outside` 必须先判断事件控件是否在 panel 内，否则菜单项永远点不中。
@@ -536,7 +536,23 @@ export DISPLAY=:99          # weston headless + Xwayland
 15. **启动先 withdraw 再 deiconify**：Tk 创建后默认会先映射小窗口；`main()` 现在先 `root.withdraw()`，`PulsesSwapApp` 建完、`update_idletasks()`、`_center_window()` 后再 `root.deiconify()`。不要在 UI 建好前提前显示窗口。
 16. **旧版预设没有本地 manifest 也要能用**：`OnlineService.scan()` 每次都会扫描当前目录并 `save_local_manifest()`；如果 `.online/local/<preset>.json` 不存在，会现场算一份并落盘（日志可见）。不要改成“只读缓存、缺失就跳过”，否则老预设第一次检查会没有本地清单。
 17. **并发下载每个线程一个 LanzouShare**：`LanzouShare` 内含 cookie、一次性令牌和 `_acw_done`，不能跨线程共用；`Downloader` 用 `threading.local()` + `clone()` 给每个线程独立会话。`ThreadPoolExecutor` 的 `workers` 默认 4，结果必须按输入顺序返回；`on_progress` 要按 `completed + in_flight` 聚合，别让每个线程各报各的。
-18. **展开侧栏要抬 `sidebar_shell`，不是只抬 `sidebar`**：`sidebar` 是 native shell 里的 CTkFrame，页面内容在 `content_col`/stack 里；只 `sidebar.lift()` 不会改变 shell 与 content 的堆叠，展开后页面文字会从侧栏上透出来。现在 `_sidebar_expand()` 同时 `sidebar_shell.lift()`。
+18. **侧栏外壳只抬一次**：`sidebar_shell` 是 native Frame，`sidebar` 是里面的 CTkFrame；装配时 `sidebar_shell.lift()` 一次即可盖住 `content_col`。不要在每次 `_sidebar_expand()` 里重复 lift，会触发整栏重绘、把首帧动画拖慢。
 19. **别再给侧栏加黑色 Toplevel 遮罩**：Windows/DWM 下 Toplevel 会先以不透明黑帧映射，再开始 alpha 补间，表现为闪黑/重绘。`_show_dim()` 现在直接 return；侧栏靠边框/圆角区分层级。`scale_check` 断言 `_sidebar_dim is None`。
 20. **OverlayCard 要被宽度撑住**：CTkFrame 的 `width=680` 会被内容反向压成 322；现在 body 里放一条透明宽度撑条，卡片自然高度由内容决定。差异清单高度按条目数收缩，不要固定 260px。
 21. **设置/弹窗的 wraplength 要 `px()`**：150% 下不缩放会在 620px 处提前换行，右边留一大块空白；`pages.py` 和 `dialogs.py` 已改为 `px(...)`。
+
+
+## v2.7.5 新增坑位（务必保留）
+
+1. **CTk 控件的真实事件目标不是 widget 本身**：`CTkLabel` 的鼠标事件落在内部 `_label`，`CTkButton` 在 `_text_label`，`CTkFrame` 在 `_canvas`。`CTkLabel.bind()` 返回 None 且可能只绑 Canvas，直接在文字上点会“没反应”。统一用 `pulses.widget.factory.bind_event()`；不要再写裸 `label.bind("<Button-1>", ...)`。
+2. **`bind_event` 不能既绑 CTk 又绑内部 Label**：CTk 自己的 `bind()` 可能已经把回调挂到内部目标，重复绑会让 `DiffRow` 的勾选切换两次，看起来像没反应。`bind_event` 现在检测到内部目标时只绑内部目标。
+3. **`Event.type` 是 `EventType` 枚举**：`str(EventType.Enter)` 是 `"7"`，不是 `"Enter"`。判断 crossing 要用 `event.type.name`；卡片 hover 之前用 `str(...) == "Enter"`，真实事件永远被当成 Leave。
+4. **描边动画必须有宽度**：`border_width=0` 时改 `border_color` 完全不可见。卡片保留 1px 与底色相同的描边，flash/入场只改颜色，不改宽度，避免重排。
+5. **侧栏收起后不要被 hover 立刻弹开**：点导航/登录导致收起时，指针还在侧栏里；必须记录 `_sidebar_leave_required`，等指针真正离开后再允许 hover 展开。否则点导航会“收起→弹开”循环。
+6. **云端列表按需创建**：空态创建 `CTkScrollableFrame` 会让侧栏首帧多 100ms 以上绘制；`sb_cloud_scroll` 现在初始为 None，有行才创建，空态销毁。`_sidebar_cloud_rows` 只销毁行卡片，不能 `winfo_children()` 全销毁（会碰内部 Canvas）。
+7. **隐藏页面不要重建管理列表**：后台检查每个阶段都重建隐藏的 `ManagePresetList`（8 行 CTk 控件）会白卡 200~400ms，正好卡在切页/侧栏动画上。`_refresh_preset_cards()` 只在 `active_page == "manage"` 时重建，否则置脏；进入管理页时强制刷新。
+8. **并发下载进度回调可能乱序**：多个线程各自算 `completed + in_flight` 后回调，B 先报 200、A 后报 100 会让进度条倒退。`Downloader._run_parallel` 现在用 `progress_lock` 串行化回调并丢弃倒退值；不要移除。
+9. **取消同步不能推进版本**：`Service.sync()` 取消时只装了一部分，`_finish(all_ok=...)` 必须同时考虑 `result.cancelled`；否则 index/manifest 会指向云端新版本，本地却不完整。`last_version`/`last_generation` 也只在 `all_ok` 时更新。
+10. **长文案要截断/换行**：Toast 不设 `wraplength` 会撑到窗口外；Step1/侧栏/管理当前预设/详情标题/云端行都要 `ellipsize()`，否则 80 字预设名会压住状态或按钮。
+11. **详情页签要显式选中**：`CanvasSegmented` 不会自动知道当前页；`open_preset_detail()` 在 `show(selected)` 后必须 `tab_bar.select(selected, animate=False)`，否则三个页签全是灰字。
+12. **加载状态不要提前写“已加载”**：`load_pack()` 只把状态设为“加载中…”，`_on_presets_loaded_body()` 完成后再设“已加载”；失败时设“加载失败”。先写已加载会让用户以为线程卡死。

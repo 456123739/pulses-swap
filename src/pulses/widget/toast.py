@@ -59,15 +59,20 @@ class Toast:
                                    corner_radius=R_CONTROL,
                                    border_width=BORDER_W,
                                    border_color=self.color)
-        self.label = ctk.CTkLabel(self.frame, text=text, text_color=self.color,
-                                   font=(config.FONT_FAMILY, FS_SMALL),
-                                   fg_color="transparent")
+        # 提示文案可能包含长预设名/错误原因：不限制宽度会把 toast
+        # 撑到窗口外（实测 1384px，左边直接负坐标）。给一个可换行上限。
+        self.label = ctk.CTkLabel(
+            self.frame, text=text, text_color=self.color,
+            font=(config.FONT_FAMILY, FS_SMALL),
+            fg_color="transparent", justify="left", anchor="w",
+            wraplength=px(360))
         self.label.pack(padx=PAD_CARD_X, pady=PAD_TIGHT)
         # _slide > 0 表示浮层右边缘越出容器右边缘（= 在屏幕外），
         # 入场从 +28 滑到 0，出场再滑回去 —— 之前符号写反了，
         # 变成「从里往外滑」，看着像往右弹一下。
         self._slide = 28.0
-        self._hold_ms = duration_ms
+        # 字多时多停一会儿，别让用户还没读完就滑走。
+        self._hold_ms = max(int(duration_ms), min(4200, 1200 + len(str(text)) * 30))
         self._place()
         self._play_in()
 

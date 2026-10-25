@@ -101,6 +101,37 @@ class EndToEndTest(unittest.TestCase):
                              self.cloud_manifest, role="player")
         self.assertTrue(again.is_clean)
 
+    def test_parallel_six_files_via_real_share(self):
+        """4 线程 + 真实 LanzouShare.clone() 走一遍 mock 服务。"""
+        extra = Path(self.temp.name) / "parallel_dev"
+        extra.mkdir()
+        for index in range(6):
+            make_zip(extra / f"parallel_{index}.zip", "pack.json",
+                     json.dumps({"index": index}).encode())
+        entries = hashing.scan_local(str(extra))
+        uploads = {entry["path"]: (extra / entry["path"]).read_bytes()
+                   for entry in entries}
+        cloud = MockLanzou(uploads, password="28pm")
+        cloud.start()
+        self.addCleanup(cloud.stop)
+        share = LanzouShare(cloud.url, "28pm", retries=2,
+                            sleep=lambda _s: None)
+        manifest = normalize({
+            "name": "并发预设", "version": "1.0", "generation": 1,
+            "files": entries})
+        plan = diff.compare([], manifest, role="player")
+        values = []
+        with tempfile.TemporaryDirectory() as staging:
+            results = Downloader(share, staging, workers=4).run(
+                plan.transfer_items,
+                on_progress=lambda value, *_: values.append(value))
+            self.assertEqual(len(results), 6)
+            self.assertTrue(all(r.ok for r in results),
+                            [r.error for r in results])
+            self.assertEqual(values, sorted(values))
+            self.assertEqual(values[-1],
+                             sum(e["packed_size"] for e in entries))
+
     def test_second_sync_downloads_nothing(self):
         plan = diff.compare([], self.cloud_manifest, role="player")
         self._sync(plan.transfer_items)

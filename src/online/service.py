@@ -637,7 +637,9 @@ class OnlineService:
                 if installer.remove_local(entry):
                     result.removed.append(item.path)
 
-            self._finish(ref, plan, result, all_ok=not result.failed)
+            # 取消时只装好了一部分：不能把版本/manifest 推进到云端。
+            self._finish(ref, plan, result,
+                         all_ok=not result.failed and not result.cancelled)
             return result
         except CancelledError:
             # 取消不是失败：把已经装好的部分如实报出去，让界面能显示进度
@@ -663,8 +665,10 @@ class OnlineService:
 
         record = self.sources.get(ref.name)
         record["last_sync"] = int(time.time())
-        record["last_version"] = plan.cloud_version or record.get("last_version", "")
-        record["last_generation"] = plan.cloud_generation
+        if all_ok:
+            record["last_version"] = (plan.cloud_version
+                                      or record.get("last_version", ""))
+            record["last_generation"] = plan.cloud_generation
         self.sources.put(ref.name, record)
 
     # ------------------------------------------------------------------

@@ -169,7 +169,18 @@ class SlideStack:
                 self.canvas.coords(new_item, start, 0)
             else:
                 self.canvas.coords(new_item, 0, start)
-            self.canvas.itemconfigure(new_item, state="normal")
+            self.canvas.itemconfigure(
+                new_item, state="normal",
+                width=self._size[0], height=self._size[1])
+            # 第一次显示的页面/选项卡可能还是 1x1：Canvas 窗口项在
+            # hidden 期间不会量尺寸，必须先显式给宽高再等 layout，
+            # 否则滑动第一帧会带着 1px 宽的页面。
+            try:
+                frame_widget = self.frames.get(key)
+                if frame_widget is not None and frame_widget.winfo_width() <= 1:
+                    self.canvas.update_idletasks()
+            except Exception:
+                pass
         except Exception:
             self._activate(key)
             return
@@ -320,7 +331,9 @@ class SlideStack:
                     self.canvas.coords(item, 0, 0)
                 else:
                     self.canvas.coords(item, park, 0)
-                self.canvas.itemconfigure(item, state="normal")
+                self.canvas.itemconfigure(
+                    item, state="normal",
+                    width=self._size[0], height=self._size[1])
             except Exception:
                 pass
         # 页面落定后补拍快照，供下一次切换当素材

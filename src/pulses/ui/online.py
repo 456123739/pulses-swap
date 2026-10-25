@@ -158,6 +158,9 @@ class OnlineMixin:
         self.online_checking = set()
         self.online_pending = {}
         self.online_queue = []
+        self._bulk_check_names = None
+        self._bulk_check_done = set()
+        self._sidebar_cloud_sig = None
         self._refresh_preset_cards()
         try:
             self._update_manage_role()
@@ -567,9 +570,37 @@ class OnlineMixin:
                              "local": False})
         return rows
 
+    def _ensure_cloud_scroll(self):
+        """按需创建云端列表滚动容器；空态不创建。"""
+        box = getattr(self, "sb_cloud_scroll", None)
+        if box is not None:
+            try:
+                if box.winfo_exists():
+                    return box
+            except Exception:
+                pass
+        parent = getattr(self, "sb_cloud_box", None)
+        if parent is None:
+            return None
+        box = ctk.CTkScrollableFrame(
+            parent, fg_color="transparent", corner_radius=0,
+            scrollbar_button_color=C_BORDER_SOFT,
+            scrollbar_button_hover_color=C_BORDER)
+        box.pack(fill=BOTH, expand=True)
+        self.sb_cloud_scroll = box
+        return box
+
     def _refresh_sidebar_clouds(self, force=False):
         box = getattr(self, "sb_cloud_scroll", None)
-        if box is None:
+        if box is not None:
+            try:
+                if not box.winfo_exists():
+                    box = None
+            except Exception:
+                box = None
+        if not getattr(self, "_sidebar_expanded", False):
+            # 收起时看不见，别在后台检查的每个阶段重建侧栏行。
+            self._sidebar_cloud_sig = None
             return
         rows = self._sidebar_row_data()
         signature = tuple((r["name"], r["status"], r["meta"], r["date"])
@@ -577,20 +608,18 @@ class OnlineMixin:
         if not force and signature == getattr(self, "_sidebar_cloud_sig", None):
             return
         self._sidebar_cloud_sig = signature
-        for child in list(box.winfo_children()):
-            if child is getattr(self, "sb_cloud_empty", None):
-                continue
-            try:
-                child.destroy()
-            except Exception:
-                pass
-        try:
-            self.sb_cloud_count.configure(text=f"{len(rows)} 个")
-        except Exception:
-            pass
         if not rows:
+            # 空态：把滚动容器整个销毁，不要留一条空滚动条拖慢展开。
+            if box is not None:
+                try:
+                    box.destroy()
+                except Exception:
+                    pass
+                self.sb_cloud_scroll = None
+                box = None
+                self._sidebar_cloud_rows = []
             try:
-                self.sb_cloud_scroll._scrollbar.grid_remove()
+                self.sb_cloud_count.configure(text="0 个")
             except Exception:
                 pass
             try:
@@ -608,7 +637,6 @@ class OnlineMixin:
             except Exception:
                 pass
             try:
-                # 没有云端预设时不要留一条“全部更新/全部检查”的幽灵文字
                 if self.sb_cloud_all_btn.winfo_manager():
                     self.sb_cloud_all_btn.pack_forget()
             except Exception:
@@ -617,12 +645,26 @@ class OnlineMixin:
                     and not self.preset_manager):
                 self._fetch_cloud_roots()
             return
+        # 有行才创建滚动容器；放在 empty 卡片之前 pack，占满剩余高度
+        box = self._ensure_cloud_scroll()
+        if box is None:
+            return
         try:
             self.sb_cloud_empty.place_forget()
         except Exception:
             pass
+        for child in list(getattr(self, "_sidebar_cloud_rows", []) or []):
+            try:
+                child.destroy()
+            except Exception:
+                pass
+        self._sidebar_cloud_rows = []
         try:
             self.sb_cloud_scroll._scrollbar.grid()
+        except Exception:
+            pass
+        try:
+            self.sb_cloud_count.configure(text=f"{len(rows)} 个")
         except Exception:
             pass
         for row in rows:
@@ -643,25 +685,33 @@ class OnlineMixin:
                             height=px(52))
         card.pack(fill=X, pady=(0, PAD_MICRO), padx=0)
         card.pack_propagate(False)
+        try:
+            self._sidebar_cloud_rows.append(card)
+        except Exception:
+            self._sidebar_cloud_rows = [card]
         top = ctk.CTkFrame(card, fg_color="transparent")
         top.pack(fill=X, padx=PAD_TIGHT, pady=(PAD_XS, 0))
-        make_label(top, text=str(row.get("name") or ""), fg=C_TEXT_MAIN,
+        # 侧栏只有 292px：长预设名/长错误原因必须截断，否则会把
+        # 右侧状态文字压到名字上，或者直接顶出侧栏。
+        name_font = tk_font(config.FONT_FAMILY, FS_SMALL, "bold")
+        tiny_font = tk_font(config.FONT_FAMILY, FS_TINY)
+        name = ellipsize(str(row.get("name") or ""), name_font, px(132))
+        status = ellipsize(str(row.get("status") or ""), tiny_font, px(104))
+        make_label(top, text=name, fg=C_TEXT_MAIN,
                    font_size=FS_SMALL, bold=True).pack(side=LEFT)
-        make_label(top, text=str(row.get("status") or ""),
+        make_label(top, text=status,
                    fg=row.get("color") or C_TEXT_MUTED,
                    font_size=FS_TINY).pack(side=RIGHT)
         sub = " · ".join(part for part in (str(row.get("meta") or ""),
                                            str(row.get("date") or ""))
                          if part)
+        sub = ellipsize(sub, tiny_font, px(244))
         make_label(card, text=sub, fg=C_TEXT_MUTED,
                    font_size=FS_TINY).pack(anchor=W, padx=PAD_TIGHT)
-        for widget in (card, top) + tuple(top.winfo_children()) +                 tuple(card.winfo_children()):
-            try:
-                widget.bind("<Button-1>",
-                            lambda e, r=row: self._sidebar_cloud_click(r),
-                            add="+")
-            except Exception:
-                pass
+        for widget in ((card, top) + tuple(top.winfo_children())
+                       + tuple(card.winfo_children())):
+            bind_event(widget, "<Button-1>",
+                       lambda e, r=row: self._sidebar_cloud_click(r))
 
     def _sidebar_cloud_click(self, row):
         name = row.get("name")
@@ -1141,7 +1191,7 @@ class OnlineMixin:
 
         if not bound:
             # 不在每张卡片上挂「绑定」按钮：双击进详情，「来源」页直接填
-            data.update(status="未绑定云端源", status_color=C_TEXT_MUTED,
+            data.update(status="未绑定来源", status_color=C_TEXT_MUTED,
                         dot_color=DOT_IDLE, action="", action_kind="")
             return data
 
@@ -1225,10 +1275,16 @@ class OnlineMixin:
                 # 有缓存所以还能列差异，但云端这次确实没连上
                 text, color = "无法连接 · 用缓存", C_WARNING
             elif phase == "checking":
-                text, color = str(state.get("phase_text") or "连接中…"), C_ACCENT
+                text = str(state.get("phase_text") or "连接中…")
+                # 左边已经写了「云端」，这里不要再出现「连接云端…」。
+                if text.startswith("连接云端"):
+                    text = "连接中…"
+                elif text.startswith("读取云端"):
+                    text = "读取中…"
+                color = C_ACCENT
             else:
                 # 左边已经写了「云端」，去掉状态里的「云端」前缀
-                if text == "未绑定云端源":
+                if text == "未绑定来源":
                     text = "未绑定"
                 elif text.startswith("云端"):
                     text = text[2:].lstrip(" ·")
@@ -1255,11 +1311,22 @@ class OnlineMixin:
         try:
             if data is None:
                 data = self._preset_card_data(name)
-            plan = (self._online_state(name) or {}).get("plan")
+            state = self._online_state(name) or {}
+            phase = str(state.get("phase") or "")
+            plan = state.get("plan")
             if self.is_developer:
                 # 开发者没有「同步」这个动作；辅助行里的「一键替换」由
                 # _apply_role_actions 负责，这里不能动 aux_row
                 button.pack_forget()
+                return
+            # 检查中/失败时旧计划已经不可信：同步按钮先收起，
+            # 否则会出现“状态写着连接云端…，按钮还挂着上次的 3 项更新”。
+            if phase in ("checking", "error"):
+                button.pack_forget()
+                alt = getattr(self, "apply_alt_btn", None)
+                aux = getattr(self, "aux_row", None)
+                if aux is not None and (alt is None or not alt.winfo_ismapped()):
+                    aux.grid_remove()
                 return
             if plan is not None and getattr(plan, "offline", False):
                 button.pack_forget()
@@ -1305,12 +1372,20 @@ class OnlineMixin:
                 self._update_preset_online_label(self.current_selected_preset)
             except Exception:
                 pass
+        # 管理页/展开的侧栏才需要这些控件；在后台检查的每个阶段
+        # 重建隐藏的 8 行管理列表，会白卡 200~400ms，正好卡在切页/展开动画上。
         try:
-            self._refresh_sidebar_clouds()
+            if getattr(self, "_sidebar_expanded", False):
+                self._refresh_sidebar_clouds()
+            else:
+                self._sidebar_cloud_sig = None
         except Exception:
             pass
         try:
-            self._update_manage_pack_list()
+            if getattr(self, "active_page", None) == "manage":
+                self._update_manage_pack_list()
+            else:
+                self._manage_overview_sig = None
         except Exception:
             pass
 
@@ -1408,6 +1483,9 @@ class OnlineMixin:
                 state["checked_at"] = time.time()
                 self.log_manager.log(f"检查更新超时（{name}）", 'WARNING')
                 self._refresh_preset_cards()
+                # 批量检查里一个超时不能把整个队列卡死。
+                self._bulk_check_mark(name)
+                self._pump_online_queue()
 
         try:
             self._cancel_check_timer(name)
@@ -1492,6 +1570,10 @@ class OnlineMixin:
         if name in self._online_recheck:
             self._online_recheck.discard(name)
             self._online_check(name)
+            # 补查入口也可能因为路径缺失/正在替换提前返回；
+            # 批量队列不能停在这个名字上。
+            if name not in self.online_checking:
+                self._bulk_check_mark(name)
             return
         pending = self.online_pending.pop(name, "")
         if pending == "sync":
@@ -1510,7 +1592,37 @@ class OnlineMixin:
                 self._publish_now(name)
         elif pending == "source":
             self.open_source_dialog(name)
+        self._bulk_check_mark(name)
         self._pump_online_queue()
+
+    def _begin_bulk_check(self, names):
+        self._bulk_check_names = list(names)
+        self._bulk_check_done = set()
+
+    def _bulk_check_mark(self, name):
+        names = getattr(self, "_bulk_check_names", None)
+        if names is not None and name in names:
+            self._bulk_check_done.add(name)
+
+    def _bulk_check_finish_if_done(self):
+        names = getattr(self, "_bulk_check_names", None)
+        if names is None:
+            return False
+        done = getattr(self, "_bulk_check_done", set())
+        if len(done) < len(names):
+            return False
+        failed = 0
+        for name in names:
+            state = self.online_states.get(name) or {}
+            if state.get("phase") == "error":
+                failed += 1
+        if failed:
+            self.set_status(f"云端检查完成 · {failed} 个失败", "warning")
+        else:
+            self.set_status("云端检查完成", "success")
+        self._bulk_check_names = None
+        self._bulk_check_done = set()
+        return True
 
     def _online_check_all(self):
         if self.online is None or not self.preset_manager:
@@ -1523,6 +1635,7 @@ class OnlineMixin:
             self.toast("还没有预设绑定云端源", "info")
             return
         self.online_queue = list(names)
+        self._begin_bulk_check(names)
         self.set_status(f"正在检查 {len(names)} 个预设…", "busy", progress=0.0)
         self.toast(f"正在检查 {len(names)} 个预设…", "info")
         self._pump_online_queue()
@@ -1536,13 +1649,21 @@ class OnlineMixin:
                 return
             if name not in (self.preset_manager.presets
                             if self.preset_manager else {}):
+                self._bulk_check_mark(name)
                 continue
             self._online_check(name)
+            # 检查入口因为路径缺失/正在替换等原因提前返回时，
+            # 不能让批量队列停在这个名字上。
+            if name not in self.online_checking:
+                self._bulk_check_mark(name)
+                continue
             return
         if (not self.online_queue and not self.online_pending
                 and not getattr(self, "_bulk_sync_queue", None)
                 and not getattr(self, "online_busy", False)):
-            self.set_status("云端检查完成", "success")
+            # 只有批量检查才写这句；单个检查的结论更具体，不能被覆盖。
+            # 有失败时也不能报「完成」得像是全部成功。
+            self._bulk_check_finish_if_done()
 
     def _online_auto_check(self):
         """启动后台检查：玩家查已绑定源，开发者查已填云端路径的预设。
@@ -1572,6 +1693,7 @@ class OnlineMixin:
                 self._start_cloud_probe()
             return
         self.online_queue = names
+        self._begin_bulk_check(names)
         self.set_status(f"启动检查：0/{len(names)} 个预设", "busy", progress=0.0)
         self._pump_online_queue()
 
@@ -1774,6 +1896,7 @@ class OnlineMixin:
             active_text_color=C_TEXT_INVERSE, font_size=FS_BODY,
             bold_active=True, text_anchor="center", duration_ms=240)
         tab_bar.pack(fill=X, padx=PAD_XS, pady=PAD_XS)
+        card.tab_bar = tab_bar
 
         bar = self._dialog_bar(card)
         make_button(bar, "关闭", command=lambda: card.close(True)).pack(side=RIGHT)
@@ -1787,7 +1910,14 @@ class OnlineMixin:
                         command=lambda: (card.close(True),
                                          self.open_sync_dialog(name))).pack(
                 side=RIGHT, padx=(0, PAD_TIGHT))
-        show(tab if any(k == tab for k, _ in tabs_items) else "overview")
+        selected = tab if any(k == tab for k, _ in tabs_items) else "overview"
+        show(selected)
+        # 详情页是自绘分段控件，不会自己知道当前页；不补这一下，
+        # 打开「来源」时三个选项卡全是没有选中态的灰字。
+        try:
+            tab_bar.select(selected, animate=False)
+        except Exception:
+            pass
 
     def _build_detail_page(self, key: str, name: str, info: dict,
                            parent):

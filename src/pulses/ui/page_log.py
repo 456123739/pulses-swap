@@ -90,5 +90,8 @@ class LogPageMixin:
                                         font=(FONT_FAMILY_MONO, FS_BODY), wrap="word")
         self.log_text.pack(fill=BOTH, expand=True)
 
+        # 子控件都建好后再绑，鼠标移到标题/按钮/日志上不会断 hover。
+        attach_hover_glow(log_group)
+
         self.log_manager = LogManager(self.log_text, self.root)
         return page

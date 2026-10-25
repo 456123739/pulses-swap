@@ -40,6 +40,10 @@ online.mkdir(parents=True)
     "secret": "badsecret"}), encoding="utf-8")
 
 import pulses_swap as ps
+# 账号默认存本机公共库；测试必须把它也指到临时库，否则会读到开发机
+# 真实账号，旧格式 fixture 永远测不到。
+import pulses.ui.online as _online_mod
+_online_mod.DEFAULT_DB_DIR = online
 
 for mod in (ps.dialogs, ps.utils, ps.app, ps.pages, ps.managers):
     for name in ("show_info", "show_warning", "show_error", "ask_yes_no",
@@ -49,6 +53,7 @@ for mod in (ps.dialogs, ps.utils, ps.app, ps.pages, ps.managers):
     if hasattr(mod, "DatabaseLocatorDialog"):
         mod.DatabaseLocatorDialog.show = lambda self: None
 ps.DatabaseLocator.load_db_path = staticmethod(lambda: DB)
+ps.PulsesSwapApp._init_database_flow = lambda self: self._use_database(DB)
 import pulses.ui.packs as packs_mod
 packs_mod.ask_text = lambda *a, **k: "自动测试"
 
@@ -82,13 +87,14 @@ check("旧会话 ID 不再显示",
 check("旧文件读出来不带账号行",
       app.identity_account.winfo_ismapped() == 0,
       app.identity_account.cget("text"))
-info = app.online.account_info()
+info = dict(app.online.account_info())
 check("username 已丢弃（旧格式）", info.get("username") == "", info)
 
 # 重新登录一次 → 账号行出现打码手机号
 app.online.accounts.set("4654636", "x", username="18651999816")
 app._update_identity_ui()
-pump(200)
+app._sidebar_expand("upgrade_check")
+pump(350)
 check("重新登录后显示打码账号",
       app.identity_account.winfo_ismapped() == 1
       and app.identity_account.cget("text") == "186****9816",

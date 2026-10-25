@@ -17,6 +17,7 @@ from ..config import (C_ACCENT, C_ACCENT_SOFT, C_BORDER_SOFT, C_CARD_BG,
                       FS_SMALL, FS_TINY, R_CONTROL)
 from ..utils import px
 from .button import AnimatedButton
+from .factory import bind_event
 from .cards import ScrollArea
 
 H_ROW = 34
@@ -98,12 +99,9 @@ class DiffRow(ctk.CTkFrame):
 
         for widget in (self, self.name_label, self.dot, self.tag,
                        self.size_label):
-            try:
-                widget.bind("<Button-1>", self._toggle_click, add="+")
-                widget.bind("<Enter>", self._hover_on, add="+")
-                widget.bind("<Leave>", self._hover_off, add="+")
-            except Exception:
-                pass
+            bind_event(widget, "<Button-1>", self._toggle_click)
+            bind_event(widget, "<Enter>", self._hover_on)
+            bind_event(widget, "<Leave>", self._hover_off)
         self._hovering = False
         self._paint()
 
@@ -202,11 +200,8 @@ class InfoRow(ctk.CTkFrame):
         self.size_label.pack(side="left", padx=(0, 10))
         self._hover = C_CARD_BG
         for widget in (self, self.name_label, self.tag, self.size_label):
-            try:
-                widget.bind("<Enter>", self._on_enter, add="+")
-                widget.bind("<Leave>", self._on_leave, add="+")
-            except Exception:
-                pass
+            bind_event(widget, "<Enter>", self._on_enter)
+            bind_event(widget, "<Leave>", self._on_leave)
 
     def _tint(self, target):
         start = self._hover

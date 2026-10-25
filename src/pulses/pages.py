@@ -489,7 +489,6 @@ class SettingsPage:
         info_card = ctk.CTkFrame(tab, fg_color=C_CARD_BG, corner_radius=R_CARD,
                                   border_width=0)
         info_card.pack(fill=X, pady=(0, PAD_DIALOG))
-        attach_hover_glow(info_card)
         self.about_db_label = make_label(info_card, text="", fg=C_TEXT_MAIN,
                                          font_size=FS_SMALL)
         self.about_db_label.configure(wraplength=px(620), justify=LEFT, anchor=W)
@@ -498,6 +497,7 @@ class SettingsPage:
         self.about_mode_label = make_label(info_card, text="", fg=C_TEXT_SECONDARY,
                                            font_size=FS_SMALL)
         self.about_mode_label.pack(anchor=W, padx=PAD_CARD_X, pady=(0, PAD_CARD_Y))
+        attach_hover_glow(info_card)
 
         btn_row = ctk.CTkFrame(tab, fg_color="transparent")
         btn_row.pack(fill=X)

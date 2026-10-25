@@ -108,7 +108,7 @@ def main() -> int:
     cards = CardList(root)
     cards.pack(fill="both", expand=True)
     items = [{"name": f"预设 {i:03d}", "meta": "v1.0 · 2 个枪包 · 100 MB",
-              "status": "未绑定云端源"} for i in range(60)]
+              "status": "未绑定来源"} for i in range(60)]
     cards.set_items(items, animate_new=False)
     root.update()
     check("卡片创建完成", cards.count() == 60, cards.count())

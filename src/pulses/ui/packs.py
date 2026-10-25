@@ -75,7 +75,7 @@ class PacksMixin:
             show_warning("操作进行中", "请等待当前操作完成")
             return
         if self.loading_presets:
-            show_info("加载中", "预设列表正在加载，请稍候...")
+            show_info("加载中", "预设列表正在加载，请稍候…")
             return
         folder = filedialog.askdirectory(title="选择整合包根目录")
         if not folder:
@@ -113,7 +113,8 @@ class PacksMixin:
         pack_db_path.mkdir(parents=True, exist_ok=True)
 
         self.pack_path_label.configure(text=str(pack_path), text_color=C_SUCCESS)
-        self.pack_status_label.configure(text="已加载", text_color=C_SUCCESS)
+        # 预设列表还在工作线程里加载，这里不能先写「已加载」。
+        self.pack_status_label.configure(text="加载中…", text_color=C_ACCENT)
         self._update_sidebar_status()
         self.pack_name_label.configure(text="当前预设：无", text_color=C_ACCENT)
         self._sync_tacz_shortcut()
@@ -161,10 +162,17 @@ class PacksMixin:
             self._on_presets_loaded_body()
         except Exception as exc:
             safe_print("预设加载完成回调出错:", traceback.format_exc())
+            try:
+                self.pack_status_label.configure(text="加载失败", text_color=C_ERROR)
+                self._update_sidebar_status()
+            except Exception:
+                pass
             self.log_manager.log(f"预设加载完成回调出错: {exc}", 'ERROR')
 
     def _on_presets_loaded_body(self):
         self._update_preset_list()
+        self.pack_status_label.configure(text="已加载", text_color=C_SUCCESS)
+        self._update_sidebar_status()
         # 单行日志模式下这条就是「加载完成」的主信息（细节条目见完整日志）
         pack_name = (self.current_pack_path.name
                      if self.current_pack_path else "整合包")
@@ -283,7 +291,7 @@ class PacksMixin:
             show_warning("操作进行中", "请等待当前操作完成")
             return
         if self.loading_presets:
-            show_info("加载中", "预设列表正在加载，请稍候...")
+            show_info("加载中", "预设列表正在加载，请稍候…")
             return
         self._stop_watcher()
         self._shutdown_online()
@@ -414,6 +422,19 @@ class PacksMixin:
             self.root.after(180, self._do_tacz_refresh)
 
     # ==================== 预设管理 ====================
+    def _set_pack_preset_label(self, name):
+        """Step 1 的「当前预设」：跟随选择，并在窄列里省略长名字。"""
+        text = f"当前预设：{name}" if name else "当前预设：无"
+        try:
+            font = tk_font(config.FONT_FAMILY, FS_SMALL)
+            text = ellipsize(text, font, px(360))
+            self.pack_name_label.configure(text=text)
+        except Exception:
+            try:
+                self.pack_name_label.configure(text=text)
+            except Exception:
+                pass
+
     def _update_sidebar_status(self):
         """侧边栏底部状态卡：镜像 Step1/Step2 的状态，避免侧边栏下半部空着。"""
         try:
@@ -435,7 +456,9 @@ class PacksMixin:
                 if text.startswith(cand):
                     text = text[len(cand):]
                     break
-            self.sb_preset_label.configure(text=f"预设 · {text}",
+            text = ellipsize(f"预设 · {text}",
+                             tk_font(config.FONT_FAMILY, FS_TINY), px(250))
+            self.sb_preset_label.configure(text=text,
                                             text_color=C_ACCENT)
         except Exception:
             pass
@@ -447,11 +470,13 @@ class PacksMixin:
             self._preset_size_cache.clear()
         self.preset_cards.set_loading(False)
         self._refresh_preset_cards()
-        if self.preset_manager.current_preset:
-            self.pack_name_label.configure(
-                text=f"当前预设：{self.preset_manager.current_preset}")
-        else:
-            self.pack_name_label.configure(text="当前预设：无")
+        # 这里显示“用户正在看的预设”，不是“上一次应用的预设”。
+        # 选中 Alpha 后详情已是 Alpha，Step 1/侧边栏却还停在 default，
+        # 是用户反馈的“文字不及时变化”里最明显的一处。
+        name = getattr(self, "current_selected_preset", None)
+        if name not in self.preset_manager.presets:
+            name = self.preset_manager.current_preset
+        self._set_pack_preset_label(name)
         if self.current_selected_preset:
             self.preset_cards.select(self.current_selected_preset,
                                      notify=False)
@@ -522,7 +547,14 @@ class PacksMixin:
         info = self.preset_manager.presets.get(name)
         if not info:
             return
-        self.preset_name_label.configure(text=name)
+        # Step 1 与侧边栏都跟着当前选择走，而不是停在已应用的那个预设。
+        self._set_pack_preset_label(name)
+        try:
+            self.preset_name_label.configure(
+                text=ellipsize(name, tk_font(config.FONT_FAMILY, FS_TITLE,
+                                             "bold"), px(520)))
+        except Exception:
+            self.preset_name_label.configure(text=name)
         self._animate_label_color(self.preset_name_label, C_TEXT_MUTED,
                                   C_TEXT_MAIN)
         version = info.get('version', 'v1.0.0')
@@ -550,7 +582,10 @@ class PacksMixin:
         self._update_sidebar_status()
         self._update_guide()
         try:
-            self._update_manage_pack_list()
+            if getattr(self, "active_page", None) == "manage":
+                self._update_manage_pack_list()
+            else:
+                self._manage_overview_sig = None
         except Exception:
             pass
 
@@ -667,7 +702,7 @@ class PacksMixin:
             f"是否继续？"):
             return
 
-        self.set_status("准备迁移...", "busy", progress=0.0)
+        self.set_status("准备迁移…", "busy", progress=0.0)
         self._disable_buttons(True)
 
         def worker():

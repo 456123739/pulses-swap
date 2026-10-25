@@ -21,16 +21,16 @@ from .. import config
 from ..animation import (FPS_COLOR, attach_hover_glow, cancel_tween,
                          ease_in_out_cubic, ease_linear, ease_out_cubic,
                          ease_out_soft_spring, lerp_color, tween)
-from ..config import (C_ACCENT, C_ACCENT_HOVER, C_ACCENT_PRESSED,
-                      C_ACCENT_SOFT, C_BORDER, C_BORDER_SOFT, C_CARD_BG,
-                      C_DIVIDER,
-                      C_ERROR, C_INFO, C_PANEL_ALT_BG, C_SUCCESS,
+from ..config import (BORDER_W, C_ACCENT, C_ACCENT_HOVER,
+                      C_ACCENT_PRESSED, C_ACCENT_SOFT, C_BORDER,
+                      C_BORDER_SOFT, C_CARD_BG, C_DIVIDER, C_ERROR,
+                      C_INFO, C_INPUT_BG, C_PANEL_ALT_BG, C_SUCCESS,
                       C_TEXT_INVERSE, C_TEXT_MAIN, C_TEXT_MUTED,
                       C_TEXT_SECONDARY, C_WARNING, FS_BODY, FS_SMALL,
                       FS_TINY, PAD_TIGHT, R_CARD, R_CONTROL)
 from ..utils import px, tk_font
 from .button import AnimatedButton
-from .factory import ellipsize
+from .factory import bind_event, ellipsize
 
 H_CARD = 92          # 卡片高度（px，未缩放）
 H_CARD_MIN = 78
@@ -273,7 +273,8 @@ class PresetCard(ctk.CTkFrame):
     def __init__(self, parent, name, *, on_select=None, on_action=None,
                  on_menu=None, on_open=None):
         super().__init__(parent, fg_color=C_CARD_BG, corner_radius=R_CONTROL,
-                         border_width=0, height=H_CARD)
+                         border_width=BORDER_W, border_color=C_CARD_BG,
+                         height=H_CARD)
         # 子控件用的是 grid，所以必须关 grid_propagate；
         # 只写 pack_propagate 的话高度仍会被内容顶开（150% 下多出 17px）
         self.pack_propagate(False)
@@ -286,6 +287,7 @@ class PresetCard(ctk.CTkFrame):
         self._selected = False
         self._action_kind = ""
         self._data: dict = {}
+        self._hover_job = None
 
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -357,8 +359,14 @@ class PresetCard(ctk.CTkFrame):
         # 注意：CTk 控件不允许在 place() 里传 width/height，高度要建的时候就给
         self.sep = ctk.CTkFrame(self, fg_color=C_DIVIDER, height=1)
         self.sep.place(relx=0.04, rely=1.0, relwidth=0.92, anchor="sw")
-        self.bind("<Enter>", self._on_hover, add="+")
-        self.bind("<Leave>", self._on_hover, add="+")
+        # 指针从卡片移到卡片里的子控件时，Tk 会给卡片发 <Leave>。
+        # 只在卡片本身绑 Enter/Leave 的话，悬停到文字上就会闪回白底。
+        # 所有子控件都参与，并用一个短延迟确认指针真的离开了整张卡。
+        for widget in (self, text_box, self.name_label, self.meta_label,
+                       self.status_label, self.dot, actions,
+                       self.action_btn, self.menu_btn, self.badge):
+            bind_event(widget, "<Enter>", self._on_hover)
+            bind_event(widget, "<Leave>", self._on_hover)
         try:
             text_box.bind("<Configure>", lambda e: self._fit_texts(), add="+")
         except Exception:
@@ -366,16 +374,10 @@ class PresetCard(ctk.CTkFrame):
 
         for widget in (self, text_box, self.name_label, self.meta_label,
                        self.status_label, self.dot):
-            try:
-                widget.bind("<Button-1>", self._select, add="+")
-                widget.bind("<Double-Button-1>", self._open, add="+")
-            except Exception:
-                pass
-        try:
-            self.bind("<Button-3>", self._menu_event, add="+")
-            self.name_label.bind("<Button-3>", self._menu_event, add="+")
-        except Exception:
-            pass
+            bind_event(widget, "<Button-1>", self._select)
+            bind_event(widget, "<Double-Button-1>", self._open)
+        bind_event(self, "<Button-3>", self._menu_event)
+        bind_event(self.name_label, "<Button-3>", self._menu_event)
 
     # ---------- 事件 ----------
     def _select(self, _event=None):
@@ -465,11 +467,16 @@ class PresetCard(ctk.CTkFrame):
         except Exception:
             pass
 
-    def _on_hover(self, event=None):
-        """整行 hover：底色在卡片白和输入框灰之间过渡。"""
-        if self._selected or time.monotonic() < _SCROLL_ACTIVE_UNTIL:
-            return
-        over = bool(event is not None and str(event.type) == "Enter")
+    def _pointer_inside(self) -> bool:
+        try:
+            x, y = self.winfo_pointerxy()
+            left, top = self.winfo_rootx(), self.winfo_rooty()
+            return (left <= x <= left + self.winfo_width()
+                    and top <= y <= top + self.winfo_height())
+        except Exception:
+            return False
+
+    def _set_hover(self, over: bool) -> None:
         target = C_INPUT_BG if over else C_CARD_BG
         start = self.cget("fg_color")
         if start == target:
@@ -485,10 +492,48 @@ class PresetCard(ctk.CTkFrame):
         tween(self, "hover", 140, frame, easing=ease_out_cubic,
               fps=FPS_COLOR)
 
+    def _on_hover(self, event=None):
+        """整行 hover：子控件之间移动不闪，真正离开后才收回。"""
+        if self._selected or time.monotonic() < _SCROLL_ACTIVE_UNTIL:
+            return
+        # tkinter 的 Event.type 是 EventType 枚举；str(EventType.Enter)
+        # 得到的是 "7"，不是 "Enter"。之前这里用 str(...) 比较，真实
+        # 鼠标事件永远被当成 Leave，hover 动画其实从未生效。
+        etype = getattr(event, "type", None)
+        kind = getattr(etype, "name", None) or str(etype or "")
+        entering = kind == "Enter"
+        job = self._hover_job
+        if job is not None:
+            try:
+                self.after_cancel(job)
+            except Exception:
+                pass
+            self._hover_job = None
+        if entering:
+            self._set_hover(True)
+            return
+
+        def finish():
+            self._hover_job = None
+            if self._pointer_inside() or self._selected:
+                return
+            self._set_hover(False)
+
+        try:
+            self._hover_job = self.after(70, finish)
+        except Exception:
+            finish()
+
     def set_selected(self, selected: bool, animate: bool = True) -> None:
         if selected == self._selected:
             return
         self._selected = selected
+        if self._hover_job is not None:
+            try:
+                self.after_cancel(self._hover_job)
+            except Exception:
+                pass
+            self._hover_job = None
         target_bg = C_ACCENT_SOFT if selected else C_CARD_BG
         start_bg = self.cget("fg_color")
         if not animate or not config.ANIMATIONS_ENABLED:
@@ -508,22 +553,28 @@ class PresetCard(ctk.CTkFrame):
         self.dot.set_bg(target_bg)
 
     def flash(self) -> None:
-        """卡片闪一下强调色（同步完成之类的反馈）。"""
-        base = self.cget("fg_color")
+        """卡片闪一下强调色（同步完成之类的反馈）。
+
+        卡片本身保持无描边外观：只在动画期间把 1px 描边从底色提到强调色，
+        再落回底色。之前直接改 border_color，但 border_width=0，整段动画
+        实际上完全看不见。
+        """
+        base = C_CARD_BG
 
         def frame(e, raw):
             wave = 1.0 - abs(raw - 0.5) * 2
             try:
-                self.configure(border_color=lerp_color(base, C_ACCENT, wave))
+                self.configure(
+                    border_color=lerp_color(base, C_ACCENT_SOFT, wave))
             except Exception:
                 pass
 
         tween(self, "flash", 520, frame, easing=ease_out_cubic,
               fps=FPS_COLOR,
-              on_done=lambda: self.configure(border_color=C_BORDER_SOFT))
+              on_done=lambda: self.configure(border_color=base))
 
     def play_enter(self, delay_ms: int = 0) -> None:
-        """入场：描边从强调色淡回发丝色。delay 用来做交错。"""
+        """入场：描边从强调色淡回底色。delay 用来做交错。"""
         if not config.ANIMATIONS_ENABLED:
             return
 
@@ -532,7 +583,7 @@ class PresetCard(ctk.CTkFrame):
                 try:
                     self.configure(
                         border_color=lerp_color(C_ACCENT_SOFT,
-                                                C_BORDER_SOFT, e))
+                                                C_CARD_BG, e))
                 except Exception:
                     pass
 

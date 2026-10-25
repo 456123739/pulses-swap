@@ -324,3 +324,15 @@
 - 枪包空状态按上下文显示；同步/发布弹窗宽度 680（150% 下 1020），差异清单按条目数收缩。
 - 设置数据库/关于补充说明卡；高 DPI `wraplength` 跟随缩放。
 - 单元测试 182 个、`ui_audit`、`online_ui_check`、`startup_check`、`scale_check`、`scroll_check`、`online_e2e` 全部通过。
+
+## 14. 2.7.5 操作过程与文字复查
+
+- 新增 `packaging/ui_process_check.py`：不只看操作结果，逐帧检查 hover、卡片选中、卡片 flash、侧栏展开/收起、切页、详情弹窗、Toast、长预设名和收尾残留。
+- 修复 CustomTkinter 真实事件目标：`CTkLabel` 的点击/悬停落在内部 `Label`，此前卡片、DiffRow、管理行、侧栏云端行点文字无反应；新增 `bind_event()` 统一绑定内部目标。
+- 修复卡片 hover 的 `NameError`（`C_INPUT_BG` 未导入）以及 `EventType` 枚举被 `str()` 成 `"7"` 导致 hover 永远不触发。
+- 卡片 flash/入场动画此前 `border_width=0`，改 `border_color` 完全不可见；现在保留 1px 同色描边并在动画中浮出强调色。
+- 侧栏：空态不再创建 `CTkScrollableFrame`；导航收起后不会被 hover 立刻弹开；`lift()` 只在装配时执行一次；收起保留图标栏。
+- 文字：Step 1/侧栏当前预设跟随选择；检查中隐藏旧同步按钮；批量检查区分失败；加载状态先“加载中…”；长名字/长 Toast 截断或换行；详情页签有选中态。
+- 下载：并发进度串行化且只增不减；新增中途取消、clone 会话、真实 mock 六文件并发；取消同步不再推进版本/manifest。
+
+验证结果：186 个单元测试通过；`ui_audit`、`ui_process_check`、`anim_invariants`、`scale_check`（100/125/150）、`scroll_check`、`startup_check`、`online_ui_check`、`online_e2e` 全部通过。Linux 本机首次展开侧栏时 CTk 首帧排版可能把 190ms 补间压进第一次 `update`；补间仍保留，Windows 实机需再确认帧率。

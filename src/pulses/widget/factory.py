@@ -486,6 +486,45 @@ def _measure_font(font_tuple):
     return created
 
 
+def bind_event(widget, sequence, func, add="+", recursive=False):
+    """把事件绑到 CTk 控件真正接收鼠标的那个原生子控件上。
+
+    CustomTkinter 的 ``bind`` 只绑到内部 Canvas；CTkLabel 的指针事件实际
+    落在 ``_label``，CTkButton 落在 ``_text_label``。于是会出现
+    “代码里明明 bind 了，点文字/悬停到文字上却没反应”的假绑定。
+    这里把可能的目标都绑一遍；同一事件只会命中一个目标，不会重复触发。
+    """
+    targets = []
+    # CTk 控件的 bind() 本身会绑到内部 Canvas/Label；再直接绑同一个
+    # 内部控件就会执行两遍（DiffRow 的勾选会被切换两次，看起来像没反应）。
+    # 因此有内部目标时只绑内部目标；原生 Tk 控件才绑自身。
+    has_internal = False
+    for attr in ("_canvas", "_label", "_text_label", "_entry"):
+        target = getattr(widget, attr, None)
+        if target is not None and target not in targets:
+            targets.append(target)
+            has_internal = True
+    if not has_internal:
+        targets.insert(0, widget)
+    if recursive:
+        try:
+            for child in widget.winfo_children():
+                for target in bind_event(child, sequence, func, add=add,
+                                         recursive=True):
+                    if target not in targets:
+                        targets.append(target)
+        except Exception:
+            pass
+    bound = []
+    for target in targets:
+        try:
+            target.bind(sequence, func, add=add)
+            bound.append(target)
+        except Exception:
+            pass
+    return bound
+
+
 def ellipsize(text, font_tuple, max_px) -> str:
     """把文字截到 max_px 以内，末尾加省略号。
 

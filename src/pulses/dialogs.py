@@ -206,7 +206,10 @@ class _OverlayCardBase:
         label = make_label(self.body, text=text,
                             fg=C_TEXT_MAIN if fg is None else fg,
                             font_size=FS_SUBHEAD, bold=True)
-        label.pack(anchor=W, pady=(0, 0))
+        # 预设名最长 80 字：标题不换行会把弹窗撑破。
+        label.configure(wraplength=max(200, px(self.width - 2 * PAD_DIALOG - 6)),
+                        justify=LEFT, anchor=W)
+        label.pack(anchor=W, fill=X, pady=(0, 0))
         # 标题下一条 24x2 的强调色短线：给所有弹窗一个统一的"落款"
         try:
             rule = ctk.CTkFrame(self.body, fg_color=C_ACCENT,
@@ -338,7 +341,10 @@ class OverlayCard(_OverlayCardBase):
         try:
             self.mask.place(relx=0.0, rely=0.0, relwidth=1.0, relheight=1.0)
             self.mask.lift()
-            self.card.place(relx=0.5, rely=0.5, anchor="center")
+            # 先放在动画起点再画第一帧。否则会先看到居中的卡片，
+            # 下一帧才跳低 6% 开始往上弹，像闪了一下。
+            start_rely = 0.56 if config.ANIMATIONS_ENABLED else 0.5
+            self.card.place(relx=0.5, rely=start_rely, anchor="center")
             self.root.update_idletasks()      # 先把内容画出来，再显示
             self.mask.focus_set()
         except Exception:
@@ -351,6 +357,13 @@ class OverlayCard(_OverlayCardBase):
         用阻尼弹簧而不是三次曲线：末端有约 7% 的过冲再收回，
         观感是"弹出来"而不是"滑进来"。
         """
+        if not config.ANIMATIONS_ENABLED:
+            try:
+                self.card.place_configure(rely=0.5)
+            except Exception:
+                pass
+            return
+
         def frame(e, raw):
             try:
                 self.card.place_configure(rely=lerp(0.56, 0.5, e))
