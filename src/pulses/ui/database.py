@@ -65,6 +65,13 @@ class DatabaseMixin:
 
     # ==================== 数据库初始化 ====================
     def _init_database_flow(self):
+        # 开窗动画期间先别读库/弹定位框：数据库初始化可能重排界面或
+        # 弹出模态框，会把 320ms 的入场动画打断在透明/半透明帧上。
+        if getattr(self, "_window_animating", False):
+            self.root.after(120, self._init_database_flow)
+            return
+        if getattr(self, "_window_closing", False):
+            return
         db_path = DatabaseLocator.load_db_path()
         if db_path and DatabaseLocator.is_valid_database(db_path):
             self._use_database(db_path)

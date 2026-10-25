@@ -1,4 +1,4 @@
-# Pulses Swap 交接文档（v2.7.5）
+# Pulses Swap 交接文档（v2.7.6）
 
 > 给接手的人 / AI 看的：这个软件被拆成了哪些文件、每个文件干什么、
 > 数据怎么流动、改哪里、怎么跑测试、怎么打包。
@@ -12,7 +12,7 @@
 一键把某组枪包换进游戏的 `tacz` 目录；同时把预设发布到**蓝奏云**，
 玩家绑定分享链接后可以增量同步。
 
-- 版本：`2.7.5`（`src/pulses/core/paths.py` 里的 `VERSION`）
+- 版本：`2.7.6`（`src/pulses/core/paths.py` 里的 `VERSION`）
 - 入口：`src/main.py` → `pulses.ui.app.main()`
 - 依赖：`customtkinter` `tkinterdnd2` `watchdog` `Pillow`（见 `requirements.txt`）
 - 不依赖任何第三方网络库（HTTP 全用标准库 `urllib`）
@@ -29,7 +29,7 @@ pulses-swap/
 │   ├── pulses/                 界面 + 本地逻辑
 │   └── online/                 在线同步（不依赖 tkinter，可命令行跑）
 ├── packaging/                  打包配置 + 各种验证脚本
-├── tests/                      单元 / 集成测试（182 个）
+├── tests/                      单元 / 集成测试（194 个）
 ├── docs/                       方案、教程、交接文档
 └── requirements.txt
 ```
@@ -373,6 +373,7 @@ export DISPLAY=:99          # weston headless + Xwayland
 | `lanzou_live_publish.py` | 真实账号：完整发布闭环 | **是** |
 | `win_dwm_check.py` | Win11 不透明逻辑 | 否 |
 | `startup_check.py` | **走真实入口 `main()`**，确认打包后能启动 | 否 |
+| `window_anim_check.py` | 主窗口出现/关闭动画：起始透明下移、结束回矩形、关闭隐藏 | 否 |
 | `scroll_check.py` | 多列表滚轮路由 / CTk 不解绑 / Listbox / 60 张卡片滚动 | 否 |
 | `lanzou_publish_release.py` | 把 dist 里的产物传到网盘下载文件夹（凭据走环境变量） | **是** |
 
@@ -556,3 +557,13 @@ export DISPLAY=:99          # weston headless + Xwayland
 10. **长文案要截断/换行**：Toast 不设 `wraplength` 会撑到窗口外；Step1/侧栏/管理当前预设/详情标题/云端行都要 `ellipsize()`，否则 80 字预设名会压住状态或按钮。
 11. **详情页签要显式选中**：`CanvasSegmented` 不会自动知道当前页；`open_preset_detail()` 在 `show(selected)` 后必须 `tab_bar.select(selected, animate=False)`，否则三个页签全是灰字。
 12. **加载状态不要提前写“已加载”**：`load_pack()` 只把状态设为“加载中…”，`_on_presets_loaded_body()` 完成后再设“已加载”；失败时设“加载失败”。先写已加载会让用户以为线程卡死。
+
+## v2.7.6 新增坑位（务必保留）
+
+1. **Tk 窗口级动画不要逐帧改尺寸**：`root.geometry("WxH+x+y")` 每次改宽高都会让 Tk 重排整棵控件树；主界面控件多时每帧 20~40ms，动画会明显掉帧。`show_window()` / `_play_window_close()` 只改 `y` 和 `-alpha`，宽高始终等于最终矩形。`window_motion.pop_rect()` 虽然保留 `scale` 参数，但主窗口调用时传 `scale=1.0`。
+2. **`winfo_width()` 在 withdraw 状态是 1**：`_center_window()` 不能直接拿它算居中，否则 1280 宽的窗口会按 1x1 的中心偏移到 `+742+1580`。现在 `w<=1 or h<=1` 时回退 `_initial_size`。
+3. **窗口补间首帧要从第一帧开始计时**：`tween(..., start_on_first_frame=True)` 的 `start` 初始为 `None`，首次 `step()` 才取 `perf_counter()`。否则 UI 首次布局阻塞 200~400ms，补间会在第一次 `update()` 里直接跳到后半段，用户看到“突然半透明出现”。只给窗口级补间用这个参数；普通控件动画仍按调用时刻计时。
+4. **`<Destroy>` 守卫只认宿主自己的销毁**：Tk 的 toplevel 会收到所有子控件的 `<Destroy>`；`_cleanup` 里判断 `widget.winfo_toplevel() is widget` 且 `event.widget is widget`，否则卡片回收会把窗口补间一起取消。
+5. **开窗/关窗时暂停 Win11 不透明防护**：`_on_opacity_event` / `_opacity_tick` 在 `_window_animating` 为真时必须直接返回；否则 `<Configure>` / `<Map>` 回调里的 `make_window_opaque()` 会把 alpha 拉回 1.0，动画只剩位移。动画结束后再 `refresh_window_opacity()`。
+6. **关闭动画必须先收束开窗动画**：用户刚打开就点关闭时，`_play_window_close()` 先调用 `_finish_window_open()` 取消 `window_open` 补间和 `_window_open_job`，否则两条补间同时写 geometry。
+7. **不要用 `Toplevel` 做窗口缩放/旋转**：Windows/DWM 下 Toplevel 会先以不透明黑帧映射，再 alpha 补间，表现为闪黑；PCL 的旋转/缩放是 WPF 合成层能力，Tk 没有等价且稳定的实现。现在的方案是“下移 + 淡入/淡出 + 轻微回弹”，已够接近 PCL 的灵动感，且不牺牲布局性能。

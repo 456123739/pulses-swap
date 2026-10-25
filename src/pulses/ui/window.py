@@ -56,6 +56,7 @@ from ..dialogs import _OVERLAY_STACK
 from ..core.platform import ROLE_THEME
 from ..managers import *
 from ..pages import *
+from .window_motion import WindowRect, lerp_rect, parse_geometry, pop_rect
 
 
 
@@ -71,11 +72,285 @@ class WindowMixin:
             self.root.update_idletasks()
             w = max(1, self.root.winfo_width())
             h = max(1, self.root.winfo_height())
+            # 窗口还处于 withdraw 状态时 winfo_width() 恒为 1，不能拿它
+            # 算居中，否则会按 1x1 的中心偏移半个窗口。用启动时算好的
+            # 初始尺寸兜底。
+            if w <= 1 or h <= 1:
+                w, h = getattr(self, "_initial_size", (WINDOW_W, WINDOW_H))
+                w, h = max(1, int(w)), max(1, int(h))
             sw = max(w, self.root.winfo_screenwidth())
             sh = max(h, self.root.winfo_screenheight())
             x = max(0, (sw - w) // 2)
             y = max(0, (sh - h) // 2 - px(12))
             self.root.geometry(f"{w}x{h}+{x}+{y}")
+        except Exception:
+            pass
+
+    # ==================== 窗口出现 / 关闭动画 ====================
+    # 参考 PCL 的「窗口不是硬切出来，而是从下方轻轻弹上来」：
+    # 起始时透明、下移，然后用一条短补间收进最终位置。
+    # Tk 没有 WPF 的 RenderTransform，所以用 geometry 的 y + alpha 做等价
+    # 效果；刻意不缩放窗口尺寸，避免内部控件每一帧重排、动画发抖。
+    def _set_window_alpha(self, value):
+        value = max(0.0, min(1.0, float(value)))
+        try:
+            self.root.attributes("-alpha", value)
+            return True
+        except Exception:
+            pass
+        try:
+            self.root.wm_attributes("-alpha", value)
+            return True
+        except Exception:
+            return False
+
+    def _set_window_rect(self, rect):
+        if not isinstance(rect, WindowRect):
+            return False
+        try:
+            current = parse_geometry(self.root.geometry())
+            if current == rect:
+                return True
+            self.root.geometry(rect.geometry())
+            return True
+        except Exception:
+            return False
+
+    def show_window(self):
+        """完成最终布局后显示主窗口；有动画时走弹出补间。"""
+        job = getattr(self, "_center_job", None)
+        self._center_job = None
+        if job is not None:
+            try:
+                self.root.after_cancel(job)
+            except Exception:
+                pass
+        try:
+            self.root.update_idletasks()
+        except Exception:
+            pass
+        self._center_window()
+        try:
+            self.root.update_idletasks()
+        except Exception:
+            pass
+        final = parse_geometry(self.root.geometry())
+        if final is None:
+            try:
+                self.root.deiconify()
+            except Exception:
+                pass
+            return
+        self._window_final_rect = final
+        self._window_opening = False
+        self._window_closing = False
+        self._window_animating = False
+        self._window_open_safety = None
+
+        try:
+            state = str(self.root.state())
+        except Exception:
+            state = "normal"
+        # 此时窗口通常还是 withdrawn（main() 先隐藏再装配），这是正常的起点；
+        # 只有已经最大化/最小化时才跳过几何动画，避免把系统窗口状态弄乱。
+        should_animate = bool(config.ANIMATIONS_ENABLED) and state not in (
+            "zoomed", "iconic")
+
+        if not should_animate:
+            self._show_window_now(final)
+            return
+
+        # 只做「位移 + 淡入」，不改窗口尺寸：Tk 改 geometry 尺寸会触发布局，
+        # 大界面上每一帧都重排，动画反而会一卡一卡；移动窗口则不会。
+        start = pop_rect(
+            final, scale=1.0, offset_y=max(8, px(26)),
+            min_width=WINDOW_MIN_W, min_height=WINDOW_MIN_H)
+        self._window_animating = True
+        self._window_opening = True
+        # 少数窗口管理器不支持 -alpha；此时直接显示最终窗口，别把窗口
+        # 留在透明状态，更不能让补间空跑。
+        if not self._set_window_alpha(0.0):
+            self._window_animating = False
+            self._window_opening = False
+            self._show_window_now(final)
+            return
+        self._set_window_rect(start)
+        try:
+            self.root.deiconify()
+            self.root.update_idletasks()
+        except Exception:
+            pass
+
+        def frame(_eased, raw):
+            if not getattr(self, "_window_opening", False):
+                return
+            raw = max(0.0, min(1.0, raw))
+            # alpha 比位移更早到位：窗口先“显形”，位置再收尾，避免半透明
+            # 窗口在屏幕上拖太久。
+            alpha = ease_out_cubic(min(1.0, raw / 0.72))
+            self._set_window_alpha(alpha)
+            # 轻微回弹：从下方 26px 弹上来，越过终点约 2px 再落回。
+            # 只动 y，不碰宽高，不会让内部控件重新排版。
+            back = ease_out_back(raw, 0.55)
+            y = round(final.y + (start.y - final.y) * (1.0 - back))
+            y = max(0, y)
+            self._set_window_rect(
+                WindowRect(final.x, y, final.width, final.height))
+
+        def safety():
+            self._window_open_safety = None
+            self._finish_window_open()
+
+        try:
+            self._window_open_safety = self.root.after(1200, safety)
+        except Exception:
+            self._window_open_safety = None
+
+        def begin():
+            self._window_open_job = None
+            if not getattr(self, "_window_opening", False):
+                return
+            # 先让 Tk 把 alpha=0 的起始帧真正画出来，再启动补间。
+            # 否则启动时那段重布局会把前几帧一起吞掉，用户看到的是
+            # 窗口突然以半透明状态出现，而不是从透明淡入。
+            try:
+                self.root.update_idletasks()
+            except Exception:
+                pass
+            tween(self.root, "window_open", 320, frame,
+                  on_done=self._finish_window_open, easing=ease_linear,
+                  fps=60, start_on_first_frame=True)
+
+        try:
+            self._window_open_job = self.root.after(40, begin)
+        except Exception:
+            self._window_open_job = None
+
+    def _show_window_now(self, final):
+        """无动画/无法动画时的最终显示路径。"""
+        self._set_window_alpha(1.0)
+        self._set_window_rect(final)
+        try:
+            self.root.deiconify()
+        except Exception:
+            pass
+        try:
+            self.root.update_idletasks()
+        except Exception:
+            pass
+        try:
+            refresh_window_opacity(self.root)
+        except Exception:
+            pass
+
+    def _finish_window_open(self):
+        """把开窗动画收束到最终态（正常结束、被关闭打断、安全兜底共用）。"""
+        if not getattr(self, "_window_opening", False):
+            return
+        self._window_opening = False
+        try:
+            cancel_tween(self.root, "window_open")
+        except Exception:
+            pass
+        job = getattr(self, "_window_open_safety", None)
+        self._window_open_safety = None
+        if job is not None:
+            try:
+                self.root.after_cancel(job)
+            except Exception:
+                pass
+        job = getattr(self, "_window_open_job", None)
+        self._window_open_job = None
+        if job is not None:
+            try:
+                self.root.after_cancel(job)
+            except Exception:
+                pass
+        final = getattr(self, "_window_final_rect", None)
+        if final is not None:
+            self._set_window_rect(final)
+        self._set_window_alpha(1.0)
+        self._window_animating = False
+        try:
+            refresh_window_opacity(self.root)
+        except Exception:
+            pass
+
+    def _play_window_close(self):
+        """关闭前的“收回”动画：下移、淡出，然后隐藏窗口。"""
+        final = getattr(self, "_window_final_rect", None)
+        if final is None:
+            final = parse_geometry(self.root.geometry())
+        if final is None:
+            self._finish_exit()
+            return
+
+        # 如果用户刚打开就点关闭，先把开窗补间收掉，避免两条补间抢 geometry。
+        self._finish_window_open()
+        self._set_window_alpha(1.0)
+        self._set_window_rect(final)
+        try:
+            state = str(self.root.state())
+        except Exception:
+            state = "normal"
+        animate_rect = state not in ("zoomed", "iconic", "withdrawn")
+        end = pop_rect(
+            final, scale=1.0, offset_y=max(6, px(18)),
+            min_width=WINDOW_MIN_W, min_height=WINDOW_MIN_H)
+
+        self._window_animating = True
+        self._window_closing = True
+        self._window_hidden = False
+
+        def frame(_eased, raw):
+            if not getattr(self, "_window_closing", False):
+                return
+            raw = max(0.0, min(1.0, raw))
+            alpha = 1.0 - ease_out_cubic(min(1.0, raw / 0.86))
+            self._set_window_alpha(alpha)
+            if animate_rect:
+                self._set_window_rect(
+                    lerp_rect(final, end, ease_out_cubic(raw)))
+            if raw >= 0.90 and not getattr(self, "_window_hidden", False):
+                self._window_hidden = True
+                try:
+                    self.root.withdraw()
+                except Exception:
+                    pass
+
+        def safety():
+            self._window_close_safety = None
+            self._finish_exit()
+
+        try:
+            self._window_close_safety = self.root.after(900, safety)
+        except Exception:
+            self._window_close_safety = None
+        tween(self.root, "window_close", 210, frame,
+              on_done=self._finish_exit, easing=ease_linear, fps=60,
+              start_on_first_frame=True)
+
+    def _finish_exit(self):
+        """关窗补间结束（或兜底）：隐藏窗口并退出 Tk 主循环。"""
+        self._window_closing = False
+        self._window_animating = False
+        job = getattr(self, "_window_close_safety", None)
+        self._window_close_safety = None
+        if job is not None:
+            try:
+                self.root.after_cancel(job)
+            except Exception:
+                pass
+        try:
+            cancel_tween(self.root, "window_close")
+        except Exception:
+            pass
+        try:
+            self.root.withdraw()
+        except Exception:
+            pass
+        try:
+            self.root.quit()
         except Exception:
             pass
 
@@ -105,6 +380,9 @@ class WindowMixin:
         self._opacity_guard_logged = False
 
     def _on_opacity_event(self, _event=None):
+        # 开窗/关窗补间正在写 alpha，防护逻辑不能把它拉回 1.0。
+        if getattr(self, "_window_animating", False):
+            return
         now = time.perf_counter()
         if now - getattr(self, "_opacity_last", 0.0) < 0.25:
             return
@@ -120,7 +398,8 @@ class WindowMixin:
                 pass
 
     def _opacity_tick(self):
-        refresh_window_opacity(self.root)
+        if not getattr(self, "_window_animating", False):
+            refresh_window_opacity(self.root)
         try:
             self.root.after(8000, self._opacity_tick)
         except Exception:
@@ -1033,11 +1312,21 @@ class WindowMixin:
             except Exception:
                 pass
             return
+        if getattr(self, "_closing", False):
+            return
+        self._closing = True
         self._stop_watcher()
         try:
-            self.root.quit()
+            viewable = bool(self.root.winfo_viewable())
         except Exception:
-            pass
+            viewable = False
+        if not config.ANIMATIONS_ENABLED or not viewable:
+            self._finish_exit()
+            return
+        try:
+            self._play_window_close()
+        except Exception:
+            self._finish_exit()
 
     # ==================== 新手引导更新 ====================
     def _update_guide(self):

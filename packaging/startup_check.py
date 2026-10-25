@@ -37,13 +37,19 @@ app_module.PulsesSwapApp._init_database_flow = lambda self: None
 
 
 def _fake_mainloop(self, *args, **kwargs):
-    """不进事件循环：只把窗口建出来、跑几帧 idle 回调。"""
-    for _ in range(6):
+    """不进事件循环：把窗口建出来，并跑完开窗补间（约 0.6s）。"""
+    for _ in range(90):
         try:
             self.update()
         except Exception:
             break
-        time.sleep(0.02)
+        if float(self.attributes("-alpha")) >= 0.999:
+            # 多跑几帧，确保 on_done 已经写回最终矩形
+            for _ in range(3):
+                self.update()
+                time.sleep(0.01)
+            break
+        time.sleep(0.01)
 
 
 tkinter.Tk.mainloop = _fake_mainloop

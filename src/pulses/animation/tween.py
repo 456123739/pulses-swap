@@ -70,14 +70,25 @@ def _install_destroy_guard(widget):
     否则 _TWEENS 里会留下一个指向已销毁控件的 token：Tk 已经取消了 after
     任务，那条补间永远不会再推进，也就永远不会被移除（长跑必漏）。
 
-    注意不能用 event.widget 判断：CustomTkinter 的 bind() 是绑在内部 Canvas 上的，
-    事件里的 widget 是那个 Canvas 而不是被补间的控件，所以这里闭包捕获 widget。
+    普通控件用闭包捕获的 widget 清理（CustomTkinter 的 bind() 可能绑在
+    内部 Canvas 上，事件里的 widget 不一定是宿主控件）；根窗口 / Toplevel
+    的 <Destroy> 还会收到所有子控件的销毁事件，因此额外用 event.widget
+    过滤，只认宿主自己的销毁。
     """
     if getattr(widget, "_tween_destroy_guard", False):
         return
     token_prefix = id(widget)
 
     def _cleanup(_event=None):
+        # 根窗口/Toplevel 的 <Destroy> 绑定会收到所有子控件的销毁事件
+        # （bindtags 里包含 toplevel）。只认宿主自己的销毁，否则界面里
+        # 任何一个卡片被回收都会把窗口级补间一起取消。
+        try:
+            if widget.winfo_toplevel() is widget:
+                if _event is not None and getattr(_event, "widget", None) is not widget:
+                    return
+        except Exception:
+            pass
         for token in [k for k in _TWEENS if k[0] == token_prefix]:
             job = _TWEENS.pop(token, None)
             _TWEEN_OWNERS.pop(token, None)
@@ -121,7 +132,7 @@ def apply_animations_setting(enabled: bool) -> None:
 
 
 def tween(widget, key, duration_ms, on_frame, on_done=None,
-          easing=ease_out_cubic, fps=60):
+          easing=ease_out_cubic, fps=60, start_on_first_frame=False):
     """
     用 widget.after 驱动一条补间时间线。
 
@@ -147,18 +158,22 @@ def tween(widget, key, duration_ms, on_frame, on_done=None,
     duration_ms = max(1, int(duration_ms))
     max_frames = int(duration_ms / interval) + 3
     token = (id(widget), key)
-    start = time.perf_counter()
-    state = {"frames": 0, "last": None}
+    state = {"frames": 0, "last": None,
+             "start": None if start_on_first_frame else time.perf_counter()}
 
     def step():
         if token not in _TWEENS:
             return
         state["frames"] += 1
         now = time.perf_counter()
+        if state.get("start") is None:
+            # 首帧可能被一次很重的布局阻塞几百毫秒；从首帧开始计时，
+            # 动画就不会“还没显示就已经播完”。窗口级动画需要这个语义。
+            state["start"] = now
         if state.get("last") is not None:
             _note_frame_time((now - state["last"]) * 1000.0)
         state["last"] = now
-        elapsed = (now - start) * 1000.0
+        elapsed = (now - state["start"]) * 1000.0
         raw = clamp01(elapsed / duration_ms)
         if state["frames"] >= max_frames:
             raw = 1.0
