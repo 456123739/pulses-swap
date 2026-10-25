@@ -78,6 +78,12 @@ check("出现动画：结束后不透明",
 end_rect = parse_geometry(root.geometry())
 check("出现动画：结束时回到最终矩形", end_rect == final, (end_rect, final))
 
+# 关闭前把窗口挪开，确认关闭动画从“当前”位置收，而不是跳回启动位置。
+moved_y = max(0, final.y - 120)
+root.geometry(f"{final.width}x{final.height}+{final.x}+{moved_y}")
+root.update_idletasks()
+root.update()
+
 # 关闭：request_exit 与标题栏关闭按钮走同一条路径
 close_started = time.perf_counter()
 app.request_exit()
@@ -109,6 +115,9 @@ check("关闭动画：alpha 单调淡出",
 check("关闭动画：窗口向下收回",
       bool(ys) and max(ys) > min(ys),
       (min(ys) if ys else None, max(ys) if ys else None))
+check("关闭动画：从当前位置收窗，不跳回启动位置",
+      bool(ys) and min(ys) >= moved_y - 4,
+      (moved_y, min(ys) if ys else None))
 
 try:
     root.destroy()

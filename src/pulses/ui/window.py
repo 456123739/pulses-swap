@@ -288,12 +288,18 @@ class WindowMixin:
         # 如果用户刚打开就点关闭，先把开窗补间收掉，避免两条补间抢 geometry。
         self._finish_window_open()
         self._set_window_alpha(1.0)
-        self._set_window_rect(final)
         try:
             state = str(self.root.state())
         except Exception:
             state = "normal"
         animate_rect = state not in ("zoomed", "iconic", "withdrawn")
+        # 用“当前”矩形收窗，而不是启动时的 _window_final_rect：
+        # 用户可能已经移动/缩放过窗口；直接套旧矩形会先跳回启动位置。
+        current = parse_geometry(self.root.geometry())
+        if animate_rect and current is not None:
+            final = current
+        if animate_rect:
+            self._set_window_rect(final)
         end = pop_rect(
             final, scale=1.0, offset_y=max(6, px(18)),
             min_width=WINDOW_MIN_W, min_height=WINDOW_MIN_H)

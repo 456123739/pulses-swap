@@ -1,4 +1,4 @@
-# Pulses Swap 交接文档（v2.7.6）
+# Pulses Swap 交接文档（v2.7.7）
 
 > 给接手的人 / AI 看的：这个软件被拆成了哪些文件、每个文件干什么、
 > 数据怎么流动、改哪里、怎么跑测试、怎么打包。
@@ -12,7 +12,7 @@
 一键把某组枪包换进游戏的 `tacz` 目录；同时把预设发布到**蓝奏云**，
 玩家绑定分享链接后可以增量同步。
 
-- 版本：`2.7.6`（`src/pulses/core/paths.py` 里的 `VERSION`）
+- 版本：`2.7.7`（`src/pulses/core/paths.py` 里的 `VERSION`）
 - 入口：`src/main.py` → `pulses.ui.app.main()`
 - 依赖：`customtkinter` `tkinterdnd2` `watchdog` `Pillow`（见 `requirements.txt`）
 - 不依赖任何第三方网络库（HTTP 全用标准库 `urllib`）
@@ -567,3 +567,4 @@ export DISPLAY=:99          # weston headless + Xwayland
 5. **开窗/关窗时暂停 Win11 不透明防护**：`_on_opacity_event` / `_opacity_tick` 在 `_window_animating` 为真时必须直接返回；否则 `<Configure>` / `<Map>` 回调里的 `make_window_opaque()` 会把 alpha 拉回 1.0，动画只剩位移。动画结束后再 `refresh_window_opacity()`。
 6. **关闭动画必须先收束开窗动画**：用户刚打开就点关闭时，`_play_window_close()` 先调用 `_finish_window_open()` 取消 `window_open` 补间和 `_window_open_job`，否则两条补间同时写 geometry。
 7. **不要用 `Toplevel` 做窗口缩放/旋转**：Windows/DWM 下 Toplevel 会先以不透明黑帧映射，再 alpha 补间，表现为闪黑；PCL 的旋转/缩放是 WPF 合成层能力，Tk 没有等价且稳定的实现。现在的方案是“下移 + 淡入/淡出 + 轻微回弹”，已够接近 PCL 的灵动感，且不牺牲布局性能。
+8. **收窗要用“当前”矩形，不能套启动矩形**：用户可能移动/缩放过窗口。`_play_window_close()` 在 `_finish_window_open()` 后解析 `root.geometry()`，普通窗口从当前位置下移 18px 淡出；`zoomed/iconic/withdrawn` 只淡出、不写 geometry。用 `_window_final_rect` 会在关闭瞬间跳回启动位置；`window_anim_check` 有移动窗口后的回归断言。
