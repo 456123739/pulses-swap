@@ -346,3 +346,10 @@
 - 修复隐藏状态下 `winfo_width()` 为 1 导致 `_center_window()` 按 1x1 计算、窗口显示后偏半个窗口的问题。
 - 验证：`tests/test_window_motion.py` 8 个用例；`packaging/window_anim_check.py` 检查起始透明/位置、结束矩形、关闭淡出与隐藏；`startup_check` 等待开窗动画结束后再断言不透明和居中。
 - 实测（Linux Xvfb，100%）：开窗在首次布局后约 40ms 启动，320ms 收束；关闭约 210ms 完成并隐藏。Windows 实机尚未逐帧验证，CI 只构建安装包；macOS 本期不构建。
+
+## 16. 2.7.7 收窗起点修正
+
+- 2.7.6 的 `_play_window_close()` 固定用 `_window_final_rect`（启动时的居中矩形）收窗；用户把窗口移到别处后关闭，会先跳回启动位置再淡出。
+- 2.7.7 在关闭开始时解析 `root.geometry()` 的当前矩形；普通窗口从当前位置下移 18px 淡出，最大化/最小化只淡出、不写 geometry。
+- `packaging/window_anim_check.py` 新增断言：开窗完成后把窗口上移 120px，再 `request_exit()`，关闭采样中的最小 y 必须仍在移动后的位置附近，不能回到启动 y。
+- 194 个单元测试与全部 UI 回归继续通过。
