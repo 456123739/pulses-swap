@@ -200,32 +200,69 @@ check("侧栏最终收起到 60", app.sidebar_shell.winfo_width() <= 64,
       app.sidebar_shell.winfo_width())
 check("收起后内容区隐藏", not bool(app.session_card.winfo_ismapped()))
 
-print("== 4. 页面切换：旧页留底、新页滑入、不露空白 ==")
+print("== 4. 页面切换：logo 幕布覆盖、页面在下面切换、左右拉开 ==")
 app.show_page("settings")
+cover = app.page_cover
 rows = []
-for _ in range(16):
+started = time.perf_counter()
+while (time.perf_counter() - started) * 1000 < 1500:
     root.update()
     try:
-        rows.append((app.stack.canvas.coords(app.stack.items["settings"])[1],
-                     app.stack.canvas.coords(app.stack.items["home"])[1]))
+        rows.append((cover.visible, cover.phase,
+                     cover.panel.winfo_y(),
+                     cover.left.winfo_x(), cover.right.winfo_x(),
+                     cover.left.winfo_width(), cover.right.winfo_width(),
+                     app.active_page, app.stack.current))
     except Exception:
         pass
     time.sleep(0.012)
-pump(400)
-ys = [r[0] for r in rows]
+pump(300)
 check("切到设置页完成", app.active_page == "settings", app.active_page)
-check("设置页从视口外滑入并收敛到 0",
-      ys and ys[-1] == 0 and any(y < 0 for y in ys), ys[:4] + ys[-2:])
-check("旧主页全程留在原地（不露底色）",
-      all(abs(y) < 1 for _new, y in rows), [r[1] for r in rows[:4]])
+check("切页使用了 logo 幕布", any(r[0] for r in rows))
+check("入场时幕布从下方升起",
+      any(r[2] > 10 for r in rows) and any(r[2] == 0 for r in rows),
+      [(r[2], r[1]) for r in rows[:8]])
+check("覆盖完成前页面栈仍是旧主页",
+      any(r[1] in ("covering", "holding") and r[8] == "home" for r in rows))
+check("覆盖完成后新页已在下面就位",
+      any(r[1] == "holding" and r[7] == "settings" and r[8] == "settings"
+          for r in rows))
+check("露布时左右半幕从中间缩窄",
+      any(r[3] == 0 and r[4] > app.page_canvas.winfo_width() // 2
+          and r[5] < app.page_canvas.winfo_width() // 2
+          for r in rows),
+      [(r[3], r[4], r[5], r[6]) for r in rows if r[1] == "revealing"][:4])
+check("露布结束后幕布完全撤掉", not cover.visible, cover.phase)
 check("设置页选项卡有选中态", app.settings_page.tab_bar.current() == "general",
       app.settings_page.tab_bar.current())
 app.settings_page.show_tab("database")
 pump(300)
 check("设置页切到数据库选项卡", app.settings_page.stack.current == "database",
       app.settings_page.stack.current)
+
+# 幕布已经盖住时改目标：不应重新盖一次，直接在下面换页。
 app.show_page("home")
-pump(400)
+pump(700)
+app.show_page("settings")
+pump(330)
+app.show_page("log")
+pump(1300)
+check("覆盖中改目标：只保留最后一次目标",
+      app.active_page == "log" and app.stack.current == "log"
+      and not cover.visible, (app.active_page, app.stack.current, cover.phase))
+
+# 已经在露布时改目标：等这一轮结束再排下一轮，不能把两轮动画叠在一起。
+app.show_page("home")
+pump(700)
+app.show_page("settings")
+pump(900)
+app.show_page("log")
+pump(1800)
+check("露布中改目标：下一轮补上，不叠动画",
+      app.active_page == "log" and app.stack.current == "log"
+      and not cover.visible, (app.active_page, app.stack.current, cover.phase))
+app.show_page("home")
+pump(1100)
 
 print("== 5. 预设详情弹窗：首帧尺寸、内容、选项卡选中 ==")
 app.open_preset_detail("Beta", tab="source")

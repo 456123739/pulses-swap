@@ -45,7 +45,7 @@ except ImportError:
 
 
 # ==================== 常量定义 ====================
-VERSION = "2.7.7"
+VERSION = "2.7.8"
 AUTHOR = "NimShade"
 PROJECT_NAME = "Pulses Swap"
 
@@ -143,6 +143,12 @@ def resource_path(filename: str) -> Path:
     here = Path(__file__).resolve().parent
     candidates.append(here / filename)                       # 与源码同级
     candidates.append(here.parent / 'packaging' / filename)  # 仓库内 packaging/
+    # 拆分后 paths.py 在 src/pulses/core/，仓库根目录的 packaging/
+    # 要往上三层；之前源码运行时 icon.png 找不到，窗口只能退回 Tk 默认图标。
+    try:
+        candidates.append(here.parents[2] / 'packaging' / filename)
+    except Exception:
+        pass
     for c in candidates:
         try:
             if c.exists():

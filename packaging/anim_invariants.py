@@ -50,50 +50,42 @@ def sample(start, duration_ms, sampler, steps=14):
 
 
 pump(900)
-canvas = app.stack.canvas
-
-# ── 1. 侧边栏切页：优先走位图，位图不可用时退回搬控件树 ──
-print("== 1. 侧边栏切页：位图优先，否则搬控件树 ==")
+# ── 1. 侧边栏切页：logo 幕布覆盖 → 页面在下面切换 → 左右拉开 ──
+print("== 1. 侧边栏切页：logo 幕布覆盖，页面在下面切换 ==")
 app.show_page("home")
-pump(700)
-for _p in ("settings", "log", "home"):
-    app.show_page(_p)
-    pump(700)
-_has_shots = bool(app.stack._shots)
-span = app.stack._size[1]
-print("   位图快照可用:", _has_shots, "| 视口高度:", span)
-
-
-def sampler_page():
-    imgs = [i for i in canvas.find_all() if canvas.type(i) == "image"]
-    return (canvas.coords(app.stack.items["settings"])[1],
-            canvas.coords(app.stack.items["home"])[1],
-            (canvas.coords(imgs[-1])[1] if imgs else None))
-
-
-rows = sample(lambda: app.show_page("settings"), 260, sampler_page)
-live_new = [r[0] for r in rows]
-live_old = [r[1] for r in rows]
-img_ys = [r[2] for r in rows if r[2] is not None]
-
-if _has_shots:
-    check("走位图路径（有图片项在动）", len(img_ys) > 6, len(img_ys))
-    check("位图单调滑入（-span → 0）",
-          img_ys and all(a <= b + 0.6 for a, b in zip(img_ys, img_ys[1:])),
-          [round(y, 1) for y in img_ys[:6]])
-    check("滑动期间活控件树一动不动（不会 remap 闪白）",
-          live_new and all(abs(y - live_new[0]) < 0.01 for y in live_new),
-          live_new[:4])
-else:
-    # 本环境 ImageGrab 不可用（Xwayland），走的是搬控件树的兜底路径
-    check("位图不可用时退回搬控件树（有位移）",
-          len({round(y, 1) for y in live_new}) > 6,
-          sorted({round(y, 1) for y in live_new})[:6])
-    check("兜底路径下新页仍在视口内滑入",
-          live_new and all(-span - 1 <= y <= 1 for y in live_new),
-          [round(y, 1) for y in live_new[:4]])
-check("旧页也保持停靠不动", live_old and all(abs(y - live_old[0]) < 0.01
-                                        for y in live_old), live_old[:4])
+pump(900)
+app.show_page("settings")
+cover = app.page_cover
+rows = []
+t0 = time.perf_counter()
+while (time.perf_counter() - t0) * 1000 < 1500:
+    root.update()
+    try:
+        rows.append((cover.visible, cover.phase,
+                     cover.panel.winfo_y(),
+                     cover.left.winfo_x(), cover.right.winfo_x(),
+                     cover.left.winfo_width(), cover.right.winfo_width(),
+                     app.active_page, app.stack.current))
+    except Exception:
+        pass
+    time.sleep(0.008)
+pump(200)
+check("切页使用了 logo 幕布", any(r[0] for r in rows))
+check("入场幕布从下往上升起",
+      any(r[2] > 10 for r in rows) and any(r[2] == 0 for r in rows),
+      [(r[2], r[1]) for r in rows[:8]])
+check("幕布完全盖住前不切页面栈",
+      any(r[1] in ("covering", "holding") and r[8] == "home" for r in rows))
+check("幕布盖住后才切到新页",
+      any(r[1] == "holding" and r[7] == "settings" and r[8] == "settings"
+          for r in rows))
+check("露布时左右半幕从中间缩窄",
+      any(r[3] == 0 and r[4] > app.page_canvas.winfo_width() // 2
+          and r[5] < app.page_canvas.winfo_width() // 2
+          for r in rows),
+      [(r[3], r[4], r[5], r[6]) for r in rows if r[1] == "revealing"][:4])
+check("露布结束后幕布完全撤掉", not cover.visible, cover.phase)
+check("露布结束后新页可见", app.stack.current == "settings", app.stack.current)
 
 # ── 2. 设置页选项卡：同样必须拼接 ──
 print("== 2. 设置页选项卡切换：任意中间帧严格拼接 ==")

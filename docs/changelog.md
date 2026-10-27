@@ -1,5 +1,22 @@
 # 更新日志
 
+## v2.7.8（2026-10-27）
+
+### 页面切换：logo 幕布
+- 主界面切页不再推入/推出整页，也不再抓截图：墨绿纯色幕布从下往上盖住工作区，中央浮出品牌字标。
+- 字标直接使用 `packaging/icon.png` 的 S/W，但按亮度去掉深色圆角底，只保留带抗锯齿的字形；因此 logo 与幕布之间没有方形拼接痕迹。
+- 幕布中央只放字标与 `PULSES SWAP`，底部一行小字 `PULSES 0 Studio · NimShade & DS`；字标按工作区正中心定位，留白足够。
+- 幕布完全盖住后，设置页 reload、管理页重建、页面栈切换全部在幕布下面完成；停留 520ms 后再露布。
+- 出场不是把整块 Frame 移出边界（Tk 不裁剪子控件，会盖到侧栏/状态条），而是左右半幕从中间向两侧缩窄，留出真正的页面；内缘保留 3px 强调色缝。
+- 快速连点时：覆盖阶段只记最后一个目标，盖住后一次到位；已经露布时把新目标排到下一轮。`ANIMATIONS_ENABLED=false` 时直接切页。
+- 修复源码运行时 `resource_path("icon.png")` 只找到 `src/pulses/core/` 的问题，补上仓库根目录 `packaging/` 候选。
+
+### 验证
+- 194 个单元测试通过。
+- `ui_process_check`、`anim_invariants` 改为检查幕布：覆盖前页面栈保持旧页、盖住后新页就位、左右半幕缩窄、快速改目标不叠动画。
+- `ui_audit`、`scale_check`（100/125/150）、`scroll_check`、`startup_check`、`window_anim_check`、`online_ui_check`、`online_e2e` 全部通过。
+- 渲染图：`docs/logo-cover.png`。
+
 ## v2.7.7（2026-10-25）
 
 ### 收窗起点修正
