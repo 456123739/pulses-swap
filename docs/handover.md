@@ -1,4 +1,4 @@
-# Pulses Swap 交接文档（v2.7.7）
+# Pulses Swap 交接文档（v2.7.8）
 
 > 给接手的人 / AI 看的：这个软件被拆成了哪些文件、每个文件干什么、
 > 数据怎么流动、改哪里、怎么跑测试、怎么打包。
@@ -12,7 +12,7 @@
 一键把某组枪包换进游戏的 `tacz` 目录；同时把预设发布到**蓝奏云**，
 玩家绑定分享链接后可以增量同步。
 
-- 版本：`2.7.7`（`src/pulses/core/paths.py` 里的 `VERSION`）
+- 版本：`2.7.8`（`src/pulses/core/paths.py` 里的 `VERSION`）
 - 入口：`src/main.py` → `pulses.ui.app.main()`
 - 依赖：`customtkinter` `tkinterdnd2` `watchdog` `Pillow`（见 `requirements.txt`）
 - 不依赖任何第三方网络库（HTTP 全用标准库 `urllib`）
@@ -364,7 +364,8 @@ export DISPLAY=:99          # weston headless + Xwayland
 |---|---|---|
 | `ui_snapshot.py` | 导出控件树 JSON，改前改后比对 | 否 |
 | `ui_audit.py` | 全流程 + 所有按钮逐个点击 | 否 |
-| `anim_invariants.py` | 动画中间帧不变量 | 否 |
+| `anim_invariants.py` | 动画中间帧不变量（含 logo 幕布切页） | 否 |
+| `ui_process_check.py` | 全流程操作过程 + 幕布重入/改目标 | 否 |
 | `scale_check.py` | 100% / 125% / 150% 三档布局 | 否 |
 | `online_ui_check.py` | 在线界面冒烟（身份/来源/同步/发布） | 否 |
 | `online_e2e.py` | 两端全流程 15 阶段（含失败/重启） | 否（本地模拟服务） |
@@ -568,3 +569,12 @@ export DISPLAY=:99          # weston headless + Xwayland
 6. **关闭动画必须先收束开窗动画**：用户刚打开就点关闭时，`_play_window_close()` 先调用 `_finish_window_open()` 取消 `window_open` 补间和 `_window_open_job`，否则两条补间同时写 geometry。
 7. **不要用 `Toplevel` 做窗口缩放/旋转**：Windows/DWM 下 Toplevel 会先以不透明黑帧映射，再 alpha 补间，表现为闪黑；PCL 的旋转/缩放是 WPF 合成层能力，Tk 没有等价且稳定的实现。现在的方案是“下移 + 淡入/淡出 + 轻微回弹”，已够接近 PCL 的灵动感，且不牺牲布局性能。
 8. **收窗要用“当前”矩形，不能套启动矩形**：用户可能移动/缩放过窗口。`_play_window_close()` 在 `_finish_window_open()` 后解析 `root.geometry()`，普通窗口从当前位置下移 18px 淡出；`zoomed/iconic/withdrawn` 只淡出、不写 geometry。用 `_window_final_rect` 会在关闭瞬间跳回启动位置；`window_anim_check` 有移动窗口后的回归断言。
+
+## v2.7.8 新增坑位（务必保留）
+
+1. **Tk 父容器不裁剪子控件**：幕布不能用一块全高 Frame 从 `y=h` 滑进来，否则下半截会盖住状态条/窗口底部；入场用 `height=h-y` 只覆盖工作区，出场用左右半幕缩窄宽度，不要移出 `page_host`。
+2. **Canvas 没有透明背景**：不要用一整块 Canvas 做幕布，移开后露的是 Canvas 底色；这里用原生 Frame 做幕布，logo 单独放在与幕布同色的小 Canvas 上，靠同色融合。
+3. **icon.png 自带深色圆角底**：直接贴图会出现方形/圆角拼接；`PageCover._load_logo()` 按亮度把背景 alpha 清零，再用 alpha>18 的 bbox 裁到 S/W 字形。换 logo 图时保持深底浅字，或同步改阈值。
+4. **页面必须在幕布下切换**：`_page_covered()` 里先 `_apply_page()`（`stack.show(animate=False)` + settings/manage 刷新），再留 520ms 给布局；不要在幕布还没盖住时先切页面。
+5. **快速连点不能叠动画**：覆盖阶段只记 `_page_pending`，盖住后一次到位；露布阶段的新目标在本轮 `_page_revealed()` 后再起一轮，不能同时开两条 reveal。
+6. **logo 居中与留白**：字标中心固定 `h/2`，不要按整块文字组的视觉中心去偏；`PULSES 0 Studio · NimShade & DS` 固定在底部 `h-34`，不要塞进字标 Canvas 里，否则小屏会被挤到字标下方。

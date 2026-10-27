@@ -641,6 +641,11 @@ class WindowMixin:
         self.stack = SlideStack(self.page_host, bg_color=C_WINDOW_BG,
                                  duration_ms=260)
         self.page_canvas = self.stack.canvas
+        # 页面切换的 logo 幕布：盖住工作区，页面在它下面完成切换/重建。
+        self.page_cover = PageCover(self.page_host)
+        self._page_transition = None
+        self._page_pending = None
+        self._page_reveal_job = None
 
         # 全局状态条：固定高度，永远只显示一行；进度条出现/消失不改变布局
         self.status_bar = ctk.CTkFrame(self.content_col,
@@ -1133,23 +1138,49 @@ class WindowMixin:
 
     # ==================== 入场动画 ====================
     def _play_entrance(self):
-        """启动入场：当前页从右侧轻轻滑入，侧边栏滑块同步淡入。"""
-        # 入场只做滑块淡入：搬页面窗口项（整棵控件树）每帧要重排子窗口，
-        # 是这里最贵的一类操作，放在启动第一帧最容易看出卡顿。
+        """启动入场：侧边栏滑块淡入；页面本身由窗口出现动画负责。"""
         self._update_nav_state(self.active_page, animate=True)
 
     # ==================== 页面切换 ====================
-    PAGE_ORDER = ("home", "manage", "settings", "log")
-
     def show_page(self, name, animate=True):
-        """切换右侧页面：整页在 Canvas 里推入/推出，侧边栏滑块同步滑动。
+        """切换右侧页面：logo 幕布盖住工作区，页面在幕布下面切换。
 
-        方向按需求走「点哪边内容就往哪边走」：
-          点下面/右面的选项 → 内容往下/右走（新页从下/右方进来）
-          点上面/左面的选项 → 内容往上/左走（新页从上/左方进来）
-        侧边栏是竖排，所以页面竖着滑（axis="y"）。
+        幕布是内容区内的 Canvas，不创建 Toplevel，也不抓截图：
+          1. 斜边纯色幕布从下往上盖住工作区；
+          2. 幕布中央浮出品牌 logo，此时才真正切换/重排页面；
+          3. 幕布带着 logo 向上收走，新页面完整露出。
+
+        快速连点时不会叠动画：覆盖期间只记最后一个目标，盖住后一次到位；
+        已经露出时再排下一次切换。动画关闭时直接走无动画路径。
         """
-        if name not in self.pages or name == self.active_page:
+        if name not in self.pages:
+            return
+        if not animate:
+            self._cancel_page_transition()
+            if name == self.active_page and self.stack.current == name:
+                return
+            self.active_page = name
+            self._update_nav_state(name, animate=False)
+            self._apply_page(name)
+            return
+        if not config.ANIMATIONS_ENABLED:
+            self._cancel_page_transition()
+            if name == self.active_page and self.stack.current == name:
+                return
+            self.active_page = name
+            self._update_nav_state(name, animate=False)
+            self._apply_page(name)
+            return
+        # 正在切换：覆盖阶段记下最后目标；已经盖住/正在露出时分别处理。
+        if self._page_transition is not None:
+            if name == self.active_page:
+                return
+            if self.page_cover.phase == "holding":
+                self._retarget_page(name)
+            else:
+                self._page_pending = name
+            return
+        if name == self.active_page:
             return
         if getattr(self, "recent_visible", False):
             try:
@@ -1157,32 +1188,89 @@ class WindowMixin:
             except Exception:
                 pass
         cancel_tween(self.stack.canvas, "entrance")
-        previous = self.active_page
-        direction = 1
-        if previous is not None:
-            try:
-                # 点下面/右面的选项 → 内容往下/右走 → 新页从上方/左方进来
-                # （SlideStack 里 direction=+1 表示新页起点在 -span）
-                direction = (1 if self.PAGE_ORDER.index(name)
-                             > self.PAGE_ORDER.index(previous) else -1)
-            except ValueError:
-                direction = 1
         self.active_page = name
-        self._update_nav_state(name, animate=animate)
-        self.stack.show(name, animate=animate, direction=direction, axis="y")
-        if animate:
-            # 切页动画结束后记一次实测帧率（完整日志可见）：
-            # 卡不卡用数字说话，不靠感觉。
-            def _log_fps():
-                interval, frames = take_frame_stats()
-                if frames > 3:
-                    self.log_manager.log(
-                        f"动画实测: {frames} 帧 · 平均帧间隔 {interval:.1f}ms "
-                        f"(≈{1000 / max(interval, 0.01):.0f}fps)",
-                        'INFO', verbose=True)
-            ui_call(self.root, lambda: self.root.after(340, _log_fps))
+        self._update_nav_state(name, animate=True)
+        self._start_page_transition(name)
+
+    def _start_page_transition(self, name):
+        self._page_pending = None
+        self._page_transition = {"target": name}
+        self.page_cover.cover(lambda: self._page_covered(name))
+
+    def _page_covered(self, name):
+        """幕布完全盖住后，先在下面把目标页面准备好，再开始露布。"""
+        if self._page_transition is None:
+            return
+        target = self._page_pending or name
+        self._page_pending = None
+        if target != self.active_page:
+            self.active_page = target
+            self._update_nav_state(target, animate=True)
+        self._page_transition["target"] = target
+        self._apply_page(target)
+        self._schedule_page_reveal()
+
+    def _retarget_page(self, name):
+        """幕布已经盖住时改目标：不重新盖布，直接在下面换页。"""
+        if self._page_transition is None:
+            return
+        self._page_pending = None
+        self.active_page = name
+        self._page_transition["target"] = name
+        self._update_nav_state(name, animate=True)
+        self._apply_page(name)
+        self._schedule_page_reveal()
+
+    def _schedule_page_reveal(self):
+        if self._page_reveal_job is not None:
+            try:
+                self.root.after_cancel(self._page_reveal_job)
+            except Exception:
+                pass
+            self._page_reveal_job = None
+        # 留一小段“logo 站住”的时间，让下面的页面把布局跑完。
+        self._page_reveal_job = self.root.after(520, self._reveal_page)
+
+    def _reveal_page(self):
+        self._page_reveal_job = None
+        if self._page_transition is None:
+            return
+        self.page_cover.reveal(lambda: self._page_revealed())
+
+    def _page_revealed(self):
+        self._page_transition = None
+        self._log_page_fps()
+        pending = self._page_pending
+        self._page_pending = None
+        if pending and pending != self.active_page:
+            self.show_page(pending, animate=True)
+
+    def _cancel_page_transition(self):
+        if self._page_reveal_job is not None:
+            try:
+                self.root.after_cancel(self._page_reveal_job)
+            except Exception:
+                pass
+            self._page_reveal_job = None
+        try:
+            self.page_cover.cancel()
+        except Exception:
+            pass
+        self._page_transition = None
+        self._page_pending = None
+
+    def _apply_page(self, name):
+        """把页面摆到当前位，并做进入该页才需要的刷新。"""
+        self.active_page = name
+        try:
+            self.stack.show(name, animate=False, axis="y")
+        except Exception:
+            pass
         if name == "settings" and self.settings_page is not None:
-            self.settings_page.reload()
+            try:
+                self.settings_page.reload()
+            except Exception:
+                pass
         if name == "manage":
             try:
                 self._update_manage_role()
@@ -1190,6 +1278,17 @@ class WindowMixin:
                 self._update_manage_pack_list()
             except Exception:
                 pass
+
+    def _log_page_fps(self):
+        try:
+            interval, frames = take_frame_stats()
+            if frames > 3:
+                self.log_manager.log(
+                    f"动画实测: {frames} 帧 · 平均帧间隔 {interval:.1f}ms "
+                    f"(≈{1000 / max(interval, 0.01):.0f}fps)",
+                    'INFO', verbose=True)
+        except Exception:
+            pass
 
     def _update_nav_state(self, name=None, animate=True):
         target = name or self.active_page

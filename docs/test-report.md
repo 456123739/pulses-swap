@@ -353,3 +353,13 @@
 - 2.7.7 在关闭开始时解析 `root.geometry()` 的当前矩形；普通窗口从当前位置下移 18px 淡出，最大化/最小化只淡出、不写 geometry。
 - `packaging/window_anim_check.py` 新增断言：开窗完成后把窗口上移 120px，再 `request_exit()`，关闭采样中的最小 y 必须仍在移动后的位置附近，不能回到启动 y。
 - 194 个单元测试与全部 UI 回归继续通过。
+
+## 17. 2.7.8 logo 幕布页面切换
+
+- 主界面 `show_page()` 改为：`PageCover.cover()` 盖住工作区 → `_page_covered()` 在幕布下调用 `stack.show(animate=False)` 并刷新目标页 → 停留 520ms → `PageCover.reveal()` 左右缩窄露布。
+- 入场幕布高度只到 `page_host` 底边（`height=h-y`），出场左右半幕宽度从中间缩窄；两者都不把原生 Frame 移出父容器，避免 Tk 不裁剪子控件造成侧栏/状态条被盖。
+- `icon.png` 先按最大通道亮度去掉深色圆角底，再用 alpha>18 的 bbox 裁到 S/W 字形；logo 与 `C_COVER_BG` 融合，没有方形底。
+- 字标中心在 `h/2`；`PULSES SWAP` 在下方，工作室/作者小字固定在底部 `h-34`。
+- 重入：覆盖阶段记 `_page_pending`，盖住时只切最后目标；露布阶段的新目标等本轮结束后再起一轮。`ANIMATIONS_ENABLED=false` 时不创建幕布动画。
+- 验证：`ui_process_check` 覆盖前旧页、盖住后新页、左右缩窄、覆盖中改目标、露布中改目标；`anim_invariants` 同步改为幕布不变量；194 个单元测试及全部 UI 回归通过。
+- 渲染图：`docs/logo-cover.png`（1204x850，工作区实际渲染）。
