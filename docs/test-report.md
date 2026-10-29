@@ -363,3 +363,11 @@
 - 重入：覆盖阶段记 `_page_pending`，盖住时只切最后目标；露布阶段的新目标等本轮结束后再起一轮。`ANIMATIONS_ENABLED=false` 时不创建幕布动画。
 - 验证：`ui_process_check` 覆盖前旧页、盖住后新页、左右缩窄、覆盖中改目标、露布中改目标；`anim_invariants` 同步改为幕布不变量；194 个单元测试及全部 UI 回归通过。
 - 渲染图：`docs/logo-cover.png`（1204x850，工作区实际渲染）。
+
+## 18. 2.7.9 完整 Pulses Swap 字标与身份切换幕布
+
+- 覆盖层字标不再取 `icon.png` 的 SW 字形，改为 `PageCover._build_wordmark()` 逐字绘制的 `Pulses Swap`：`Pulses` 暖白、`Swap` 低饱和青，左侧 2px 竖线，字距 `TRACKING=1`。
+- 字标在 `Canvas` 上只有文字像素，Canvas 底色与幕布同为 `C_COVER_BG`，没有矩形底；整体按 `h/2` 垂直居中，字标 Canvas 宽 360 左右，底部署名独立。
+- 身份切换新增 `_set_role_visual()`：幕布盖住后调用同步 `_set_role()`，再留 520ms 让主题/页面重建完成，最后 `PageCover.reveal()`；`_role_transition` 期间 `show_page()` 直接忽略，防止两套幕布互相 cancel。
+- 回归：`ui_process_check` 第 4b 节检查身份幕布、盖住前不改身份、开发者/玩家双向切换；194 个单元测试与其它 UI 检查全部通过。
+- 渲染图：`docs/logo-cover.png`（1204×850，实际工作区）。

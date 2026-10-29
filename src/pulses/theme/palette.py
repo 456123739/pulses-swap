@@ -89,6 +89,7 @@ C_GUIDE_GLOW     = "#3D7A6E"
 # 页面切换幕布：比主文字更深一档的墨绿，和 icon.png 的底色接近。
 C_COVER_BG       = "#233839"
 C_COVER_TEXT     = "#F4F8F7"
+C_COVER_ACCENT   = "#86C8BB"
 C_COVER_MUTED    = "#9DBDB8"
 
 # 层级用色：宣传片靠 box-shadow 分层，CustomTkinter 的 CTkFrame 不支持投影，

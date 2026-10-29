@@ -203,6 +203,52 @@ class OnlineMixin:
     def is_developer(self) -> bool:
         return str(getattr(self.settings, "role", "player")) == "developer"
 
+    def _set_role_visual(self, role: str) -> None:
+        """UI 层的身份切换：先让 logo 幕布盖住，再换主题/重建界面。
+
+        `_set_role()` 本身保持同步，供测试和后台逻辑直接调用；只有真实
+        点击/登录/退出走这里，避免把 1 秒动画带进数据层。
+        """
+        target = "developer" if str(role).startswith("dev") else "player"
+        current = "developer" if self.is_developer else "player"
+        if target == current:
+            return
+        cover = getattr(self, "page_cover", None)
+        if (cover is None or not config.ANIMATIONS_ENABLED
+                or cover.visible or getattr(self, "_role_transition", False)):
+            self._set_role(target)
+            return
+        self._role_transition = True
+        self._role_cover_target = target
+        cover.cover(self._role_cover_covered)
+
+    def _role_cover_covered(self):
+        if not getattr(self, "_role_transition", False):
+            return
+        try:
+            self._set_role(self._role_cover_target)
+        finally:
+            # 漏掉 reveal 会把界面永远留在幕布下面，必须无条件排上。
+            try:
+                self._role_reveal_job = self.root.after(
+                    520, self._role_cover_reveal)
+            except Exception:
+                self._role_transition = False
+
+    def _role_cover_reveal(self):
+        self._role_reveal_job = None
+        if not getattr(self, "_role_transition", False):
+            return
+        cover = getattr(self, "page_cover", None)
+        if cover is None:
+            self._role_transition = False
+            return
+        cover.reveal(self._role_cover_done)
+
+    def _role_cover_done(self):
+        self._role_reveal_job = None
+        self._role_transition = False
+
     def _set_role(self, role: str) -> None:
         """切换身份并落盘（弹窗与测试共用）。
 
@@ -830,6 +876,8 @@ class OnlineMixin:
 
     def _on_role_switch(self, role):
         """侧边栏滑块点了一下：成功才让滑块停在目标位置。"""
+        if getattr(self, "_role_transition", False):
+            return
         if getattr(self, "is_applying", False) or getattr(self, "online_busy",
                                                            False):
             self.toast("正在替换/同步，完成后再切换身份", "warning")
@@ -838,7 +886,7 @@ class OnlineMixin:
         if target == ("developer" if self.is_developer else "player"):
             return
         if target == "player":
-            self._set_role("player")
+            self._set_role_visual("player")
             self.set_status("已切换为玩家", "info")
             return
         if self.online is None:
@@ -853,7 +901,7 @@ class OnlineMixin:
             self._sidebar_collapse()
             self.open_identity_dialog()
             return
-        self._set_role("developer")
+        self._set_role_visual("developer")
         self.set_status("已切换为开发者", "success")
         self._sidebar_collapse()
         self.root.after(120, self._start_cloud_probe)
@@ -1019,7 +1067,7 @@ class OnlineMixin:
                 card.close(True)
             except Exception:
                 pass
-        self._set_role("developer")
+        self._set_role_visual("developer")
         self.log_manager.log("已切换为开发者身份", 'SUCCESS')
         self.toast("已切换为开发者", "success")
         self._refresh_preset_cards()
@@ -1045,7 +1093,7 @@ class OnlineMixin:
 
         def switch_back():
             card.close(True)
-            self._set_role("player")
+            self._set_role_visual("player")
             self.log_manager.log("已切换为玩家身份", 'INFO')
             self.toast("已切换为玩家", "info")
 
@@ -1058,7 +1106,7 @@ class OnlineMixin:
                 return
             self.online.logout(forget=True)
             card.close(True)
-            self._set_role("player")
+            self._set_role_visual("player")
             self.log_manager.log("已退出认证并清除本机凭据", 'INFO')
             self.toast("已退出认证", "info")
 
