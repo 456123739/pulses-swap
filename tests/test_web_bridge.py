@@ -92,9 +92,21 @@ class WebBridgeTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertEqual(result["error"]["code"], "NO_TACZ")
 
+    def test_drop_without_paths_emits_error(self):
+        result = self.api.handle_drop([])
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"]["code"], "NO_PATH")
+        event = self.wait_event("dnd.error")
+        self.assertIsNotNone(event)
+
     def test_cancel_job(self):
         job_id = self.jobs.submit("slow", lambda ctx: time.sleep(0.2))
         self.assertTrue(self.jobs.cancel(job_id))
+
+    def test_non_cancelable_job_rejects_cancel(self):
+        job_id = self.jobs.submit("fixed", lambda ctx: None, cancelable=False)
+        self.assertFalse(self.jobs.cancelable(job_id))
+        self.assertFalse(self.jobs.cancel(job_id))
 
     def test_event_pump_serializes_events(self):
         win = FakeWindow()

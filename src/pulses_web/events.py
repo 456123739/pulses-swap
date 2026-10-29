@@ -22,6 +22,7 @@ class Job:
     title: str
     cancel_event: threading.Event = field(default_factory=threading.Event)
     status: str = "queued"          # queued / running / done / error / cancelled
+    cancelable: bool = True
     created_at: float = field(default_factory=time.time)
     result: Any = None
     error: str = ""
@@ -144,18 +145,25 @@ class JobRunner:
             target=self._run, name="pulses-web-jobs", daemon=True)
         self._worker.start()
 
-    def submit(self, title: str, fn: Callable[["JobContext"], Any]) -> str:
-        job = Job(id="j_" + uuid.uuid4().hex[:10], title=title)
+    def submit(self, title: str, fn: Callable[["JobContext"], Any],
+               *, cancelable: bool = True) -> str:
+        job = Job(id="j_" + uuid.uuid4().hex[:10], title=title,
+                  cancelable=bool(cancelable))
         with self._lock:
             self._jobs[job.id] = job
         self.bus.emit("job.queued", {"title": title}, job_id=job.id)
         self._queue.put((job, fn))
         return job.id
 
+    def cancelable(self, job_id: str) -> bool:
+        with self._lock:
+            job = self._jobs.get(job_id)
+        return bool(job and job.cancelable)
+
     def cancel(self, job_id: str):
         with self._lock:
             job = self._jobs.get(job_id)
-        if job is not None:
+        if job is not None and job.cancelable:
             job.cancel_event.set()
             self.bus.emit("job.cancelling", {}, job_id=job_id)
             return True
