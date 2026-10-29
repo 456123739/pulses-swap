@@ -40,6 +40,16 @@ jobs:
             throw "前端产物没有打进 exe 目录"
           }
           Write-Host ("exe: {0:N1} MB" -f ((Get-Item $exe).Length / 1MB))
+      - name: 启动冒烟（隐藏窗口）
+        shell: pwsh
+        run: |
+          $p = Start-Process "dist/PulsesSwap/PulsesSwap.exe" -PassThru
+          Start-Sleep -Seconds 8
+          if ($p.HasExited) {
+            throw "打包产物提前退出，exit code = $($p.ExitCode)"
+          }
+          Stop-Process -Id $p.Id -Force
+          Write-Host "OK: 打包产物启动并持续运行"
       - name: 安装 Inno Setup
         run: choco install innosetup --no-progress -y
       - name: 下载 WebView2 Bootstrapper

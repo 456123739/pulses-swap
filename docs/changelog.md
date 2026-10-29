@@ -1,5 +1,26 @@
 # 更新日志
 
+## v3.0.0（2026-10-30）
+
+### 架构
+- 新增 `feature/webview` 分支：UI 从 customtkinter 迁移到 **PyWebView 6.2.1 + React 19 + Vite + Motion**。
+- 保留 `PresetManager`、`OnlineService`、diff/manifest/publisher/hashing 等核心；新增 `pulses_web/controller.py` 作为无 UI 应用层，不重写业务算法。
+- `js_api` 只暴露 `invoke` / `pick_folder` / `handle_drop`；所有修改型操作进入单写者 `JobRunner`，后台线程执行，`EventPump` 通过 `evaluate_js` 推送进度与结果。
+- 本地前端通过 PyWebView 内置 HTTP server 加载，不使用 CDN；DND 走 `window.dom` 的 `pywebviewFullPath`，支持文件夹路径。
+- Windows 使用 WebView2，安装器随包提供 Bootstrapper；PyInstaller 打包前端 `dist` 和 WebView2 依赖。
+
+### UI / 动效
+- 严格还原原有信息架构：60/200 折叠侧栏、首页/管理/设置/日志、底部状态条。
+- Inter + Manrope 字体、玻璃卡片、柔和环境渐变、紧凑统计卡；页面不空旷，也不堆叠。
+- 页面/身份切换保留完整 `Pulses Swap` 长字标幕布；身份切换在幕布下完成主题和可用操作更新。
+- 按钮按压缩放、列表入场、Modal/Toast 弹簧、进度条单调平滑；`prefers-reduced-motion` 降级。
+- 侧栏展开时内容区同步让位，避免 Tk 老版本中常见的文字裁剪。
+
+### 验证
+- 200 个 Python 单元测试通过（原 194 + 6 个 Web bridge/DND/事件测试）。
+- `ui_process_check`、`anim_invariants` 等原有 Tk 回归继续保留；React 端 `test-ui.mjs` 检查首页/侧栏/幕布/设置/日志/DND/三档窗口尺寸，全部通过。
+- Windows GitHub Actions：PyInstaller、WebView2 Bootstrapper、Inno Setup、绿色版、启动冒烟；Linux PyInstaller/tar；源码包与 Release。
+
 ## v2.7.9（2026-10-29）
 
 ### 覆盖层字标重做

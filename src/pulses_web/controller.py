@@ -34,6 +34,17 @@ except Exception:                       # 打包缺 online 时仍允许只读功
     diff = None
 
 
+def _locked(fn):
+    """串行化会改状态的 controller 入口（RLock 允许内部递归调用）。"""
+    from functools import wraps
+
+    @wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        with self.lock:
+            return fn(self, *args, **kwargs)
+    return wrapper
+
+
 class LogBus:
     """核心类需要的 `.log(message, level, verbose=...)` 接口。"""
 
@@ -217,6 +228,7 @@ class AppController:
     # ------------------------------------------------------------------
     # 整合包 / 预设
     # ------------------------------------------------------------------
+    @_locked
     def open_pack(self, pack_path: str):
         root = Path(pack_path).expanduser().resolve()
         tacz = root / "tacz"
@@ -262,6 +274,7 @@ class AppController:
                        "incremental_count": 0}, f, indent=2, ensure_ascii=False)
         pm.save_cache()
 
+    @_locked
     def close_pack(self):
         self._stop_watcher()
         self.pack_path = None
@@ -271,6 +284,7 @@ class AppController:
         self.last_plan = None
         self._init_online(paths.DEFAULT_DB_DIR)
 
+    @_locked
     def select_preset(self, name: str):
         if not self.preset_manager or name not in self.preset_manager.presets:
             raise ValueError("预设不存在")
@@ -282,6 +296,7 @@ class AppController:
         self._rev += 1
         return self.state()
 
+    @_locked
     def create_preset(self, name: str, version: str = "v1.0.0"):
         if not self.preset_manager:
             raise ValueError("请先加载整合包")
@@ -290,6 +305,7 @@ class AppController:
         self.selected = name
         return self._refresh_after_mutation()
 
+    @_locked
     def rename_preset(self, old: str, new: str):
         if not self.preset_manager:
             raise ValueError("请先加载整合包")
@@ -304,6 +320,7 @@ class AppController:
             self.selected = new
         return self._refresh_after_mutation()
 
+    @_locked
     def delete_preset(self, name: str):
         if not self.preset_manager:
             raise ValueError("请先加载整合包")
@@ -318,11 +335,13 @@ class AppController:
             self.selected = next(iter(self.preset_manager.presets), None)
         return self._refresh_after_mutation()
 
+    @_locked
     def save_version(self, name: str, version: str):
         if not self.preset_manager or not self.preset_manager.update_preset_version(name, version):
             raise ValueError("版本保存失败")
         return self._refresh_after_mutation()
 
+    @_locked
     def apply_preset(self, name: str, ctx=None):
         pm = self.preset_manager
         if not pm:
@@ -383,6 +402,7 @@ class AppController:
             raise RuntimeError("在线模块不可用")
         return self.online
 
+    @_locked
     def login(self, username: str, password: str, remember=True):
         data = self._require_online().login(username, password, remember=remember)
         self.settings.role = "developer"
@@ -390,6 +410,7 @@ class AppController:
         self._rev += 1
         return {"account": data, "state": self.state()}
 
+    @_locked
     def logout(self, forget=True):
         if self.online:
             self.online.logout(forget=forget)
@@ -398,6 +419,7 @@ class AppController:
         self._rev += 1
         return self.state()
 
+    @_locked
     def switch_role(self, role: str):
         target = "developer" if str(role).startswith("dev") else "player"
         if target == "developer" and self.online and not self.online.has_account():
@@ -431,12 +453,14 @@ class AppController:
         info.pop("uid", None)
         return {"available": True, "account": info}
 
+    @_locked
     def bind_source(self, name: str, url: str, password: str = "", cloud_path=""):
         data = self._require_online().bind(
             name, url, password, cloud_path=cloud_path)
         self._rev += 1
         return {"source": data, "state": self.state()}
 
+    @_locked
     def unbind_source(self, name: str):
         self._require_online().unbind(name)
         self._rev += 1
@@ -447,6 +471,7 @@ class AppController:
         return PresetRef(name=name, path=info["path"],
                          root=info["path"], applied=bool(info.get("applied")))
 
+    @_locked
     def check(self, name: str, ctx=None):
         online = self._require_online()
         if not self.preset_manager or name not in self.preset_manager.presets:
@@ -487,6 +512,7 @@ class AppController:
             "clean": plan.is_clean,
         }
 
+    @_locked
     def sync(self, name: str, selection=None, ctx=None):
         online = self._require_online()
         plan = self.last_plan
@@ -516,6 +542,7 @@ class AppController:
         self._rev += 1
         return {"result": self._serialize(result), "state": self.state()}
 
+    @_locked
     def publish_plan(self, name: str, ctx=None):
         online = self._require_online()
         if self.role != "developer":
@@ -529,6 +556,7 @@ class AppController:
         self._rev += 1
         return {"plan": self._plan_summary(plan), "state": self.state()}
 
+    @_locked
     def publish(self, name: str, version: str, notes="", min_app="",
                 selection=None, ctx=None):
         online = self._require_online()
@@ -561,6 +589,7 @@ class AppController:
                     if not k.startswith("_")}
         return value
 
+    @_locked
     def set_database(self, path: str):
         target = Path(path).expanduser().resolve()
         target.mkdir(parents=True, exist_ok=True)
