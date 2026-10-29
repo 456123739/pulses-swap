@@ -321,3 +321,13 @@ h3 { font-size: 15px; font-weight: 600; }
 .chip.warning { color: var(--warning); background: #F7F2E5; }
 .chip.error { color: var(--error); background: #F7E8E8; }
 @media (max-width: 1050px) { .log-lower { grid-template-columns: 1fr; } }
+
+.drop-overlay { pointer-events: none; }
+.busy-toast { bottom: 76px; display: flex; align-items: center; gap: 10px; }
+.busy-toast .progress-wrap { flex: 1; }
+.busy-toast .cancel-job { flex: none; height: 26px; }
+.log-card, .path, .info-block strong { user-select: text; }
+.animations-off *, .animations-off *::before, .animations-off *::after {
+  animation-duration: .001ms !important;
+  transition-duration: .001ms !important;
+}

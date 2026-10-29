@@ -46,13 +46,19 @@ def _bind_drop(window, api: Api):
     try:
         window.dom.document.events.drop += DOMEventHandler(
             on_drop, prevent_default=True, stop_propagation=True)
+        # dragenter/dragover 不阻断冒泡：React 还要用它们显示覆盖层。
+        # drop 必须阻断冒泡，由 Python 拿 pywebviewFullPath 后统一处理。
         window.dom.document.events.dragenter += DOMEventHandler(
-            on_drag, prevent_default=True, stop_propagation=True)
+            on_drag, prevent_default=True)
         window.dom.document.events.dragover += DOMEventHandler(
-            on_drag, prevent_default=True, stop_propagation=True)
+            on_drag, prevent_default=True)
     except Exception:
-        # 某些 Linux 后端没有 DOM 支持；原生文件选择仍可用
-        pass
+        # 某些后端没有 DOM 支持；明确通知前端，避免遮罩闪一下却无动作。
+        try:
+            window.evaluate_js(
+                "window.PS && (window.PS.dndUnavailable = true);")
+        except Exception:
+            pass
 
 
 def main():

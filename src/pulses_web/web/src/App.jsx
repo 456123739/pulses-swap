@@ -93,9 +93,11 @@ function Modal({ modal, onClose }) {
   }
   return (
     <div className="modal-mask" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <motion.div className="modal-card" initial={{ opacity: 0, scale: 0.96, y: 10 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }} transition={{ type: 'spring', stiffness: 380, damping: 30 }}>
-        <div className="modal-head"><h3>{modal.title}</h3><button className="icon-btn" onClick={onClose}><Icon name="close" /></button></div>
+      <motion.div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title"
+        initial={{ opacity: 0, scale: 0.96, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+        onKeyDown={(e) => { if (e.key === 'Enter' && modal.kind === 'confirm') submit() }}>
+        <div className="modal-head"><h3 id="modal-title">{modal.title}</h3><button className="icon-btn" aria-label="关闭" onClick={onClose}><Icon name="close" /></button></div>
         {modal.body && <p className="modal-body">{modal.body}</p>}
         {modal.kind === 'prompt' && (
           <label className="field"><span>{modal.label || '名称'}</span>
@@ -124,7 +126,7 @@ function Toast({ toast }) {
   return (
     <AnimatePresence>
       {toast && (
-        <motion.div key={toast.id} className={`toast ${toast.kind || 'info'}`}
+        <motion.div key={toast.id} className={`toast ${toast.kind || 'info'}`} role="status" aria-live="polite"
           initial={{ opacity: 0, x: 30, scale: 0.97 }} animate={{ opacity: 1, x: 0, scale: 1 }}
           exit={{ opacity: 0, x: 20, scale: 0.98 }} transition={{ type: 'spring', stiffness: 420, damping: 32 }}>
           <span className="toast-dot" />{toast.message}
@@ -169,8 +171,8 @@ function Home({ snap, actions, busy }) {
         <div><span className="eyebrow">WORKSPACE</span><h1>枪包预设</h1></div>
         <div className="head-actions">
           <button className="btn ghost" onClick={openPack}><Icon name="folder" />选择整合包</button>
-          {snap.pack.loaded && <button className="btn primary" disabled={!selected || selected.applied || busy}
-            onClick={() => actions.apply(selected)}><Icon name="check" />{selected?.applied ? '已应用' : '一键替换'}</button>}
+          {snap.pack.loaded && <button className="btn primary" disabled={!selected || busy}
+            onClick={() => actions.apply(selected)}><Icon name="check" />{selected?.applied ? '重新替换' : '一键替换'}</button>}
         </div>
       </div>
 
@@ -241,10 +243,9 @@ function Home({ snap, actions, busy }) {
           <div className="quick-grid"><button className="quick" onClick={() => actions.select(snap.selected)}><Icon name="refresh" /><span>刷新当前预设</span></button>
             <button className="quick" onClick={() => actions.check(snap.selected)}><Icon name="cloud" /><span>检查云端更新</span></button>
             <button className="quick" onClick={() => actions.login}><Icon name="user" /><span>账号与身份</span></button>
-            <button className="quick" onClick={() => actions.updateSettings({})}><Icon name="settings" /><span>偏好设置</span></button></div>
+            <button className="quick" onClick={() => actions.navigate('settings')}><Icon name="settings" /><span>偏好设置</span></button></div>
         </section>
       </div>}
-      {busy && <div className="busy-strip"><Progress value={busy.progress} text={busy.text || busy.title} /></div>}
     </div>
   )
 }
@@ -258,6 +259,7 @@ function Manage({ snap, actions, busy }) {
   const [publishNotes, setPublishNotes] = useState('')
   const selected = snap.presets.find((p) => p.name === snap.selected)
   useEffect(() => { setUrl(snap.online.binding?.url || ''); setPassword(snap.online.binding?.password || '') }, [snap.online.binding?.url, snap.online.binding?.password])
+  useEffect(() => { setPublishVersion(selected?.version || '') }, [selected?.name, selected?.version])
   const plan = snap.plan
   const selectedPaths = selection ?? new Set((plan?.items || []).filter((i) => i.checked).map((i) => i.path))
   const toggle = (path) => {
@@ -304,7 +306,7 @@ function Manage({ snap, actions, busy }) {
           {plan && <span className="pill">{plan.summary}</span>}</div>
         {!plan ? <p className="muted pad">检查后会在这里显示云端差异</p> : <>
           {snap.role === 'developer' && <div className="publish-row">
-            <label className="field"><span>发布版本号</span><input value={publishVersion || selected?.version || ''} onChange={(e) => setPublishVersion(e.target.value)} placeholder="v1.0.0" /></label>
+            <label className="field"><span>发布版本号</span><input value={publishVersion} onChange={(e) => setPublishVersion(e.target.value)} placeholder={selected?.version || 'v1.0.0'} /></label>
             <label className="field"><span>发布说明</span><input value={publishNotes} onChange={(e) => setPublishNotes(e.target.value)} placeholder="可选" /></label>
           </div>}
           <div className="plan-list">{plan.items.map((item) => (
@@ -314,10 +316,10 @@ function Manage({ snap, actions, busy }) {
             </label>))}</div>
           <div className="button-row end">
             {snap.role === 'player'
-              ? <button className="btn primary" disabled={!selectedPaths.size || busy} onClick={() => actions.sync(selected.name, [...selectedPaths])}>同步选中</button>
+              ? <button className="btn primary" disabled={!selected || !selectedPaths.size || busy} onClick={() => actions.sync(selected.name, [...selectedPaths])}>同步选中</button>
               : snap.publish_ready
               ? <button className="btn primary" disabled={busy} onClick={() => actions.publish(selected.name, publishVersion || selected.version, publishNotes, [...selectedPaths])}>发布选中</button>
-              : <button className="btn primary" disabled={busy} onClick={() => actions.publishPlan(selected.name)}>生成发布计划</button>}
+              : <button className="btn primary" disabled={busy || !selected} onClick={() => actions.publishPlan(selected.name)}>生成发布计划</button>}
           </div>
         </>}
       </section>
@@ -337,7 +339,6 @@ function Manage({ snap, actions, busy }) {
           </div>
         </section>
       </div>
-      {busy && <div className="busy-strip"><Progress value={busy.progress} text={busy.text || busy.title} /></div>}
     </div>
   )
 }
@@ -359,9 +360,9 @@ function Settings({ snap, actions }) {
           {tab === 'general' && <div className="settings-stack">
             <section className="card"><div className="section-title"><span className="eyebrow">APPEARANCE</span><h2>外观与动效</h2></div>
               <div className="setting-row"><div><strong>界面动画</strong><span>关闭后所有过渡一帧到位</span></div>
-                <button className={`switch ${s.animations ? 'on' : ''}`} onClick={() => update({ animations: !s.animations })}><span /></button></div>
+                <button className={`switch ${s.animations ? 'on' : ''}`} role="switch" aria-checked={!!s.animations} aria-label="界面动画" onClick={() => update({ animations: !s.animations })}><span /></button></div>
               <div className="setting-row"><div><strong>同步方式</strong><span>完全同步会删除本地多余枪包</span></div>
-                <button className={`switch ${s.online_sync_clean ? 'on' : ''}`} onClick={() => update({ online_sync_clean: !s.online_sync_clean })}><span /></button></div>
+                <button className={`switch ${s.online_sync_clean ? 'on' : ''}`} role="switch" aria-checked={!!s.online_sync_clean} aria-label="完全同步" onClick={() => update({ online_sync_clean: !s.online_sync_clean })}><span /></button></div>
             </section>
             <section className="card"><div className="section-title"><span className="eyebrow">IDENTITY</span><h2>身份</h2></div>
               <div className="setting-row"><div><strong>用户身份</strong><span>开发者可以发布到云端</span></div>
@@ -370,9 +371,9 @@ function Settings({ snap, actions }) {
             </section>
             <section className="card"><div className="section-title"><span className="eyebrow">SYNC</span><h2>同步偏好</h2></div>
               <div className="setting-row"><div><strong>启动时检查更新</strong><span>只检查，不自动下载</span></div>
-                <button className={`switch ${s.online_auto_check ? 'on' : ''}`} onClick={() => update({ online_auto_check: !s.online_auto_check })}><span /></button></div>
+                <button className={`switch ${s.online_auto_check ? 'on' : ''}`} role="switch" aria-checked={!!s.online_auto_check} aria-label="启动时检查更新" onClick={() => update({ online_auto_check: !s.online_auto_check })}><span /></button></div>
               <div className="setting-row"><div><strong>完整更新前确认</strong><span>批量更新前先看差异</span></div>
-                <button className={`switch ${s.online_confirm_full ? 'on' : ''}`} onClick={() => update({ online_confirm_full: !s.online_confirm_full })}><span /></button></div>
+                <button className={`switch ${s.online_confirm_full ? 'on' : ''}`} role="switch" aria-checked={!!s.online_confirm_full} aria-label="完整更新前确认" onClick={() => update({ online_confirm_full: !s.online_confirm_full })}><span /></button></div>
             </section>
           </div>}
           {tab === 'database' && <section className="card"><div className="section-title"><span className="eyebrow">STORAGE</span><h2>数据库</h2></div>
@@ -411,7 +412,7 @@ function LogPage({ logs, snap }) {
     <div className="page-head"><div><span className="eyebrow">RUNTIME</span><h1>日志</h1></div>
       <span className="pill">{logs.length} 条记录</span></div>
     <div className="log-layout">
-      <section className="card log-card">{logs.length === 0 ? <div className="empty"><div className="empty-orbit" /><h3>暂无日志</h3><p>操作后这里会实时显示运行记录</p></div> : logs.map((l, i) =>
+      <section className="card log-card" aria-live="polite">{logs.length === 0 ? <div className="empty"><div className="empty-orbit" /><h3>暂无日志</h3><p>操作后这里会实时显示运行记录</p></div> : logs.map((l, i) =>
         <div className="log-line" key={`${l.time}-${i}`}><span className={`log-level ${l.level}`}>{l.level}</span><span className="log-time">{l.time}</span><span>{l.message}</span></div>)}
       </section>
       <aside className="log-side">
@@ -491,12 +492,22 @@ export default function App() {
         if (event.jobId !== jobIdRef.current) return
         setBusy(null)
         showToast(event.data?.message || '操作失败', 'error')
+      } else if (type === 'job.cancelled') {
+        if (event.jobId !== jobIdRef.current) return
+        setBusy(null)
+        showToast('操作已取消', 'info')
+        refresh()
       } else if (type === 'state.changed') {
         if (event.data?.state) setSnap(event.data.state)
       } else if (type === 'log.append') {
         setLogs((prev) => [...prev.slice(-799), event.data])
       } else if (type === 'dnd.consumed') {
         setDnd(false)
+        const jid = event.data?.jobId || event.jobId || ''
+        if (jid) {
+          jobIdRef.current = jid
+          setBusy({ title: '拖入整合包', progress: 0, text: '正在读取拖入的整合包…', jobId: jid })
+        }
       } else if (type === 'dnd.error') {
         setDnd(false)
         showToast(event.data?.message || '拖入失败', 'error')
@@ -504,11 +515,21 @@ export default function App() {
         refresh()
       }
     })
-    whenReady().then((ready) => {
-      if (!ready) { setBridgeError('桌面桥接尚未就绪，请从 PyWebView 启动'); return }
-      refresh()
-    })
-    return () => { alive = false; off() }
+    let retryTimer = null
+    const tryReady = () => {
+      whenReady().then((ready) => {
+        if (!alive) return
+        if (!ready) {
+          setBridgeError('桌面桥接尚未就绪，正在重试…')
+          retryTimer = setTimeout(tryReady, 900)
+          return
+        }
+        setBridgeError('')
+        refresh()
+      })
+    }
+    tryReady()
+    return () => { alive = false; off(); clearTimeout(retryTimer) }
   }, [refresh, showToast])
 
   useEffect(() => {
@@ -550,9 +571,18 @@ export default function App() {
       setBusy({ title, progress: 0, text: '准备中…' })
       const data = await invoke(method, params)
       jobIdRef.current = data?.jobId || ''
+      setBusy((prev) => prev ? { ...prev, jobId: jobIdRef.current } : prev)
       if (!jobIdRef.current) { setBusy(null); await refresh() }
     } catch (err) { setBusy(null); showToast(err.message, 'error') }
   }, [refresh, showToast])
+
+  const cancelJob = useCallback(async () => {
+    if (!busy?.jobId) return
+    try {
+      setBusy((prev) => prev ? { ...prev, text: '正在取消…' } : prev)
+      await invoke('job.cancel', { jobId: busy.jobId })
+    } catch (err) { showToast(err.message, 'error') }
+  }, [busy?.jobId, showToast])
 
   const openPack = useCallback((path) => startJob('pack.open', { path }, '打开整合包'), [startJob])
   const openDatabase = useCallback(async () => {
@@ -622,6 +652,8 @@ export default function App() {
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape') { setModal(null); return }
+      const tag = (e.target?.tagName || '').toLowerCase()
+      if (tag === 'input' || tag === 'textarea') return
       if ((e.metaKey || e.ctrlKey) && ['1', '2', '3', '4'].includes(e.key)) {
         e.preventDefault()
         const next = NAV[Number(e.key) - 1]?.key
@@ -645,14 +677,14 @@ export default function App() {
     setCover({ active: false, phase: 'idle' })
   }, [snap.role, cover.active, showToast])
 
-  const actions = { openPack, openDatabase, select, createPreset, rename, delete: remove, saveVersion, apply, bind, check, sync, publishPlan, publish, login, logout, updateSettings, switchRole, prompt, toast: showToast }
+  const actions = { openPack, openDatabase, select, createPreset, rename, delete: remove, saveVersion, apply, bind, check, sync, publishPlan, publish, login, logout, updateSettings, switchRole, prompt, toast: showToast, navigate, cancelJob }
   const pageEl = page === 'home' ? <Home snap={snap} actions={actions} busy={busy} />
     : page === 'manage' ? <Manage snap={snap} actions={actions} busy={busy} />
     : page === 'settings' ? <Settings snap={snap} actions={actions} />
     : <LogPage logs={logs} snap={snap} />
 
   return (
-    <div className={`app role-${snap.role} ${expanded ? 'sidebar-open' : ''}`}>
+    <div className={`app role-${snap.role} ${expanded ? 'sidebar-open' : ''} ${snap.settings?.animations === false ? 'animations-off' : ''}`}>
       <Sidebar page={page} onNavigate={(next) => { setExpanded(false); navigate(next) }} role={snap.role} expanded={expanded} setExpanded={setExpanded} version={snap.version} />
       <main className="workspace">
         <div className="content">
@@ -665,7 +697,8 @@ export default function App() {
           <Cover state={cover} />
           {dnd && <div className="drop-overlay"><div className="drop-inner"><Icon name="download" size={28} /><h2>松手导入</h2><p>拖入整合包文件夹，自动定位 tacz</p></div></div>}
           <Toast toast={toast} />
-          <AnimatePresence>{busy && <div className="busy-toast"><Progress value={busy.progress} text={busy.text || busy.title} /></div>}</AnimatePresence>
+          <AnimatePresence>{busy && <div className="busy-toast"><Progress value={busy.progress} text={busy.text || busy.title} />
+            <button className="btn small ghost cancel-job" disabled={!busy.jobId} onClick={actions.cancelJob}>取消</button></div>}</AnimatePresence>
         </div>
         <footer className="statusbar">
           <span className={`status-dot ${snap.pack.loaded ? 'ready' : ''}`} />

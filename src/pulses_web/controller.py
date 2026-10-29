@@ -74,6 +74,8 @@ class AppController:
         self.selected: str | None = None
         self.last_plan = None
         self.last_publish_plan = None
+        self._plan_owner = None
+        self._publish_owner = None
         self._rev = 0
         self._init_online()
         self.add_log(f"Pulses Swap Web {getattr(config, 'VERSION', '')}",
@@ -109,6 +111,26 @@ class AppController:
     def emit(self, kind, data=None, **kwargs):
         if self.bus is not None:
             self.bus.emit(kind, data, **kwargs)
+
+    def _owner(self, name):
+        return (str(name or ""), str(self.pack_path or ""),
+                str(self.db_path or ""))
+
+    def _clear_plans(self):
+        self.last_plan = None
+        self.last_publish_plan = None
+        self._plan_owner = None
+        self._publish_owner = None
+
+    def _plan_for(self, name):
+        if self.last_plan is None or self._plan_owner != self._owner(name):
+            return None
+        return self.last_plan
+
+    def _publish_for(self, name):
+        if self.last_publish_plan is None or self._publish_owner != self._owner(name):
+            return None
+        return self.last_publish_plan
 
     def add_log(self, message, level="INFO", verbose=True):
         entry = {"time": time.strftime("%H:%M:%S"), "message": str(message),
@@ -147,7 +169,9 @@ class AppController:
             account = self.online.account_info() if self.online else {}
             if account:
                 account.pop("uid", None)
-            plan = self._plan_summary(self.last_plan) if self.last_plan else None
+            plan = (self._plan_summary(self.last_plan)
+                    if self.last_plan and self._plan_owner == self._owner(self.selected)
+                    else None)
             return {
                 "revision": self._rev,
                 "version": getattr(config, "VERSION", ""),
@@ -168,7 +192,8 @@ class AppController:
                     "binding": self._binding_state(),
                 },
                 "plan": plan,
-                "publish_ready": bool(self.last_publish_plan),
+                "publish_ready": bool(self._publish_owner == self._owner(self.selected)
+                                     and self.last_publish_plan is not None),
                 "recent": self.recent.get_all()[:8],
                 "logs": list(self.logs)[-300:],
                 "settings": self._settings_state(),
@@ -236,6 +261,7 @@ class AppController:
             raise ValueError("未找到 tacz 文件夹，请选择整合包根目录")
         with self.lock:
             self.close_pack()
+            self._clear_plans()
             self.pack_path = root
             self.tacz_path = tacz
             self.db_path = self.settings.get_db_path(root)
@@ -281,13 +307,15 @@ class AppController:
         self.tacz_path = None
         self.preset_manager = None
         self.selected = None
-        self.last_plan = None
+        self._clear_plans()
         self._init_online(paths.DEFAULT_DB_DIR)
 
     @_locked
     def select_preset(self, name: str):
         if not self.preset_manager or name not in self.preset_manager.presets:
             raise ValueError("预设不存在")
+        if self.selected != name:
+            self._clear_plans()
         self.selected = name
         self._rev += 1
         return self.state()
@@ -318,6 +346,7 @@ class AppController:
                 pass
         if self.selected == old:
             self.selected = new
+        self._clear_plans()
         return self._refresh_after_mutation()
 
     @_locked
@@ -333,6 +362,7 @@ class AppController:
                 pass
         if self.selected == name:
             self.selected = next(iter(self.preset_manager.presets), None)
+        self._clear_plans()
         return self._refresh_after_mutation()
 
     @_locked
@@ -426,6 +456,7 @@ class AppController:
             raise ValueError("需要先登录蓝奏账号")
         self.settings.role = target
         self.settings.save()
+        self._clear_plans()
         self._rev += 1
         return self.state()
 
@@ -477,11 +508,13 @@ class AppController:
         if not self.preset_manager or name not in self.preset_manager.presets:
             raise ValueError("预设不存在")
         self.last_publish_plan = None
+        self._publish_owner = None
         plan = online.check(
             self._ref(name), role=self.role,
             on_phase=lambda text: ctx.progress(None, phase="check", message=text)
             if ctx else None)
         self.last_plan = plan
+        self._plan_owner = self._owner(name)
         self._rev += 1
         return {"plan": self._plan_summary(plan), "state": self.state()}
 
@@ -515,8 +548,10 @@ class AppController:
     @_locked
     def sync(self, name: str, selection=None, ctx=None):
         online = self._require_online()
-        plan = self.last_plan
-        if plan is None or not selection:
+        plan = self._plan_for(name)
+        if plan is None:
+            raise ValueError("当前差异计划不属于这个预设，请重新检查")
+        if not selection:
             if plan is None:
                 raise ValueError("请先检查差异")
             selection = [i.path for i in plan.items
@@ -553,6 +588,8 @@ class AppController:
             if ctx else None)
         self.last_publish_plan = plan
         self.last_plan = plan
+        self._publish_owner = self._owner(name)
+        self._plan_owner = self._owner(name)
         self._rev += 1
         return {"plan": self._plan_summary(plan), "state": self.state()}
 
@@ -562,9 +599,9 @@ class AppController:
         online = self._require_online()
         if self.role != "developer":
             raise PermissionError("只有开发者可以发布")
-        plan = getattr(self, "last_publish_plan", None)
+        plan = self._publish_for(name)
         if plan is None:
-            raise ValueError("请先预览发布差异")
+            raise ValueError("发布计划已过期，请重新生成")
         if not selection:
             selection = [i.path for i in plan.items
                          if i.action not in ("skip", "blocked")]
@@ -605,6 +642,7 @@ class AppController:
             self.add_log(f"数据库已切换：{target}", "SUCCESS")
             return self.state()
 
+    @_locked
     def update_settings(self, patch: dict):
         allowed = {"animations", "online_auto_check", "online_sync_clean",
                    "online_publish_preview", "online_confirm_full",

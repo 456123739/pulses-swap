@@ -378,3 +378,8 @@
 - React 前端 `test-ui.mjs`：首页/侧栏展开/页面幕布/设置/日志/DND/1280×900/1140×812/1600×1000；无 console error、无横向溢出。
 - Windows Actions 构建 PyInstaller、安装 WebView2 Bootstrapper、Inno Setup、绿色版，并做启动冒烟；Linux 构建 tar。
 - 视觉截图：`docs/web-ui/`；旧 2.7.9 的 Tk 截图保留不混用。
+
+## 20. 3.0.1 审计复测
+
+- 修复旧 plan 跨预设复用、DND 无进度/无错误、取消无入口、桥接超时永久错误态、设置开关无 aria、Ctrl 快捷键劫持输入框等问题。
+- 200 个 Python 单元测试通过；React `test-ui.mjs` 全部通过；Windows RC 构建 + 启动冒烟 + 安装器成功。
