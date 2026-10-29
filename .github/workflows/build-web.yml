@@ -1,0 +1,118 @@
+name: build-web
+
+on:
+  push:
+    tags: ["v3*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: 构建前端
+        working-directory: src/pulses_web/web
+        run: |
+          npm ci --include=dev
+          npm run build
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-web.txt pyinstaller
+      - name: PyInstaller
+        run: pyinstaller packaging/pulses_web.spec --noconfirm --clean
+      - name: 检查产物
+        shell: pwsh
+        run: |
+          $exe = "dist/PulsesSwap/PulsesSwap.exe"
+          if (-not (Test-Path $exe)) { throw "没有生成 $exe" }
+          if (-not (Test-Path "dist/PulsesSwap/_internal/pulses_web/web/dist/index.html")) {
+            throw "前端产物没有打进 exe 目录"
+          }
+          Write-Host ("exe: {0:N1} MB" -f ((Get-Item $exe).Length / 1MB))
+      - name: 安装 Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: 下载 WebView2 Bootstrapper
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" `
+            -OutFile "packaging/MicrosoftEdgeWebview2Setup.exe"
+      - name: 编译安装器
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}".TrimStart("v")
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            "packaging\installer.iss" "/DMyAppVersion=$v"
+      - name: 绿色版
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}".TrimStart("v")
+          $stage = "dist/portable/PulsesSwap-$v"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item "dist/PulsesSwap/*" $stage -Recurse -Force
+          Compress-Archive -Path $stage -DestinationPath "dist/portable/PulsesSwap-Portable-$v.zip" -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PulsesSwap-Web-Windows
+          path: |
+            dist/installer/*.exe
+            dist/portable/*.zip
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: 构建前端
+        working-directory: src/pulses_web/web
+        run: |
+          npm ci --include=dev
+          npm run build
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 安装依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-0 libwebkit2gtk-4.1-0
+          pip install -r requirements-web.txt pyinstaller
+      - name: PyInstaller
+        run: pyinstaller packaging/pulses_web.spec --noconfirm --clean
+      - name: 打包
+        run: |
+          cd dist && tar -czf PulsesSwap-linux-x86_64.tar.gz PulsesSwap
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PulsesSwap-Web-Linux
+          path: dist/PulsesSwap-linux-x86_64.tar.gz
+
+  release:
+    needs: [windows, linux]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - run: |
+          mkdir -p release
+          find artifacts -type f \( -name "*.exe" -o -name "*.zip" -o -name "*.tar.gz" \) -exec cp {} release/ \;
+          git archive --format=zip --prefix=PulsesSwap/ -o "release/PulsesSwap-src-${GITHUB_REF_NAME}.zip" HEAD
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Pulses Swap ${{ github.ref_name }}
+          generate_release_notes: true
+          files: release/*

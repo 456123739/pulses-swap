@@ -1,10 +1,10 @@
 ; Inno Setup 安装器脚本 —— 由 CI 在 Windows runner 上编译
-; 用法: iscc packaging\installer.iss /DMyAppVersion=2.7.9
+; 用法: iscc packaging\installer.iss /DMyAppVersion=3.0.0
 ; 输入: dist\PulsesSwap\  (PyInstaller 目录版产物)
 ; 输出: dist\installer\PulsesSwap-Setup-<version>.exe
 
 #ifndef MyAppVersion
-  #define MyAppVersion "2.7.9"
+  #define MyAppVersion "3.0.0"
 #endif
 
 #define MyAppName "Pulses Swap"
@@ -40,12 +40,38 @@ Name: "chinese"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加任务:"
 
+
+[Code]
+function WebView2RuntimeInstalled: Boolean;
+var
+  Value: string;
+begin
+  Result :=
+    RegQueryStringValue(HKLM, 'SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'pv', Value) or
+    RegQueryStringValue(HKCU, 'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'pv', Value) or
+    DirExists(ExpandConstant('{commonpf}\Microsoft\EdgeWebView\Application'));
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if (CurStep = ssPostInstall) and (not WebView2RuntimeInstalled) then
+    MsgBox('Pulses Swap 需要 Microsoft Edge WebView2 Runtime。' + #13#10 +
+           '请从 https://developer.microsoft.com/microsoft-edge/webview2/ 安装后重新启动程序。',
+           mbInformation, MB_OK);
+end;
+
 [Files]
 Source: "..\dist\PulsesSwap\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+#if FileExists(AddBackslash(SourcePath) + "MicrosoftEdgeWebview2Setup.exe")
+Source: "MicrosoftEdgeWebview2Setup.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
+#endif
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
+#if FileExists(AddBackslash(SourcePath) + "MicrosoftEdgeWebview2Setup.exe")
+Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; StatusMsg: "正在安装 WebView2 Runtime…"; Flags: waituntilterminated; Check: not WebView2RuntimeInstalled
+#endif
 Filename: "{app}\{#MyAppExeName}"; Description: "立即启动 {#MyAppName}"; Flags: nowait postinstall skipifsilent
