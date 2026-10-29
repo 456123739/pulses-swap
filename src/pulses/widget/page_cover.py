@@ -1,25 +1,26 @@
 """页面切换的 logo 覆盖层。
 
 切页不再把整页位图/控件树横向推走，而是先用一块纯色幕布盖住工作区，
-在幕布中央浮出品牌字标；页面在幕布下面完成切换和重排，再从中间
-把幕布向两侧拉开。
+在幕布中央浮出完整的 Pulses Swap 字标；页面在幕布下面完成切换和重排，
+再从中间把幕布向两侧收掉。
 
 为什么不是整块透明 Canvas：
   · Tk 的 Canvas 没有透明背景，幕布一旦移开就会露出 Canvas 底色；
   · 这里用两个原生 Frame 做左右幕布，中间留出的缝就是真正的页面；
-  · logo 单独放在一个与幕布同色的小 Canvas 上，背景完全融合，看不出矩形。
+  · 字标直接画在与幕布同色的小 Canvas 上，没有矩形底，天然融合。
 
 动画只移动原生 Frame / 小 Canvas，不碰页面控件树，也不抓截图。
 """
 from __future__ import annotations
 
 from tkinter import Canvas, Frame, Label
+from tkinter import font as tkfont
 
 from ..config import (
-    C_ACCENT, C_COVER_BG, C_COVER_MUTED, C_COVER_TEXT,
-    FONT_FAMILY,
+    C_ACCENT, C_COVER_ACCENT, C_COVER_BG, C_COVER_MUTED,
+    C_COVER_TEXT, FONT_FAMILY,
 )
-from ..utils import px, resource_path, tk_font
+from ..utils import px, tk_font
 from ..animation import (
     FPS_MOVE, cancel_tween, clamp01, ease_in_out_cubic, ease_linear,
     ease_out_back, ease_out_cubic, lerp_color, tween,
@@ -27,12 +28,13 @@ from ..animation import (
 
 
 class PageCover:
-    """覆盖在工作区上的纯色 logo 幕布。"""
+    """覆盖在工作区上的纯色字标幕布。"""
 
     COVER_MS = 250
-    LOGO_MS = 270
+    LOGO_MS = 280
     REVEAL_MS = 380
-    LOGO_PX = 112
+    WORD_SIZE = 44
+    TRACKING = 1
 
     def __init__(self, parent):
         self.parent = parent
@@ -46,37 +48,30 @@ class PageCover:
         self.panel = Frame(parent, bg=C_COVER_BG, bd=0, highlightthickness=0)
         self.left = Frame(parent, bg=C_COVER_BG, bd=0, highlightthickness=0)
         self.right = Frame(parent, bg=C_COVER_BG, bd=0, highlightthickness=0)
-        self.edge = Frame(parent, bg=C_ACCENT, bd=0, highlightthickness=0)
-        self.left_edge = Frame(parent, bg=C_ACCENT, bd=0, highlightthickness=0)
-        self.right_edge = Frame(parent, bg=C_ACCENT, bd=0, highlightthickness=0)
+        self.edge = Frame(parent, bg=C_COVER_ACCENT, bd=0, highlightthickness=0)
+        self.left_edge = Frame(parent, bg=C_COVER_ACCENT, bd=0, highlightthickness=0)
+        self.right_edge = Frame(parent, bg=C_COVER_ACCENT, bd=0, highlightthickness=0)
         for widget in (self.panel, self.left, self.right,
                        self.edge, self.left_edge, self.right_edge):
             widget.place_forget()
             widget.bind("<Button-1>", self._swallow)
             widget.bind("<ButtonRelease-1>", self._swallow)
 
-        # logo 单独一个小 Canvas：底色与大幕布完全相同，边缘不可见。
+        # 字标单独一个小 Canvas：底色与大幕布完全相同，只有文字像素。
         self.logo = Canvas(
             parent, bg=C_COVER_BG, highlightthickness=0, bd=0, takefocus=0)
         self.logo.place_forget()
         self.logo.bind("<Button-1>", self._swallow)
         self.logo.bind("<ButtonRelease-1>", self._swallow)
-        self._logo_w = max(48, px(self.LOGO_PX))
-        self._logo_h = max(28, int(round(self._logo_w * 0.52)))
-        self._logo_photo = None
-        self._logo_image_ok = False
-        self._logo_canvas_w = 1
-        self._logo_canvas_h = 1
 
-        self._logo_item = self.logo.create_image(0, 0, anchor="center")
-        self._fallback_text = self.logo.create_text(
-            0, 0, text="SW", anchor="center", fill=C_COVER_TEXT,
-            font=tk_font(FONT_FAMILY, 40, "bold"), state="hidden")
-        self._word = self.logo.create_text(
-            0, 0, text="PULSES SWAP", anchor="center",
-            fill=C_COVER_BG, font=tk_font(FONT_FAMILY, 13, "bold"))
-        self._rule = self.logo.create_line(
-            0, 0, 0, 0, fill=C_COVER_BG, width=max(1, px(1)))
+        self._font = tkfont.Font(
+            family=FONT_FAMILY, size=-max(18, px(self.WORD_SIZE)),
+            weight="normal")
+        self._tracking = max(0, px(self.TRACKING))
+        self._glyphs = []          # (canvas item, target color)
+        self._bar = None
+        self._build_wordmark()
+
         self.footer = Label(
             parent, text="PULSES 0 Studio · NimShade & DS",
             bg=C_COVER_BG, fg=C_COVER_MUTED,
@@ -84,9 +79,6 @@ class PageCover:
             highlightthickness=0, padx=0, pady=0)
         self.footer.place_forget()
         self.footer.bind("<Button-1>", self._swallow)
-
-        self._load_logo()
-        self._layout_logo_canvas()
 
         try:
             parent.bind("<Configure>", self._on_configure, add="+")
@@ -133,7 +125,7 @@ class PageCover:
               easing=ease_linear, fps=FPS_MOVE)
 
     def reveal(self, on_done=None):
-        """logo 先向上退场，随后左右幕布从中间拉开。"""
+        """字标先向上退场，随后左右幕布从中间缩窄。"""
         if not self._visible:
             if on_done is not None:
                 on_done()
@@ -150,20 +142,19 @@ class PageCover:
 
         def frame(_eased, raw):
             self._progress = clamp01(raw)
-            # 前半段：logo 向上退场。幕布仍完整，logo 底色与幕布同色。
+            # 前半段：字标向上退场。幕布仍完整，字标 Canvas 底色与幕布同色。
             logo_t = ease_out_cubic(min(1.0, self._progress / 0.42))
             self.logo.place_configure(
                 y=int(round(start_y - travel * logo_t)))
             if self._progress >= 0.42:
                 self.logo.place_forget()
-            # 后半段：左右幕布向两侧拉开，页面从中间露出来。
             if self._progress >= 0.16:
                 self.footer.place_forget()
+            # 后半段：左右幕布从中间缩窄，页面从中间露出来。
             split = ease_in_out_cubic(
                 clamp01((self._progress - 0.16) / 0.84))
             # 用“缩窄”而不是“整体向外移”：Tk 普通控件不会被父容器裁剪，
-            # 半幕移出 page_host 会盖到侧栏或状态条上。宽度从中间向两边
-            # 收掉，视觉上仍是幕布从中间拉开，但任何一帧都不会越界。
+            # 半幕移出 page_host 会盖到侧栏或状态条上。
             half = self._w // 2
             shift = int(round(half * split))
             self.left.place_configure(
@@ -208,7 +199,6 @@ class PageCover:
         if not self._visible:
             return
         if self._phase == "revealing":
-            # 窗口在动画中被缩放：按当前进度重画，避免半幕停在旧位置。
             self._show_halves()
         elif self._phase in ("covering", "holding"):
             self._place_cover(self._progress)
@@ -258,34 +248,60 @@ class PageCover:
         if self._visible and self._phase in ("holding", "revealing"):
             self.logo.tk.call("raise", self.logo._w)
 
-    def _layout_logo_canvas(self):
-        """按字标大小排一个刚刚好的小 Canvas，留出足够留白。"""
-        pad_top = px(30)
-        self._logo_cy = pad_top + self._logo_h // 2
-        self._word_y = self._logo_cy + self._logo_h // 2 + px(22)
-        self._rule_y = self._word_y + px(20)
-        self._logo_canvas_w = max(px(260), self._logo_w + px(96))
-        self._logo_canvas_h = self._rule_y + px(26)
-        self.logo.configure(width=self._logo_canvas_w,
-                            height=self._logo_canvas_h)
-        self._place_logo(0)
+    # ------------------------------------------------------------------
+    # 字标
+    # ------------------------------------------------------------------
+    def _build_wordmark(self):
+        """排一个长条形字标：细竖线 + Pulses Swap。
+
+        逐字 draw 是为了自己控制字距；Tk Canvas 的 text 没有 letter-spacing。
+        “Pulses” 用暖白，“Swap” 用低饱和青，读起来是一个完整的名字而不是缩写。
+        """
+        tracking = self._tracking
+        gap = self._font.measure(" ") + px(5)
+        letters = []
+        for word, color in (("Pulses", C_COVER_TEXT),
+                            ("Swap", C_COVER_ACCENT)):
+            for ch in word:
+                letters.append([ch, self._font.measure(ch), color])
+        word_w = sum(item[1] for item in letters) + tracking * (len(letters) - 1)
+        lock_w = word_w + gap
+        bar_w = max(2, px(2))
+        bar_gap = px(18)
+        canvas_w = max(px(360), lock_w + bar_w + bar_gap + px(96))
+        canvas_h = max(px(86), px(self.WORD_SIZE) + px(42))
+        self._logo_canvas_w = canvas_w
+        self._logo_canvas_h = canvas_h
+        self.logo.configure(width=canvas_w, height=canvas_h)
+
+        left = (canvas_w - (bar_w + bar_gap + lock_w)) // 2
+        bar_x = left
+        cy = canvas_h // 2
+        self._bar = self.logo.create_rectangle(
+            bar_x, cy - px(23), bar_x + bar_w, cy + px(23),
+            fill=C_COVER_BG, outline="")
+        x = bar_x + bar_w + bar_gap
+        for index, (ch, width, color) in enumerate(letters):
+            item = self.logo.create_text(
+                x, cy, text=ch, anchor="w",
+                fill=C_COVER_BG, font=self._font)
+            self._glyphs.append((item, color, x))
+            x += width + tracking
+            if index == 5:          # Pulses 与 Swap 之间留呼吸
+                x += gap
+        self._logo_y_center = cy
+        self._logo_left = left
 
     def _logo_y(self):
-        return int(round(self._h / 2 - self._logo_cy))
+        return int(round(self._h / 2 - self._logo_canvas_h / 2))
 
     def _logo_x(self):
         return int(round((self._w - self._logo_canvas_w) / 2))
 
     def _show_logo(self):
-        if self._logo_image_ok:
-            self.logo.itemconfigure(self._logo_item, state="normal")
-        else:
-            self.logo.itemconfigure(self._fallback_text, state="normal")
-        self._place_logo(0)
-        self.logo.itemconfigure(self._word, state="normal")
-        self.logo.itemconfigure(self._rule, state="normal")
-        self.logo.itemconfigure(self._word, fill=C_COVER_BG)
-        self.logo.itemconfigure(self._rule, fill=C_COVER_BG)
+        self.logo.itemconfigure(self._bar, state="normal", fill=C_COVER_BG)
+        for item, _color, _x in self._glyphs:
+            self.logo.itemconfigure(item, state="normal", fill=C_COVER_BG)
         self.logo.place(x=self._logo_x(), y=self._logo_y(),
                         width=self._logo_canvas_w,
                         height=self._logo_canvas_h)
@@ -294,17 +310,21 @@ class PageCover:
         self.footer.lift()
 
     def _set_logo_final_colors(self):
-        self.logo.itemconfigure(self._word, fill=C_COVER_TEXT)
-        self.logo.itemconfigure(self._rule, fill=C_ACCENT)
+        self.logo.itemconfigure(self._bar, fill=C_COVER_ACCENT)
+        for item, color, _x in self._glyphs:
+            self.logo.itemconfigure(item, fill=color)
         self.footer.configure(fg=C_COVER_MUTED)
 
     def _hide_logo(self):
-        for item in (self._logo_item, self._fallback_text,
-                     self._word, self._rule):
+        for item, _color, _x in self._glyphs:
             try:
                 self.logo.itemconfigure(item, state="hidden")
             except Exception:
                 pass
+        try:
+            self.logo.itemconfigure(self._bar, state="hidden")
+        except Exception:
+            pass
         self.logo.place_forget()
         self.footer.place_forget()
 
@@ -315,26 +335,24 @@ class PageCover:
         except Exception:
             pass
 
-    def _place_logo(self, offset=0):
-        cx = self._logo_canvas_w // 2
-        cy = self._logo_cy + int(offset)
-        self.logo.coords(self._logo_item, cx, cy)
-        self.logo.coords(self._fallback_text, cx, cy)
-        self.logo.coords(self._word, cx, self._word_y + int(offset))
-        self.logo.coords(self._rule, cx - px(18), self._rule_y + int(offset),
-                         cx + px(18), self._rule_y + int(offset))
-
     def _logo_in(self):
-        start = px(9)
+        start = px(8)
 
         def frame(_eased, raw):
-            # 字标从下往上轻轻落位；文字从幕布色淡入，图片本身直接出现。
-            self._place_logo(int(round(start * (1.0 - ease_out_back(raw, 0.8)))))
+            # 字标从下往上轻轻落位；每个字从幕布色淡入。
+            dy = int(round(start * (1.0 - ease_out_back(raw, 0.8))))
+            cy = self._logo_y_center + dy
+            bar_x = self._logo_left
+            self.logo.coords(
+                self._bar, bar_x, cy - px(23),
+                bar_x + max(2, px(2)), cy + px(23))
             mix = min(1.0, raw * 3.4)
+            for item, color, x in self._glyphs:
+                self.logo.coords(item, x, cy)
+                self.logo.itemconfigure(
+                    item, fill=lerp_color(C_COVER_BG, color, mix))
             self.logo.itemconfigure(
-                self._word, fill=lerp_color(C_COVER_BG, C_COVER_TEXT, mix))
-            self.logo.itemconfigure(
-                self._rule, fill=lerp_color(C_COVER_BG, C_ACCENT, mix))
+                self._bar, fill=lerp_color(C_COVER_BG, C_COVER_ACCENT, mix))
 
         frame(0.0, 0.0)
         tween(self.parent, "page_logo", self.LOGO_MS, frame,
@@ -348,46 +366,6 @@ class PageCover:
                        self.edge, self.left_edge, self.right_edge):
             widget.place_forget()
         self._hide_logo()
-
-    # ------------------------------------------------------------------
-    # 资源
-    # ------------------------------------------------------------------
-    def _load_logo(self):
-        """读取 icon.png，并把深色圆角底去掉，只留 S/W 字标。
-
-        直接把整块 icon 贴上来会看到一圈深色方块，和幕布底色对不上。
-        这里按亮度把背景像素做成透明，字标边缘保留抗锯齿；这样 logo
-        是“长在”幕布上的，没有拼接矩形。
-        """
-        try:
-            from PIL import Image
-            from PIL import ImageTk
-            path = resource_path("icon.png")
-            img = Image.open(path).convert("RGBA")
-            cleaned = []
-            for r, g, b, alpha in img.getdata():
-                # 图标背景是深墨绿（最大通道约 68）；S/W 是白色/浅青，
-                # 最大通道 > 100。窄窄一段过渡用来保留字形抗锯齿。
-                strength = max(0.0, min(1.0, (max(r, g, b) - 84) / 32.0))
-                cleaned.append((r, g, b, int(alpha * strength)))
-            img.putdata(cleaned)
-            # 只按“真正有字”的 alpha 取边界：背景里残留的极淡像素
-            # 会把 bbox 撑回整块 512 方图，字标就会被缩得很小。
-            solid = img.getchannel("A").point(lambda v: 255 if v > 18 else 0)
-            box = solid.getbbox()
-            if box:
-                img = img.crop(box)
-            width = self._logo_w
-            ratio = width / max(1, img.width)
-            img = img.resize(
-                (width, max(1, int(round(img.height * ratio)))),
-                Image.LANCZOS)
-            self._logo_w, self._logo_h = img.size
-            self._logo_photo = ImageTk.PhotoImage(img)
-            self.logo.itemconfigure(self._logo_item, image=self._logo_photo)
-            self._logo_image_ok = True
-        except Exception:
-            self._logo_image_ok = False
 
     def _swallow(self, _event=None):
         return "break"

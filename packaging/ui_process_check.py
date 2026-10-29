@@ -262,7 +262,26 @@ check("露布中改目标：下一轮补上，不叠动画",
       app.active_page == "log" and app.stack.current == "log"
       and not cover.visible, (app.active_page, app.stack.current, cover.phase))
 app.show_page("home")
-pump(1100)
+pump(1400)
+
+print("== 4b. 切换身份：完整字标幕布盖住，身份在下面切换 ==")
+app._set_role_visual("developer")
+role_cover = app.page_cover
+pump(120)
+check("身份切换使用了 logo 幕布", role_cover.visible, role_cover.phase)
+check("幕布完全盖住前不提前改身份", app.settings.role == "player",
+      app.settings.role)
+ok = wait_until(lambda: not role_cover.visible, 4.0)
+check("身份在幕布下切到开发者",
+      ok and app.settings.role == "developer",
+      (app.settings.role, role_cover.phase))
+app._set_role_visual("player")
+pump(120)
+check("切回玩家也使用 logo 幕布", role_cover.visible, role_cover.phase)
+ok = wait_until(lambda: not role_cover.visible, 4.0)
+check("身份切回玩家并撤掉幕布",
+      ok and app.settings.role == "player",
+      (app.settings.role, role_cover.phase))
 
 print("== 5. 预设详情弹窗：首帧尺寸、内容、选项卡选中 ==")
 app.open_preset_detail("Beta", tab="source")

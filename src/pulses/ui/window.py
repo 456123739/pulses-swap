@@ -646,6 +646,8 @@ class WindowMixin:
         self._page_transition = None
         self._page_pending = None
         self._page_reveal_job = None
+        self._role_transition = False
+        self._role_reveal_job = None
 
         # 全局状态条：固定高度，永远只显示一行；进度条出现/消失不改变布局
         self.status_bar = ctk.CTkFrame(self.content_col,
@@ -1154,6 +1156,8 @@ class WindowMixin:
         已经露出时再排下一次切换。动画关闭时直接走无动画路径。
         """
         if name not in self.pages:
+            return
+        if getattr(self, "_role_transition", False):
             return
         if not animate:
             self._cancel_page_transition()

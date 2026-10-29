@@ -1,4 +1,4 @@
-# Pulses Swap 交接文档（v2.7.8）
+# Pulses Swap 交接文档（v2.7.9）
 
 > 给接手的人 / AI 看的：这个软件被拆成了哪些文件、每个文件干什么、
 > 数据怎么流动、改哪里、怎么跑测试、怎么打包。
@@ -12,7 +12,7 @@
 一键把某组枪包换进游戏的 `tacz` 目录；同时把预设发布到**蓝奏云**，
 玩家绑定分享链接后可以增量同步。
 
-- 版本：`2.7.8`（`src/pulses/core/paths.py` 里的 `VERSION`）
+- 版本：`2.7.9`（`src/pulses/core/paths.py` 里的 `VERSION`）
 - 入口：`src/main.py` → `pulses.ui.app.main()`
 - 依赖：`customtkinter` `tkinterdnd2` `watchdog` `Pillow`（见 `requirements.txt`）
 - 不依赖任何第三方网络库（HTTP 全用标准库 `urllib`）
@@ -578,3 +578,11 @@ export DISPLAY=:99          # weston headless + Xwayland
 4. **页面必须在幕布下切换**：`_page_covered()` 里先 `_apply_page()`（`stack.show(animate=False)` + settings/manage 刷新），再留 520ms 给布局；不要在幕布还没盖住时先切页面。
 5. **快速连点不能叠动画**：覆盖阶段只记 `_page_pending`，盖住后一次到位；露布阶段的新目标在本轮 `_page_revealed()` 后再起一轮，不能同时开两条 reveal。
 6. **logo 居中与留白**：字标中心固定 `h/2`，不要按整块文字组的视觉中心去偏；`PULSES 0 Studio · NimShade & DS` 固定在底部 `h-34`，不要塞进字标 Canvas 里，否则小屏会被挤到字标下方。
+
+## v2.7.9 新增坑位（务必保留）
+
+1. **字标不是 icon 贴图**：`PageCover._build_wordmark()` 用 `tkfont.Font.measure()` 逐字定位，`Pulses` 暖白、`Swap` 低饱和青，左侧细竖线；Canvas 底色与幕布同色，只有文字像素。不要把 `icon.png` 的 SW 块重新贴回来。
+2. **字标居中按字标 Canvas 算**：`_logo_y()` 用 `h/2 - canvas_h/2`，字标 Canvas 内文字按中心排；底部 `PULSES 0 Studio · NimShade & DS` 固定在 `h-34`，不要塞回字标 Canvas。
+3. **身份动画只包 UI 入口**：`_set_role_visual()` 负责 cover → `_set_role()` → 520ms → reveal；`_set_role()` 必须保持同步，`online_e2e`/后台/测试都直接调用它。不要把动画塞进 `_set_role()` 本身。
+4. **身份幕布期间禁止切页**：`show_page()` 在 `_role_transition` 时直接返回；否则 page cover 的 `cancel()` 会取消 identity cover，`_role_transition` 永远悬着。
+5. **页面幕布可见时身份切换退回即时**：`_set_role_visual()` 检测 `page_cover.visible`，避免第二条幕布抢同一个 Canvas/Frame；页面幕布结束后的身份切换才走完整动画。
