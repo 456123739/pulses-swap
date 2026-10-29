@@ -34,7 +34,9 @@ function Cover({ state }) {
     <div className={`cover cover-${state.phase}`} aria-hidden="true">
       <div className="cover-panel cover-left" />
       <div className="cover-panel cover-right" />
+      <div className="cover-aura" />
       <div className="cover-brand">
+        <span className="cover-kicker">{state.note || 'PULSES SWAP'}</span>
         <Logo />
         <div className="cover-credit">PULSES 0 Studio · NimShade &amp; DS</div>
       </div>
@@ -45,7 +47,7 @@ function Cover({ state }) {
 function Progress({ value, text }) {
   return (
     <div className="progress-wrap" role="progressbar" aria-valuemin="0" aria-valuemax="100"
-      aria-valuenow={Math.round(value || 0)}>
+      aria-valuenow={Math.round(value || 0)} aria-valuetext={text || undefined}>
       <div className="progress-track"><span style={{ transform: `scaleX(${Math.max(0.015, (value || 0) / 100)})` }} /></div>
       <span className="progress-label">{text}</span>
     </div>
@@ -84,7 +86,15 @@ function Modal({ modal, onClose }) {
   const [value, setValue] = useState(modal?.value || '')
   const [password, setPassword] = useState('')
   const submitted = useRef(false)
-  useEffect(() => { setValue(modal?.value || ''); setPassword(''); submitted.current = false }, [modal])
+  const cardRef = useRef(null)
+  const previousFocus = useRef(null)
+  useEffect(() => {
+    setValue(modal?.value || ''); setPassword(''); submitted.current = false
+    if (!modal) return undefined
+    previousFocus.current = document.activeElement
+    const timer = setTimeout(() => cardRef.current?.focus(), 0)
+    return () => { clearTimeout(timer); previousFocus.current?.focus?.() }
+  }, [modal])
   if (!modal) return null
   const submit = () => {
     if (submitted.current) return
@@ -96,10 +106,20 @@ function Modal({ modal, onClose }) {
   }
   return (
     <div className="modal-mask" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
-      <motion.div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title"
+      <motion.div ref={cardRef} tabIndex={-1} className="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title"
         initial={{ opacity: 0, scale: 0.96, y: 10 }} animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ type: 'spring', stiffness: 380, damping: 30 }}
-        onKeyDown={(e) => { if (e.key === 'Enter' && modal.kind === 'confirm') submit() }}>
+        onKeyDown={(e) => {
+          if (e.key === 'Tab') {
+            const focusables = [...e.currentTarget.querySelectorAll('button, input, [href]')].filter((n) => !n.disabled)
+            if (!focusables.length) return
+            const first = focusables[0], last = focusables[focusables.length - 1]
+            if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() }
+            else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
+          } else if (e.key === 'Enter' && modal.kind === 'confirm' && e.target.tagName !== 'BUTTON') {
+            e.preventDefault(); submit()
+          }
+        }}>
         <div className="modal-head"><h3 id="modal-title">{modal.title}</h3><button className="icon-btn" aria-label="关闭" onClick={onClose}><Icon name="close" /></button></div>
         {modal.body && <p className="modal-body">{modal.body}</p>}
         {modal.kind === 'prompt' && (
@@ -160,8 +180,26 @@ function PresetRow({ item, selected, onSelect, onRename, onDelete }) {
 }
 
 function Home({ snap, actions, busy }) {
-  const [name, setName] = useState('')
   const selected = snap.presets.find((p) => p.name === snap.selected)
+  const animations = snap.settings?.animations !== false
+  const [celebrate, setCelebrate] = useState(false)
+  const wasApplied = useRef(Boolean(selected?.applied))
+  const lastName = useRef(selected?.name)
+  useEffect(() => {
+    const now = Boolean(selected?.applied)
+    if (lastName.current !== selected?.name) {
+      lastName.current = selected?.name
+      wasApplied.current = now
+      return undefined
+    }
+    if (!wasApplied.current && now) {
+      setCelebrate(true)
+      const timer = setTimeout(() => setCelebrate(false), 1500)
+      wasApplied.current = now
+      return () => clearTimeout(timer)
+    }
+    wasApplied.current = now
+  }, [selected?.applied, selected?.name])
   const openPack = async () => {
     try {
       const path = await pickFolder()
@@ -170,27 +208,21 @@ function Home({ snap, actions, busy }) {
   }
   return (
     <div className="page home-page">
-      <div className="page-head">
+      <div className="page-head home-head">
         <div><span className="eyebrow">WORKSPACE</span><h1>枪包预设</h1></div>
-        <div className="head-actions">
-          <button className="btn ghost" onClick={openPack}><Icon name="folder" />选择整合包</button>
-          {snap.pack.loaded && <button className="btn primary" disabled={!selected || busy}
-            onClick={() => actions.apply(selected)}><Icon name="check" />{selected?.applied ? '重新替换' : '一键替换'}</button>}
-        </div>
+        {snap.pack.loaded
+          ? <div className="pack-inline" title={snap.pack.path}>
+              <span className="status-dot ready" />
+              <div><strong>{snap.pack.name}</strong><span>{snap.pack.path}</span></div>
+              <button className="text-btn" onClick={openPack}>切换</button>
+            </div>
+          : <span className="pill">未加载整合包</span>}
       </div>
 
-      {snap.pack.loaded && (
-        <div className="stat-grid">
-          <div className="stat"><span>预设</span><strong>{snap.presets.length}</strong><small>已加载</small></div>
-          <div className="stat"><span>枪包</span><strong>{snap.gunpacks.length}</strong><small>当前预设</small></div>
-          <div className="stat"><span>云端</span><strong>{snap.online.binding?.url ? '已绑定' : '未绑定'}</strong><small>{snap.online.binding?.last_version || '—'}</small></div>
-          <div className="stat"><span>身份</span><strong>{snap.role === 'developer' ? '开发者' : '玩家'}</strong><small>{snap.online.account?.label || '本地模式'}</small></div>
-        </div>
-      )}
       {!snap.pack.loaded ? (
         <div className="hero-empty">
           <Empty title="还没有加载整合包" hint="把整合包文件夹拖进来，或手动选择包含 tacz 的目录">
-            <button className="btn primary" onClick={openPack}><Icon name="folder" />选择整合包</button>
+            <button className="btn xl primary" onClick={openPack}><Icon name="folder" size={20} />选择整合包</button>
           </Empty>
           {snap.recent?.length > 0 && <div className="recent"><span className="eyebrow">最近</span>
             {snap.recent.map((r) => <button key={r.path} className="recent-row" onClick={() => actions.openPack(r.path)}>
@@ -199,61 +231,93 @@ function Home({ snap, actions, busy }) {
         </div>
       ) : (
         <>
-          <section className="card pack-card">
-            <div className="card-head"><div><span className="eyebrow">CURRENT PACK</span><h2>{snap.pack.name}</h2></div>
-              <span className="pill">{snap.presets.length} 个预设</span></div>
-            <p className="muted path">{snap.pack.path}</p>
-            <div className="pack-meta"><span>TACZ · {snap.pack.tacz ? '已定位' : '未找到'}</span>
-              <button className="text-btn" onClick={openPack}>切换</button></div>
-          </section>
-          <div className="home-grid">
-          <section className="card presets-card">
-            <div className="card-head"><div><span className="eyebrow">PRESETS</span><h2>预设</h2></div>
-              <button className="btn small" onClick={() => actions.prompt('新建预设', '名称', '', (v) => actions.createPreset(v))}><Icon name="plus" />新建</button></div>
-            <div className="preset-list">
-              {snap.presets.length === 0 ? <p className="muted pad">还没有预设</p> : snap.presets.map((p) => (
-                <PresetRow key={p.name} item={p} selected={p.name === snap.selected}
-                  onSelect={actions.select} onRename={actions.rename} onDelete={actions.delete} />
-              ))}
+          <motion.section className="home-hero" aria-label="主要操作"
+            initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: animations ? 0.34 : 0, ease: [0.22, 1, 0.36, 1] }}>
+            <motion.div className="hero-copy" key={selected?.name || 'none'}
+              initial={animations ? { opacity: 0, y: 5 } : false} animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: animations ? 0.28 : 0, ease: [0.22, 1, 0.36, 1] }}>
+              <span className="eyebrow">SELECTED PRESET</span>
+              <div className="hero-title">
+                <h2>{selected ? selected.name : '选择一个预设'}</h2>
+                {selected && <span className={`pill ${selected.applied ? 'success' : ''}`}>{selected.applied ? '已应用' : '待替换'}</span>}
+              </div>
+              <p>{selected
+                ? (selected.applied ? '这个预设已经写入整合包。需要恢复枪包时，可以重新替换。' : '把预设里的枪包写入当前整合包，替换前会再确认一次。')
+                : '从左侧预设列表选一个，再执行替换。'}</p>
+              <div className="hero-facts">
+                <span><b>{selected?.version || '—'}</b> 版本</span>
+                <span><b>{selected?.count ?? 0}</b> 个枪包</span>
+                <span><b>{snap.online.binding?.url ? '已绑定' : '未绑定'}</b> 云端</span>
+              </div>
+            </motion.div>
+            <div className="hero-actions">
+              <button className={`btn hero-primary ${celebrate ? 'is-applied' : ''}`} disabled={!selected || busy}
+                onClick={() => selected && actions.apply(selected)}>
+                <Icon name="check" size={21} />{celebrate ? '已应用' : (selected?.applied ? '重新替换' : '一键替换')}
+              </button>
+              <button className="btn hero-secondary" onClick={openPack}>
+                <Icon name="folder" size={17} />选择整合包
+              </button>
             </div>
-          </section>
+            {busy && <div className="hero-progress"><Progress value={busy.progress} text={busy.text || busy.title} /></div>}
+          </motion.section>
 
-          <section className="card detail-card">
-            <div className="card-head"><div><span className="eyebrow">DETAIL</span><h2>{selected?.name || '未选择'}</h2></div>
-              {selected && <span className={`pill ${selected.applied ? 'success' : ''}`}>{selected.applied ? '已应用' : '未应用'}</span>}</div>
-            {selected ? <>
-              <div className="detail-row"><span>版本</span><strong>{selected.version}</strong>
-                <button className="text-btn" onClick={() => actions.prompt('修改版本号', '版本号', selected.version, (v) => actions.saveVersion(selected.name, v))}>修改</button></div>
-              <div className="detail-row"><span>云端</span><strong>{snap.online.binding?.url ? '已绑定' : '未绑定'}</strong></div>
-              <div className="gunpack-head"><span>枪包列表</span><span className="muted">共 {snap.gunpacks.length} 个</span></div>
-              <div className="gunpack-list">
-                {snap.gunpacks.length === 0 ? <p className="muted pad">这个预设还没有枪包</p> : snap.gunpacks.map((g) => (
-                  <div className="gunpack-row" key={g.name}><Icon name="folder" size={15} /><span>{g.name}</span>
-                    <span className="muted">{g.type || 'zip'}</span></div>
+          <div className="home-grid">
+            <section className="card presets-card">
+              <div className="card-head">
+                <div><span className="eyebrow">PRESETS</span><h2>预设 <span className="count-badge">{snap.presets.length}</span></h2></div>
+                <button className="btn small" onClick={() => actions.prompt('新建预设', '名称', '', (v) => actions.createPreset(v))}><Icon name="plus" />新建</button>
+              </div>
+              <div className="preset-list">
+                {snap.presets.length === 0 ? <p className="muted pad">还没有预设</p> : snap.presets.map((p) => (
+                  <PresetRow key={p.name} item={p} selected={p.name === snap.selected}
+                    onSelect={actions.select} onRename={actions.rename} onDelete={actions.delete} />
                 ))}
               </div>
-            </> : <p className="muted pad">从左侧选择一个预设</p>}
-          </section>
+            </section>
+
+            <motion.section className="card detail-card" key={selected?.name || 'none'}
+              initial={animations ? { opacity: 0, y: 7 } : false} animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: animations ? 0.28 : 0, ease: [0.22, 1, 0.36, 1] }}>
+              <div className="card-head"><div><span className="eyebrow">DETAIL</span><h2>{selected?.name || '未选择'}</h2></div>
+                {selected && <span className={`pill ${selected.applied ? 'success' : ''}`}>{selected.applied ? '已应用' : '未应用'}</span>}</div>
+              {selected ? <>
+                <div className="detail-row"><span>版本</span><strong>{selected.version}</strong>
+                  <button className="text-btn" onClick={() => actions.prompt('修改版本号', '版本号', selected.version, (v) => actions.saveVersion(selected.name, v))}>修改</button></div>
+                <div className="detail-row"><span>云端</span><strong>{snap.online.binding?.url ? '已绑定' : '未绑定'}</strong></div>
+                <div className="gunpack-head"><span>枪包列表</span><span className="muted">共 {snap.gunpacks.length} 个</span></div>
+                <div className="gunpack-list">
+                  {snap.gunpacks.length === 0 ? <p className="muted pad">这个预设还没有枪包</p> : (
+                    <AnimatePresence mode="popLayout" initial={false}>
+                      {snap.gunpacks.map((g, i) => (
+                        <motion.div className="gunpack-row" key={`${snap.selected}:${g.name}`}
+                          initial={animations ? { opacity: 0, y: 10 } : false}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={animations ? { opacity: 0, y: -4 } : { opacity: 1 }}
+                          transition={{ duration: animations ? 0.4 : 0, delay: animations ? i * 0.045 : 0, ease: [0.34, 1.3, 0.44, 1] }}>
+                          <Icon name="folder" size={15} /><span>{g.name}</span>
+                          <span className="muted">{g.type || 'zip'}</span>
+                        </motion.div>
+                      ))}
+                    </AnimatePresence>
+                  )}
+                </div>
+                <div className="detail-footer">
+                  <span className="muted">{snap.online.binding?.url ? '云端已绑定，可增量同步' : '尚未绑定云端来源'}</span>
+                  <button className="btn ghost small" onClick={() => actions.navigate('manage')}>管理云端</button>
+                </div>
+              </> : <div className="detail-empty"><p>从左侧选择一个预设</p><span>选中后可在这里查看版本、云端绑定和枪包列表。</span></div>}
+            </motion.section>
           </div>
         </>
       )}
-      {snap.pack.loaded && <div className="home-lower">
-        <section className="card"><div className="card-head"><div><span className="eyebrow">STATUS</span><h2>运行状态</h2></div><span className="pill success">就绪</span></div>
-          <div className="status-lines"><div><span>TACZ</span><strong>{snap.pack.tacz ? '已定位' : '未找到'}</strong></div>
-            <div><span>本地缓存</span><strong>已加载</strong></div><div><span>最近同步</span><strong>{snap.online.binding?.last_version || '暂无'}</strong></div></div>
-        </section>
-        <section className="card"><div className="card-head"><div><span className="eyebrow">QUICK ACTIONS</span><h2>快捷操作</h2></div></div>
-          <div className="quick-grid"><button className="quick" onClick={() => actions.select(snap.selected)}><Icon name="refresh" /><span>刷新当前预设</span></button>
-            <button className="quick" onClick={() => actions.check(snap.selected)}><Icon name="cloud" /><span>检查云端更新</span></button>
-            <button className="quick" onClick={() => actions.login}><Icon name="user" /><span>账号与身份</span></button>
-            <button className="quick" onClick={() => actions.navigate('settings')}><Icon name="settings" /><span>偏好设置</span></button></div>
-        </section>
-      </div>}
     </div>
   )
 }
 
 function Manage({ snap, actions, busy }) {
+  const animations = snap.settings?.animations !== false
   const [tab, setTab] = useState('overview')
   const [url, setUrl] = useState(snap.online.binding?.url || '')
   const [password, setPassword] = useState(snap.online.binding?.password || '')
@@ -279,12 +343,62 @@ function Manage({ snap, actions, busy }) {
             {snap.role === 'developer' ? '切换为玩家' : '切换为开发者'}
           </button>
         </div></div>
+      <section className="action-deck manage-action" aria-label="管理主要操作">
+        <div className="action-copy">
+          <span className="eyebrow">CURRENT PRESET</span>
+          <h2>{selected ? selected.name : '还没有选择预设'}</h2>
+          <p>{selected ? '先检查云端差异，再决定同步或发布。' : '到主页选择一个预设后，这里会显示可执行的云端操作。'}</p>
+          <div className="action-meta">
+            <span>{selected?.version || '—'}</span>
+            <span>{plan?.summary || '尚未检查'}</span>
+            <span>{snap.role === 'developer' ? '开发者' : '玩家'}</span>
+          </div>
+        </div>
+        <div className="action-buttons">
+          <button className="btn xl primary action-primary" disabled={!selected || !url || busy}
+            onClick={() => actions.check(selected.name)}><Icon name="cloud" size={20} />检查云端更新</button>
+          {snap.role === 'developer' && <button className="btn action-secondary" disabled={!selected || busy}
+            onClick={() => actions.publishPlan(selected.name)}><Icon name="upload" size={17} />生成发布计划</button>}
+        </div>
+      </section>
       <div className="stat-grid">
         <div className="stat"><span>预设计数</span><strong>{snap.presets.length}</strong><small>当前整合包</small></div>
         <div className="stat"><span>云端状态</span><strong>{snap.online.binding?.url ? '已绑定' : '未绑定'}</strong><small>{snap.plan?.summary || '尚未检查'}</small></div>
         <div className="stat"><span>账号</span><strong>{snap.online.account?.label ? '已认证' : '未登录'}</strong><small>{snap.online.account?.label || '本地模式'}</small></div>
         <div className="stat"><span>发布历史</span><strong>{(snap.online.binding?.history || []).length}</strong><small>最近记录</small></div>
       </div>
+      <section className="card plan-card">
+        <div className="card-head"><div><span className="eyebrow">DIFF</span><h2>差异与同步</h2></div>
+          {plan && <span className="pill">{plan.summary}</span>}</div>
+        {!plan ? <p className="muted pad">检查后会在这里显示云端差异</p> : <>
+          {snap.role === 'developer' && <div className="publish-row">
+            <label className="field"><span>发布版本号</span><input value={publishVersion} onChange={(e) => setPublishVersion(e.target.value)} placeholder={selected?.version || 'v1.0.0'} /></label>
+            <label className="field"><span>发布说明</span><input value={publishNotes} onChange={(e) => setPublishNotes(e.target.value)} placeholder="可选" /></label>
+          </div>}
+          <div className="plan-list">
+            <AnimatePresence mode="popLayout" initial={false}>
+              {plan.items.map((item, i) => (
+                <motion.label key={`${snap.selected}:${snap.plan?.generation || 0}:${item.path}`}
+                  className={`diff-row ${item.action}`}
+                  initial={animations ? { opacity: 0, y: 8, scale: 0.99 } : false}
+                  animate={{ opacity: 1, y: 0, scale: animations && busy && ['download', 'repair'].includes(item.action) ? 1.012 : 1 }}
+                  exit={animations ? { opacity: 0, y: -4 } : { opacity: 1 }}
+                  transition={{ duration: animations ? 0.34 : 0, delay: animations ? i * 0.04 : 0, ease: [0.34, 1.3, 0.44, 1] }}>
+                  <input type="checkbox" checked={selectedPaths.has(item.path)} onChange={() => toggle(item.path)} />
+                  <span className="diff-name">{item.name}</span><span className="diff-label">{item.label}</span>
+                </motion.label>
+              ))}
+            </AnimatePresence>
+          </div>
+          <div className="button-row end">
+            {snap.role === 'player'
+              ? <button className="btn primary" disabled={!selected || !selectedPaths.size || busy} onClick={() => actions.sync(selected.name, [...selectedPaths])}>同步选中</button>
+              : snap.publish_ready
+              ? <button className="btn primary" disabled={busy} onClick={() => actions.publish(selected.name, publishVersion || selected.version, publishNotes, [...selectedPaths])}>发布选中</button>
+              : <button className="btn primary" disabled={busy || !selected} onClick={() => actions.publishPlan(selected.name)}>生成发布计划</button>}
+          </div>
+        </>}
+      </section>
       <div className="manage-grid">
         <section className="card">
           <div className="card-head"><div><span className="eyebrow">ACCOUNT</span><h2>{snap.online.account?.label || '未登录'}</h2></div>
@@ -299,33 +413,11 @@ function Manage({ snap, actions, busy }) {
           {selected ? <>
             <label className="field"><span>分享链接</span><input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://..." /></label>
             <label className="field"><span>提取密码</span><input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="可留空" /></label>
-            <div className="button-row"><button className="btn" onClick={() => actions.bind(selected.name, url, password)}>保存绑定</button>
+            <div className="button-row"><button className="btn primary" disabled={!url} onClick={() => actions.bind(selected.name, url, password)}>保存绑定</button>
               <button className="btn ghost" disabled={!url} onClick={() => actions.check(selected.name)}>检查更新</button></div>
           </> : <p className="muted">先在主页选择一个预设</p>}
         </section>
       </div>
-      <section className="card plan-card">
-        <div className="card-head"><div><span className="eyebrow">DIFF</span><h2>差异与同步</h2></div>
-          {plan && <span className="pill">{plan.summary}</span>}</div>
-        {!plan ? <p className="muted pad">检查后会在这里显示云端差异</p> : <>
-          {snap.role === 'developer' && <div className="publish-row">
-            <label className="field"><span>发布版本号</span><input value={publishVersion} onChange={(e) => setPublishVersion(e.target.value)} placeholder={selected?.version || 'v1.0.0'} /></label>
-            <label className="field"><span>发布说明</span><input value={publishNotes} onChange={(e) => setPublishNotes(e.target.value)} placeholder="可选" /></label>
-          </div>}
-          <div className="plan-list">{plan.items.map((item) => (
-            <label key={item.path} className={`diff-row ${item.action}`}>
-              <input type="checkbox" checked={selectedPaths.has(item.path)} onChange={() => toggle(item.path)} />
-              <span className="diff-name">{item.name}</span><span className="diff-label">{item.label}</span>
-            </label>))}</div>
-          <div className="button-row end">
-            {snap.role === 'player'
-              ? <button className="btn primary" disabled={!selected || !selectedPaths.size || busy} onClick={() => actions.sync(selected.name, [...selectedPaths])}>同步选中</button>
-              : snap.publish_ready
-              ? <button className="btn primary" disabled={busy} onClick={() => actions.publish(selected.name, publishVersion || selected.version, publishNotes, [...selectedPaths])}>发布选中</button>
-              : <button className="btn primary" disabled={busy || !selected} onClick={() => actions.publishPlan(selected.name)}>生成发布计划</button>}
-          </div>
-        </>}
-      </section>
       <div className="manage-lower">
         <section className="card"><div className="card-head"><div><span className="eyebrow">HISTORY</span><h2>发布历史</h2></div></div>
           {(snap.online.binding?.history || []).length === 0
@@ -459,6 +551,7 @@ export default function App() {
   const [bridgeError, setBridgeError] = useState('')
   const jobIdRef = useRef('')
   const coverTimers = useRef([])
+  const roleSwitchRef = useRef(false)
   const toastTimer = useRef(null)
 
   const showToast = useCallback((message, kind = 'info') => {
@@ -648,12 +741,12 @@ export default function App() {
   const navigate = useCallback((next) => {
     if (next === page || cover.active) return
     if (snap.settings?.animations === false) { setPage(next); return }
-    setCover({ active: true, phase: 'cover' })
+    setCover({ active: true, phase: 'cover', note: `正在打开${NAV.find((n) => n.key === next)?.label || ''}` })
     clearTimeout(coverTimers.current[0]); clearTimeout(coverTimers.current[1]); clearTimeout(coverTimers.current[2])
-    coverTimers.current[0] = setTimeout(() => { setPage(next); setCover({ active: true, phase: 'hold' }) }, 250)
-    coverTimers.current[1] = setTimeout(() => setCover({ active: true, phase: 'reveal' }), 770)
+    coverTimers.current[0] = setTimeout(() => { setPage(next); setCover((s) => ({ ...s, phase: 'hold' })) }, 250)
+    coverTimers.current[1] = setTimeout(() => setCover((s) => ({ ...s, phase: 'reveal' })), 770)
     coverTimers.current[2] = setTimeout(() => setCover({ active: false, phase: 'idle' }), 1150)
-  }, [page, cover.active])
+  }, [page, cover.active, snap.settings?.animations])
 
   useEffect(() => {
     const onKey = (e) => {
@@ -671,19 +764,32 @@ export default function App() {
   }, [navigate])
 
   const switchRole = useCallback(async (role) => {
-    if (role === snap.role || cover.active) return
-    setCover({ active: true, phase: 'cover' })
+    if (role === snap.role || cover.active || roleSwitchRef.current) return
+    if (snap.settings?.animations === false) {
+      roleSwitchRef.current = true
+      try {
+        const state = await invoke('app.role.switch', { role })
+        setSnap(state)
+        showToast(role === 'developer' ? '已切换为开发者' : '已切换为玩家', 'success')
+      } catch (err) { showToast(err.message, 'error') }
+      roleSwitchRef.current = false
+      return
+    }
+    roleSwitchRef.current = true
+    setCover({ active: true, phase: 'cover', note: role === 'developer' ? '正在切换为开发者' : '正在切换为玩家' })
     await new Promise((r) => setTimeout(r, 250))
-    setCover({ active: true, phase: 'hold' })
+    setCover((s) => ({ ...s, phase: 'hold' }))
     try { const state = await invoke('app.role.switch', { role }); setSnap(state); showToast(role === 'developer' ? '已切换为开发者' : '已切换为玩家', 'success') }
     catch (err) { showToast(err.message, 'error') }
     await new Promise((r) => setTimeout(r, 520))
-    setCover({ active: true, phase: 'reveal' })
+    setCover((s) => ({ ...s, phase: 'reveal' }))
     await new Promise((r) => setTimeout(r, 380))
+    roleSwitchRef.current = false
     setCover({ active: false, phase: 'idle' })
-  }, [snap.role, cover.active, showToast])
+  }, [snap.role, cover.active, snap.settings?.animations, showToast])
 
   const actions = { openPack, openDatabase, select, createPreset, rename, delete: remove, saveVersion, apply, bind, check, sync, publishPlan, publish, login, logout, updateSettings, switchRole, prompt, toast: showToast, navigate, cancelJob }
+  const animations = snap.settings?.animations !== false
   const pageEl = page === 'home' ? <Home snap={snap} actions={actions} busy={busy} />
     : page === 'manage' ? <Manage snap={snap} actions={actions} busy={busy} />
     : page === 'settings' ? <Settings snap={snap} actions={actions} />
@@ -695,12 +801,15 @@ export default function App() {
       <main className="workspace">
         <div className="content">
           <AnimatePresence mode="wait" initial={false}>
-            <motion.div key={page} className="page-motion" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.18 }}>
+            <motion.div key={page} className="page-motion"
+              initial={animations ? { opacity: 0, y: 6 } : false}
+              animate={{ opacity: 1, y: 0 }}
+              exit={animations ? { opacity: 0, y: -4 } : { opacity: 1 }}
+              transition={{ duration: animations ? 0.18 : 0 }}>
               {pageEl}
             </motion.div>
           </AnimatePresence>
           {bridgeError && <div className="bridge-error">{bridgeError}</div>}
-          <Cover state={cover} />
           {dnd && <div className="drop-overlay"><div className="drop-inner"><Icon name="download" size={28} /><h2>松手导入</h2><p>拖入整合包文件夹，自动定位 tacz</p></div></div>}
           <Toast toast={toast} />
           <AnimatePresence>{busy && <div className="busy-toast"><Progress value={busy.progress} text={busy.text || busy.title} />
@@ -712,8 +821,8 @@ export default function App() {
           <span className="statusbar-meta">{snap.role === 'developer' ? '开发者' : '玩家'} · {snap.pack.name || '未选择整合包'}</span>
         </footer>
       </main>
+      <Cover state={cover} />
       <Modal modal={modal} onClose={() => setModal(null)} />
-      {cover.active && <div className="cover-scrim" aria-hidden="true" />}
     </div>
   )
 }
