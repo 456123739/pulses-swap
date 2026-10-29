@@ -383,3 +383,8 @@
 
 - 修复旧 plan 跨预设复用、DND 无进度/无错误、取消无入口、桥接超时永久错误态、设置开关无 aria、Ctrl 快捷键劫持输入框等问题。
 - 200 个 Python 单元测试通过；React `test-ui.mjs` 全部通过；Windows RC 构建 + 启动冒烟 + 安装器成功。
+
+## 21. 3.0.2 最终复核
+
+- DND 失败路径、来源变更导致 plan 过期、不可取消任务的假成功、Modal Enter 重复提交均已修复。
+- 200 个 Python 测试及 React `test-ui.mjs` 通过；Windows CI 启动冒烟 + 安装器 + WebView2 Bootstrapper 通过。

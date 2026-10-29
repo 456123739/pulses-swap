@@ -83,9 +83,12 @@ function Sidebar({ page, onNavigate, role, expanded, setExpanded, version }) {
 function Modal({ modal, onClose }) {
   const [value, setValue] = useState(modal?.value || '')
   const [password, setPassword] = useState('')
-  useEffect(() => { setValue(modal?.value || ''); setPassword('') }, [modal])
+  const submitted = useRef(false)
+  useEffect(() => { setValue(modal?.value || ''); setPassword(''); submitted.current = false }, [modal])
   if (!modal) return null
   const submit = () => {
+    if (submitted.current) return
+    submitted.current = true
     const callback = modal.onConfirm
     const payload = modal.kind === 'login' ? { username: value, password } : value
     onClose()
@@ -506,7 +509,7 @@ export default function App() {
         const jid = event.data?.jobId || event.jobId || ''
         if (jid) {
           jobIdRef.current = jid
-          setBusy({ title: '拖入整合包', progress: 0, text: '正在读取拖入的整合包…', jobId: jid })
+          setBusy({ title: '拖入整合包', progress: 0, text: '正在读取拖入的整合包…', jobId: jid, cancelable: false })
         }
       } else if (type === 'dnd.error') {
         setDnd(false)
@@ -525,6 +528,7 @@ export default function App() {
           return
         }
         setBridgeError('')
+        if (window.PS?.dndUnavailable) showToast('当前 WebView 后端不支持拖拽，请使用“选择整合包”', 'warning')
         refresh()
       })
     }
@@ -546,7 +550,7 @@ export default function App() {
       depth = Math.max(0, depth - 1)
       if (depth === 0) setDnd(false)
     }
-    const drop = () => { depth = 0; setDnd(false) }
+    const drop = (e) => { if (hasFiles(e)) e.preventDefault(); depth = 0; setDnd(false) }
     window.addEventListener('dragenter', enter)
     window.addEventListener('dragover', over)
     window.addEventListener('dragleave', leave)
@@ -571,7 +575,8 @@ export default function App() {
       setBusy({ title, progress: 0, text: '准备中…' })
       const data = await invoke(method, params)
       jobIdRef.current = data?.jobId || ''
-      setBusy((prev) => prev ? { ...prev, jobId: jobIdRef.current } : prev)
+      setBusy((prev) => prev ? { ...prev, jobId: jobIdRef.current,
+        cancelable: Boolean(data?.cancelable) } : prev)
       if (!jobIdRef.current) { setBusy(null); await refresh() }
     } catch (err) { setBusy(null); showToast(err.message, 'error') }
   }, [refresh, showToast])
@@ -642,6 +647,7 @@ export default function App() {
 
   const navigate = useCallback((next) => {
     if (next === page || cover.active) return
+    if (snap.settings?.animations === false) { setPage(next); return }
     setCover({ active: true, phase: 'cover' })
     clearTimeout(coverTimers.current[0]); clearTimeout(coverTimers.current[1]); clearTimeout(coverTimers.current[2])
     coverTimers.current[0] = setTimeout(() => { setPage(next); setCover({ active: true, phase: 'hold' }) }, 250)
@@ -698,7 +704,7 @@ export default function App() {
           {dnd && <div className="drop-overlay"><div className="drop-inner"><Icon name="download" size={28} /><h2>松手导入</h2><p>拖入整合包文件夹，自动定位 tacz</p></div></div>}
           <Toast toast={toast} />
           <AnimatePresence>{busy && <div className="busy-toast"><Progress value={busy.progress} text={busy.text || busy.title} />
-            <button className="btn small ghost cancel-job" disabled={!busy.jobId} onClick={actions.cancelJob}>取消</button></div>}</AnimatePresence>
+            <button className="btn small ghost cancel-job" disabled={!busy.jobId || !busy.cancelable} onClick={actions.cancelJob}>取消</button></div>}</AnimatePresence>
         </div>
         <footer className="statusbar">
           <span className={`status-dot ${snap.pack.loaded ? 'ready' : ''}`} />

@@ -37,8 +37,9 @@ def _bind_drop(window, api: Api):
             path = item.get("pywebviewFullPath") if isinstance(item, dict) else None
             if path:
                 paths.append(path)
-        if paths:
-            api.handle_drop(paths)
+        # 即使没有拿到 pywebviewFullPath，也要走 handle_drop 发 dnd.error，
+        # 否则覆盖层会永久留在界面上且用户得不到任何提示。
+        api.handle_drop(paths)
 
     def on_drag(event):
         return

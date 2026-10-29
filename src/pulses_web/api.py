@@ -154,7 +154,8 @@ class Api:
             return {"ok": False, "error": {
                 "code": "NO_TACZ", "message": "拖入的路径里没有 tacz 文件夹"}}
         job = self.jobs.submit("pack.open",
-                               lambda ctx: self._open_pack_job(str(pack), ctx))
+                               lambda ctx: self._open_pack_job(str(pack), ctx),
+                               cancelable=False)
         self.bus.emit("dnd.consumed", {"jobId": job, "path": str(pack)})
         return {"ok": True, "data": {"jobId": job, "path": str(pack)}}
 
@@ -168,14 +169,16 @@ class Api:
                 if not path:
                     raise ValueError("缺少整合包路径")
                 job = self.jobs.submit("打开整合包",
-                                       lambda ctx: self._open_pack_job(path, ctx))
+                                       lambda ctx: self._open_pack_job(path, ctx),
+                                       cancelable=False)
             elif method == "pack.close":
                 job = self.jobs.submit("关闭整合包",
                                        lambda ctx: self.controller.close_pack())
             elif method == "preset.apply":
                 name = params.get("name", "")
                 job = self.jobs.submit("应用预设",
-                                       lambda ctx: self.controller.apply_preset(name, ctx))
+                                       lambda ctx: self.controller.apply_preset(name, ctx),
+                                       cancelable=False)
             elif method == "online.check":
                 name = params.get("name", "")
                 job = self.jobs.submit("检查更新",
@@ -195,7 +198,8 @@ class Api:
                 if not path:
                     raise ValueError("缺少数据库路径")
                 job = self.jobs.submit("打开数据库",
-                                       lambda ctx: {"state": self.controller.set_database(path)})
+                                       lambda ctx: {"state": self.controller.set_database(path)},
+                                       cancelable=False)
             elif method == "online.publish.run":
                 name = params.get("name", "")
                 job = self.jobs.submit("发布预设",
@@ -206,7 +210,7 @@ class Api:
                                            params.get("selection") or [], ctx))
             else:
                 raise ValueError("不支持的任务")
-            return {"jobId": job}
+            return {"jobId": job, "cancelable": self.jobs.cancelable(job)}
         return run
 
     def _open_pack_job(self, path, ctx):

@@ -488,12 +488,14 @@ class AppController:
     def bind_source(self, name: str, url: str, password: str = "", cloud_path=""):
         data = self._require_online().bind(
             name, url, password, cloud_path=cloud_path)
+        self._clear_plans()
         self._rev += 1
         return {"source": data, "state": self.state()}
 
     @_locked
     def unbind_source(self, name: str):
         self._require_online().unbind(name)
+        self._clear_plans()
         self._rev += 1
         return self.state()
 
