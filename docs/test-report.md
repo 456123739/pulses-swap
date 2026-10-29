@@ -388,3 +388,8 @@
 
 - DND 失败路径、来源变更导致 plan 过期、不可取消任务的假成功、Modal Enter 重复提交均已修复。
 - 200 个 Python 测试及 React `test-ui.mjs` 通过；Windows CI 启动冒烟 + 安装器 + WebView2 Bootstrapper 通过。
+
+## 22. 3.0.3 首页重排与交互动效
+
+- 首页主按钮尺寸、首屏位置、1140 横向边界、预设切换枪包滑入、身份浅色全窗幕布、DND drop 收起、Modal 焦点归还、关闭动画瞬时切页均有 Playwright 断言。
+- 202 个 Python 测试、`node test-ui.mjs` 通过；GitHub Actions `ui` job 与 Windows/Linux 构建联动。

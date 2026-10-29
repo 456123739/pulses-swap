@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import assert from 'node:assert'
 
 const state = {
-  revision: 7, version: '3.0.0', role: 'developer',
+  revision: 7, version: '3.0.3', role: 'developer',
   pack: { path: 'D:\\Games\\Minecraft\\PCL\\.minecraft\\versions\\1.20.1-Fabric', name: '1.20.1-Fabric', tacz: 'D:\\Games\\Minecraft\\PCL\\.minecraft\\versions\\1.20.1-Fabric\\tacz', loaded: true },
   presets: [
     { name: '默认枪包', version: 'v1.2.0', applied: true, count: 18, path: '' },
@@ -29,7 +29,7 @@ const state = {
   settings: { storage_mode: 'isolated', role: 'developer', animations: true, online_sync_clean: true, online_auto_check: true, online_publish_preview: false, online_confirm_full: true },
   recent: [{ name: '1.20.1-Fabric', path: 'D:\\Games\\Minecraft\\PCL\\.minecraft\\versions\\1.20.1-Fabric' }],
   logs: [
-    { time: '22:31:07', message: 'Pulses Swap v3.0.0 启动成功，作者: NimShade', level: 'SUCCESS', verbose: false },
+    { time: '22:31:07', message: 'Pulses Swap v3.0.3 启动成功，作者: NimShade', level: 'SUCCESS', verbose: false },
     { time: '22:31:08', message: '数据库位置: D:\\PulsesSwap_database', level: 'INFO', verbose: true },
     { time: '22:31:09', message: '整合包已就绪: 1.20.1-Fabric · 预设 4 个', level: 'SUCCESS', verbose: false },
     { time: '22:31:12', message: '云端检查完成：待下载 3 · 一致 9', level: 'INFO', verbose: false },
@@ -37,14 +37,31 @@ const state = {
   capabilities: { developer: true, online: true },
 }
 
-const browser = await chromium.launch({ executablePath: '/home/admin/.cache/ms-playwright/chromium-1194/chrome-linux/chrome', args: ['--no-sandbox'] })
+const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE
+  || '/home/admin/.cache/ms-playwright/chromium-1194/chrome-linux/chrome'
+const browser = await chromium.launch({
+  ...(executablePath && fs.existsSync(executablePath) ? { executablePath } : {}),
+  args: ['--no-sandbox'],
+})
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1 })
 const errors = []
 page.on('pageerror', e => errors.push(e.message))
 page.on('console', m => { if (m.type() === 'error') errors.push(m.text()) })
 await page.addInitScript((s) => {
+  window.__invokes = []
   window.pywebview = { api: {
-    async invoke() { return { ok: true, data: s } },
+    async invoke(method, params) {
+      window.__invokes.push([method, params])
+      if (method === 'app.role.switch') {
+        s.role = params.role
+        s.settings.role = params.role
+      } else if (method === 'app.settings.update') {
+        Object.assign(s.settings, params)
+      } else if (method === 'preset.select') {
+        s.selected = params.name
+      }
+      return { ok: true, data: JSON.parse(JSON.stringify(s)) }
+    },
     async pick_folder() { return { ok: true, data: { path: s.pack.path } } },
     async handle_drop() { return { ok: true, data: {} } },
   } }
@@ -54,6 +71,27 @@ await page.waitForTimeout(500)
 fs.mkdirSync('/tmp/web_shots', { recursive: true })
 await page.screenshot({ path: '/tmp/web_shots/01-home.png' })
 assert.equal(await page.locator('h1').innerText(), '枪包预设')
+// 主操作必须足够大、在首屏内，且是页面最显眼的动作
+const primary = page.locator('.hero-primary')
+const primaryBox = await primary.boundingBox()
+assert.ok(primaryBox, '缺少一键替换主按钮')
+assert.ok(primaryBox.height >= 52, `一键替换按钮高度 ${primaryBox.height}`)
+assert.ok(primaryBox.width >= 190, `一键替换按钮宽度 ${primaryBox.width}`)
+assert.equal((await primary.innerText()).trim(), '一键替换')
+assert.ok(primaryBox.y + primaryBox.height <= 812, `主按钮不在首屏 ${primaryBox.y}`)
+const secondaryBox = await page.locator('.hero-secondary').boundingBox()
+assert.ok(secondaryBox.height >= 40, `次要按钮高度 ${secondaryBox.height}`)
+assert.ok(primaryBox.height > secondaryBox.height, '主按钮没有比次要按钮更突出')
+// 选预设后，枪包列表逐项滑入，且详情跟随切换
+await page.locator('.preset-row').nth(2).click()
+await page.waitForTimeout(520)
+assert.equal((await page.locator('.detail-card h2').innerText()).trim(), '竞技场')
+assert.equal(await page.locator('.gunpack-row').count(), 4)
+const firstGunOpacity = await page.locator('.gunpack-row').first().evaluate(el => Number(getComputedStyle(el).opacity))
+assert.ok(firstGunOpacity > 0.9, `枪包行未完成滑入 ${firstGunOpacity}`)
+await page.locator('.preset-row').nth(1).click()
+await page.waitForTimeout(520)
+assert.equal((await page.locator('.detail-card h2').innerText()).trim(), '轻量生存')
 const collapsed = await page.locator('.sidebar').evaluate(el => getComputedStyle(el).width)
 assert.equal(collapsed, '60px')
 assert.equal(await page.locator('.nav-item span').first().evaluate(el => getComputedStyle(el).display), 'none')
@@ -69,11 +107,35 @@ await page.waitForTimeout(500)
 await page.locator('.nav-item').nth(2).click()
 await page.waitForTimeout(310)
 assert.ok(await page.locator('.cover').count())
+const cover = page.locator('.cover')
+const coverBox = await cover.boundingBox()
+assert.ok(coverBox.width >= 1279 && coverBox.height >= 899, '幕布没有覆盖整个窗口')
+assert.equal(await cover.evaluate(el => getComputedStyle(el).position), 'fixed')
+assert.equal(await cover.evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(242, 243, 245)')
+const wordmarkColor = await cover.locator('.wordmark-pulses').evaluate(el => getComputedStyle(el).color)
+assert.notEqual(wordmarkColor, 'rgb(255, 255, 255)', '幕布文字仍是白色')
+assert.ok((await cover.locator('.cover-kicker').innerText()).includes('设置'))
 await page.screenshot({ path: '/tmp/web_shots/03-cover.png' })
 await page.waitForTimeout(1200)
 assert.equal(await page.locator('h1').innerText(), '设置')
 assert.equal(await page.locator('.cover').count(), 0)
 await page.screenshot({ path: '/tmp/web_shots/05-settings.png' })
+
+// 身份切换也必须使用浅色全窗幕布，并在结束后落到新身份
+await page.getByRole('button', { name: '玩家', exact: true }).click()
+await page.waitForTimeout(120)
+assert.ok(await page.locator('.cover').count(), '身份切换没有幕布')
+assert.ok((await page.locator('.cover-kicker').innerText()).includes('切换为玩家'))
+assert.equal(await page.locator('.cover').evaluate(el => getComputedStyle(el).position), 'fixed')
+await page.screenshot({ path: '/tmp/web_shots/11-role-cover.png' })
+await page.waitForTimeout(1400)
+assert.equal(await page.locator('.cover').count(), 0)
+assert.ok(await page.locator('.app.role-player').count(), '身份没有切换为玩家')
+assert.equal(await page.locator('.sidebar-foot').innerText(), '玩家')
+// 切回开发者，保持后续截图一致
+await page.getByRole('button', { name: '开发者', exact: true }).click()
+await page.waitForTimeout(1400)
+assert.ok(await page.locator('.app.role-developer').count())
 
 await page.locator('.tabs button').nth(1).click()
 await page.waitForTimeout(200)
@@ -86,6 +148,45 @@ await page.waitForTimeout(1200)
 assert.equal(await page.locator('h1').innerText(), '日志')
 await page.screenshot({ path: '/tmp/web_shots/06-log.png' })
 
+// 1140 最小窗口：首页主操作仍要在首屏且不横向溢出
+await page.setViewportSize({ width: 1140, height: 812 })
+await page.locator('.nav-item').nth(0).click()
+await page.waitForTimeout(1200)
+assert.equal(await page.locator('h1').innerText(), '枪包预设')
+const narrowPrimary = await page.locator('.hero-primary').boundingBox()
+assert.ok(narrowPrimary, '1140 下缺少主按钮')
+assert.ok(narrowPrimary.y + narrowPrimary.height <= 812, '1140 下主按钮不在首屏')
+assert.ok(narrowPrimary.x + narrowPrimary.width <= 1140 - 8, `1140 下主按钮横向溢出 ${narrowPrimary.x + narrowPrimary.width}`)
+const narrowOverflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)
+assert.ok(narrowOverflow <= 1, `1140 横向溢出 ${narrowOverflow}`)
+await page.screenshot({ path: '/tmp/web_shots/09-1140x812.png' })
+
+// 管理页主操作条同样要大且可见
+await page.locator('.nav-item').nth(1).click()
+await page.waitForTimeout(1200)
+const managePrimary = page.locator('.manage-action .action-primary')
+const manageBox = await managePrimary.boundingBox()
+assert.ok(manageBox, '管理页缺少主操作')
+assert.ok(manageBox.height >= 46, `管理页主操作高度 ${manageBox.height}`)
+assert.ok(manageBox.y + manageBox.height <= 812, '管理页主操作不在首屏')
+assert.equal((await managePrimary.innerText()).trim(), '检查云端更新')
+await page.screenshot({ path: '/tmp/web_shots/10-manage-1140.png' })
+await page.setViewportSize({ width: 1280, height: 900 })
+await page.locator('.nav-item').nth(0).click()
+await page.waitForTimeout(1200)
+
+// 主按钮确认弹窗可 Esc 关闭，不应重复提交
+await page.locator('.hero-primary').click()
+await page.waitForTimeout(120)
+assert.equal(await page.locator('.modal-card').count(), 1)
+assert.ok(await page.locator('.modal-card').evaluate(el => el.contains(document.activeElement)), '弹窗没有接管焦点')
+await page.keyboard.press('Tab')
+assert.ok(await page.locator('.modal-card').evaluate(el => el.contains(document.activeElement)), 'Tab 焦点跑出弹窗')
+await page.keyboard.press('Escape')
+await page.waitForTimeout(100)
+assert.equal(await page.locator('.modal-card').count(), 0)
+assert.ok(await page.locator('.hero-primary').evaluate(el => el === document.activeElement), '关闭弹窗后没有归还焦点')
+
 // DND overlay
 await page.evaluate(() => {
   const dt = new DataTransfer()
@@ -97,6 +198,15 @@ assert.equal(await page.locator('.drop-overlay').count(), 1)
 await page.screenshot({ path: '/tmp/web_shots/08-dnd.png' })
 await page.evaluate(() => window.dispatchEvent(new DragEvent('dragleave', { bubbles: true })))
 await page.waitForTimeout(100)
+// drop 必须收起遮罩，不能留下永久覆盖层
+await page.evaluate(() => {
+  const dt = new DataTransfer()
+  dt.items.add(new File(['x'], 'pack.zip'))
+  window.dispatchEvent(new DragEvent('dragenter', { dataTransfer: dt, bubbles: true, cancelable: true }))
+  window.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }))
+})
+await page.waitForTimeout(120)
+assert.equal(await page.locator('.drop-overlay').count(), 0, 'drop 后遮罩仍在')
 
 // responsive quick resize
 for (const [w, h, name] of [[1140, 812, '09-1140x812'], [1600, 1000, '10-1600x1000']]) {
@@ -106,6 +216,15 @@ for (const [w, h, name] of [[1140, 812, '09-1140x812'], [1600, 1000, '10-1600x10
   assert.ok(of <= 1, `${name} overflow ${of}`)
   await page.screenshot({ path: `/tmp/web_shots/${name}.png` })
 }
+// 关闭动画后切页应一帧到位，不应再出现幕布
+await page.locator('.nav-item').nth(2).click()
+await page.waitForTimeout(1200)
+await page.locator('.settings-page .switch').first().click()
+await page.waitForTimeout(150)
+await page.locator('.nav-item').nth(3).click()
+await page.waitForTimeout(60)
+assert.equal(await page.locator('.cover').count(), 0, '关闭动画后仍出现幕布')
+assert.equal(await page.locator('h1').innerText(), '日志')
 assert.deepEqual(errors, [], JSON.stringify(errors))
 await browser.close()
 console.log('UI tests passed')
