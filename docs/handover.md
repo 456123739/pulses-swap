@@ -1,4 +1,4 @@
-# Pulses Swap 交接文档（v2.7.9）
+# Pulses Swap 交接文档（v3.0.0 WebView）
 
 > 给接手的人 / AI 看的：这个软件被拆成了哪些文件、每个文件干什么、
 > 数据怎么流动、改哪里、怎么跑测试、怎么打包。
@@ -12,7 +12,7 @@
 一键把某组枪包换进游戏的 `tacz` 目录；同时把预设发布到**蓝奏云**，
 玩家绑定分享链接后可以增量同步。
 
-- 版本：`2.7.9`（`src/pulses/core/paths.py` 里的 `VERSION`）
+- 版本：`3.0.0`（`src/pulses/core/paths.py` 里的 `VERSION`）
 - 入口：`src/main.py` → `pulses.ui.app.main()`
 - 依赖：`customtkinter` `tkinterdnd2` `watchdog` `Pillow`（见 `requirements.txt`）
 - 不依赖任何第三方网络库（HTTP 全用标准库 `urllib`）
@@ -586,3 +586,13 @@ export DISPLAY=:99          # weston headless + Xwayland
 3. **身份动画只包 UI 入口**：`_set_role_visual()` 负责 cover → `_set_role()` → 520ms → reveal；`_set_role()` 必须保持同步，`online_e2e`/后台/测试都直接调用它。不要把动画塞进 `_set_role()` 本身。
 4. **身份幕布期间禁止切页**：`show_page()` 在 `_role_transition` 时直接返回；否则 page cover 的 `cancel()` 会取消 identity cover，`_role_transition` 永远悬着。
 5. **页面幕布可见时身份切换退回即时**：`_set_role_visual()` 检测 `page_cover.visible`，避免第二条幕布抢同一个 Canvas/Frame；页面幕布结束后的身份切换才走完整动画。
+
+## v3.0.0 WebView 迁移坑位（务必保留）
+
+1. **不要重新引入 customtkinter 窗口**：新入口 `src/pulses_web_main.py` 只启动 PyWebView；`pulses/ui` 仅保留旧 2.x 回滚入口。核心模块仍 import customtkinter 是为了兼容旧核心，不是 UI 依赖。
+2. **`js_api` 方法线程不安全**：官方说明它们运行在独立线程。所有修改型操作必须走 `pulses_web/events.py` 的 `JobRunner` 单写者队列；不要在 API 方法里直接改 PresetManager/OnlineService。
+3. **事件只能从 EventPump 推**：worker 不得直接 `evaluate_js`；EventPump 合并进度、保留 seq，窗口关闭时安全退出。页面重载/窗口销毁时 evaluate_js 异常必须吞掉。
+4. **DND 路径用 `pywebviewFullPath`**：Python `window.dom.document.events.drop += DOMEventHandler(..., prevent_default=True, stop_propagation=True)`；React 只负责拖拽覆盖层，不要依赖浏览器 `File.path`。
+5. **本地资源走 HTTP**：PyWebView 相对路径自动启 server；不要用 file:// 直接加载 ES Modules/CSS，否则 CSP/CORS 和字体都可能失败。
+6. **WebView2 Runtime**：Windows 安装器缺失时运行 Bootstrapper；绿色版必须提示用户安装 Evergreen Runtime。PyInstaller 要带 `pulses_web/web/dist` 和 webview 平台数据。
+7. **改 UI 必须过两套测试**：Python 200 个测试 + `src/pulses_web/web/test-ui.mjs`；再跑打包启动冒烟。UI 截图放 `docs/web-ui/`。

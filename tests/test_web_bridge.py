@@ -70,6 +70,28 @@ class WebBridgeTests(unittest.TestCase):
         self.assertTrue(state["pack"]["loaded"])
         self.assertEqual(len(state["presets"]), 1)
 
+    def test_drop_folder_opens_pack(self):
+        pack = Path(self.tmp.name) / "dropped"
+        (pack / "tacz").mkdir(parents=True)
+        result = self.api.handle_drop([str(pack)])
+        self.assertTrue(result["ok"], result)
+        job_id = result["data"]["jobId"]
+        done = None
+        end = time.time() + 3
+        while time.time() < end and done is None:
+            event = self.wait_event("job.done", timeout=0.5)
+            if event is not None and event.get("jobId") == job_id:
+                done = event
+        self.assertIsNotNone(done)
+        self.assertTrue(done["data"]["result"]["state"]["pack"]["loaded"])
+
+    def test_drop_without_tacz_is_rejected(self):
+        folder = Path(self.tmp.name) / "plain"
+        folder.mkdir()
+        result = self.api.handle_drop([str(folder)])
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"]["code"], "NO_TACZ")
+
     def test_cancel_job(self):
         job_id = self.jobs.submit("slow", lambda ctx: time.sleep(0.2))
         self.assertTrue(self.jobs.cancel(job_id))

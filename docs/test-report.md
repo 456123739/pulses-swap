@@ -371,3 +371,10 @@
 - 身份切换新增 `_set_role_visual()`：幕布盖住后调用同步 `_set_role()`，再留 520ms 让主题/页面重建完成，最后 `PageCover.reveal()`；`_role_transition` 期间 `show_page()` 直接忽略，防止两套幕布互相 cancel。
 - 回归：`ui_process_check` 第 4b 节检查身份幕布、盖住前不改身份、开发者/玩家双向切换；194 个单元测试与其它 UI 检查全部通过。
 - 渲染图：`docs/logo-cover.png`（1204×850，实际工作区）。
+
+## 19. 3.0.0 PyWebView + React 迁移
+
+- 无 UI Controller、JobRunner/EventPump、DND 路径、API 合同新增 6 个测试；总计 200 个 Python 测试通过。
+- React 前端 `test-ui.mjs`：首页/侧栏展开/页面幕布/设置/日志/DND/1280×900/1140×812/1600×1000；无 console error、无横向溢出。
+- Windows Actions 构建 PyInstaller、安装 WebView2 Bootstrapper、Inno Setup、绿色版，并做启动冒烟；Linux 构建 tar。
+- 视觉截图：`docs/web-ui/`；旧 2.7.9 的 Tk 截图保留不混用。
