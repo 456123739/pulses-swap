@@ -1,16 +1,18 @@
 /* pywebview bridge: the only place that talks to Python. */
-let readyPromise
-
 export function whenReady() {
-  if (readyPromise) return readyPromise
-  readyPromise = new Promise((resolve) => {
-    const done = () => resolve(true)
-    if (window.pywebview?.api) return done()
+  // 不缓存 false：WebView2 冷启动/杀软扫描时注入可能晚于 1.8s，
+  // 调用方可以稍后重试，而不是永久卡在错误态。
+  if (window.pywebview?.api) return Promise.resolve(true)
+  return new Promise((resolve) => {
+    let settled = false
+    const done = () => {
+      if (settled) return
+      settled = true
+      resolve(Boolean(window.pywebview?.api))
+    }
     window.addEventListener('pywebviewready', done, { once: true })
-    // Browser-only development: let the UI render an explicit demo state.
-    setTimeout(() => resolve(Boolean(window.pywebview?.api)), 1800)
+    setTimeout(done, 1800)
   })
-  return readyPromise
 }
 
 export function hasBridge() {
