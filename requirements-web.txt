@@ -1,0 +1,7 @@
+# Pulses Swap 3.x: PyWebView + React 前端
+# 核心模块仍复用 Pulses Swap 的 managers/online；customtkinter 仅作为旧核心
+# 模块的历史 import 兼容依赖，不再创建任何 customtkinter 窗口。
+pywebview==6.2.1
+customtkinter>=5.2.2
+watchdog>=4.0.0
+Pillow>=10.0.0

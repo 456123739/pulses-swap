@@ -7,3 +7,5 @@ dist/
 venv/
 PulsesSwap_config.json
 PulsesSwap_database/
+
+node_modules/
