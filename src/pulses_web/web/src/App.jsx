@@ -375,6 +375,13 @@ function Manage({ snap, actions, busy }) {
             <label className="field"><span>发布版本号</span><input value={publishVersion} onChange={(e) => setPublishVersion(e.target.value)} placeholder={selected?.version || 'v1.0.0'} /></label>
             <label className="field"><span>发布说明</span><input value={publishNotes} onChange={(e) => setPublishNotes(e.target.value)} placeholder="可选" /></label>
           </div>}
+          <div className="plan-cta">
+            {snap.role === 'player'
+              ? <button className="btn primary plan-primary" disabled={!selected || !selectedPaths.size || busy} onClick={() => actions.sync(selected.name, [...selectedPaths])}>同步选中</button>
+              : snap.publish_ready
+              ? <button className="btn primary plan-primary" disabled={busy} onClick={() => actions.publish(selected.name, publishVersion || selected.version, publishNotes, [...selectedPaths])}>发布选中</button>
+              : <button className="btn primary plan-primary" disabled={busy || !selected} onClick={() => actions.publishPlan(selected.name)}>生成发布计划</button>}
+          </div>
           <div className="plan-list">
             <AnimatePresence mode="popLayout" initial={false}>
               {plan.items.map((item, i) => (
@@ -389,13 +396,6 @@ function Manage({ snap, actions, busy }) {
                 </motion.label>
               ))}
             </AnimatePresence>
-          </div>
-          <div className="button-row end">
-            {snap.role === 'player'
-              ? <button className="btn primary" disabled={!selected || !selectedPaths.size || busy} onClick={() => actions.sync(selected.name, [...selectedPaths])}>同步选中</button>
-              : snap.publish_ready
-              ? <button className="btn primary" disabled={busy} onClick={() => actions.publish(selected.name, publishVersion || selected.version, publishNotes, [...selectedPaths])}>发布选中</button>
-              : <button className="btn primary" disabled={busy || !selected} onClick={() => actions.publishPlan(selected.name)}>生成发布计划</button>}
           </div>
         </>}
       </section>

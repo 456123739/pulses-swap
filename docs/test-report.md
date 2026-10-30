@@ -393,3 +393,8 @@
 
 - 首页主按钮尺寸、首屏位置、1140 横向边界、预设切换枪包滑入、身份浅色全窗幕布、DND drop 收起、Modal 焦点归还、关闭动画瞬时切页均有 Playwright 断言。
 - 202 个 Python 测试、`node test-ui.mjs` 通过；GitHub Actions `ui` job 与 Windows/Linux 构建联动。
+
+## 23. 3.0.4 管理页主操作前置
+
+- 玩家/开发者主操作按钮移到差异卡顶部，1280×900 下无需滚动即可看到“同步选中/发布选中”。
+- 黑白盒测试：202 个 Python 测试、`node test-ui.mjs` 通过；3.0.4 CI `ui`、Windows、Linux 全绿。
