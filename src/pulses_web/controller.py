@@ -190,6 +190,8 @@ class AppController:
                     "available": self.online is not None,
                     "account": account,
                     "binding": self._binding_state(),
+                    "bound": self._bound_names(),
+                    "bound_count": len(self._bound_names()),
                 },
                 "plan": plan,
                 "publish_ready": bool(self._publish_owner == self._owner(self.selected)
@@ -212,6 +214,7 @@ class AppController:
             "online_auto_check": bool(s.online_auto_check),
             "online_sync_clean": bool(s.online_sync_clean),
             "online_publish_preview": bool(s.online_publish_preview),
+            "advanced_actions": bool(getattr(s, "advanced_actions", False)),
             "online_confirm_full": bool(s.online_confirm_full),
         }
 
@@ -579,6 +582,224 @@ class AppController:
         self._rev += 1
         return {"result": self._serialize(result), "state": self.state()}
 
+    @staticmethod
+    def _next_version(value: str) -> str:
+        """把 v1.0.4 递增为 v1.0.5；无法解析时给一个安全的新版本。"""
+        import re
+        m = re.match(r"^[vV]?(\d+)\.(\d+)\.(\d+)", str(value or ""))
+        if not m:
+            return "v1.0.1"
+        major, minor, patch = (int(x) for x in m.groups())
+        return f"v{major}.{minor}.{patch + 1}"
+
+    def _bound_names(self) -> list[str]:
+        if not self.online or not self.preset_manager:
+            return []
+        return [name for name in self.preset_manager.presets
+                if self.online.is_bound(name)]
+
+    def _batch_phase(self, ctx, index, total, label):
+        if ctx is None:
+            return
+        pct = (index / total * 100.0) if total else None
+        ctx.progress(pct, phase="batch",
+                     message=f"{label} {index}/{total}" if index else label,
+                     current=index, total=total)
+
+    @_locked
+    def sync_all_auto(self, ctx=None):
+        """玩家一键更新全部：所有已绑定预设逐个检查、下载、必要时替换。"""
+        if self.role != "player":
+            raise PermissionError("一键更新只适用于玩家身份")
+        names = self._bound_names()
+        if not names:
+            raise ValueError("还没有绑定云端来源的预设")
+        updated, unchanged, failed = [], [], []
+        total = len(names)
+        for i, name in enumerate(names, 1):
+            if ctx is not None and ctx.cancelled:
+                raise RuntimeError("操作已取消")
+            self._batch_phase(ctx, i, total, f"更新 {name}")
+            try:
+                out = self.sync_auto(name, ctx=ctx)
+                if out.get("changed"):
+                    updated.append(name)
+                else:
+                    unchanged.append(name)
+            except Exception as exc:                 # 单个失败不阻塞其他预设
+                failed.append((name, str(exc)))
+                self.add_log(f"一键更新失败：{name} · {exc}", "ERROR")
+        self._batch_phase(ctx, total, total, "更新完成")
+        message = (f"更新完成 · 更新 {len(updated)} 个"
+                   + (f" · 已是最新 {len(unchanged)} 个" if unchanged else "")
+                   + (f" · 失败 {len(failed)} 个" if failed else ""))
+        return {"result": {"ok": not failed, "updated": updated,
+                           "unchanged": unchanged, "failed": failed},
+                "state": self.state(), "message": message}
+
+    @_locked
+    def publish_all_auto(self, ctx=None):
+        """开发者一键发布全部：所有已绑定预设自动计划、递增版本、上传。"""
+        if self.role != "developer":
+            raise PermissionError("只有开发者可以发布")
+        names = self._bound_names()
+        if not names:
+            raise ValueError("还没有绑定云端来源的预设")
+        published, unchanged, failed = [], [], []
+        total = len(names)
+        for i, name in enumerate(names, 1):
+            if ctx is not None and ctx.cancelled:
+                raise RuntimeError("操作已取消")
+            self._batch_phase(ctx, i, total, f"发布 {name}")
+            try:
+                out = self.publish_auto(name, ctx=ctx)
+                if out.get("changed"):
+                    published.append(name)
+                else:
+                    unchanged.append(name)
+            except Exception as exc:
+                failed.append((name, str(exc)))
+                self.add_log(f"一键发布失败：{name} · {exc}", "ERROR")
+        self._batch_phase(ctx, total, total, "发布完成")
+        message = (f"发布完成 · 发布 {len(published)} 个"
+                   + (f" · 无变更 {len(unchanged)} 个" if unchanged else "")
+                   + (f" · 失败 {len(failed)} 个" if failed else ""))
+        return {"result": {"ok": not failed, "published": published,
+                           "unchanged": unchanged, "failed": failed},
+                "state": self.state(), "message": message}
+
+    @_locked
+    def sync_auto(self, name: str, ctx=None):
+        """玩家一键更新：收回已应用预设 → 检查/下载/清理 → 再自动替换。"""
+        if self.role != "player":
+            raise PermissionError("一键更新只适用于玩家身份")
+        was_applied = bool(
+            self.preset_manager and name in self.preset_manager.presets
+            and self.preset_manager.presets[name].get("applied"))
+        detached = False
+        try:
+            if was_applied:
+                self._stop_watcher()
+                try:
+                    if not self.preset_manager.detach_preset(name):
+                        raise RuntimeError("无法收回当前已应用的预设，已停止更新")
+                    detached = True
+                finally:
+                    self._start_watcher()
+            self.check(name, ctx=ctx)
+            plan = self._plan_for(name)
+            if plan is None:
+                raise ValueError("没有生成差异计划")
+            if plan.offline:
+                raise ValueError("云端暂时不可用，已保留本地预设，请稍后重试")
+            actions = {diff.DOWNLOAD, diff.REPAIR}
+            if bool(getattr(self.settings, "online_sync_clean", True)):
+                actions.add(diff.ASK_DELETE_LOCAL)
+            selection = [i.path for i in plan.items if i.action in actions]
+            blocked = [i for i in plan.items if i.action == diff.BLOCKED]
+            if blocked:
+                self.add_log(f"一键更新：{len(blocked)} 个文件无法自动处理，已跳过",
+                             "WARNING")
+            if not selection:
+                message = ("当前预设已是最新" if not plan.has_changes
+                           else "没有可自动处理的安全项；如确需删除本地多余，请开启高级操作")
+                self.add_log(f"一键更新：{message}", "SUCCESS", verbose=False)
+                if detached:
+                    restored = self.apply_preset(name, ctx)
+                    return {"result": None, "state": restored["state"],
+                            "changed": 0, "message": message}
+                return {"result": None, "state": self.state(),
+                        "changed": 0, "message": message}
+            out = self.sync(name, selection, ctx)
+            applied = False
+            if was_applied:
+                applied_out = self.apply_preset(name, ctx)
+                out["state"] = applied_out["state"]
+                applied = True
+            out["applied"] = applied
+            out["changed"] = len(selection)
+            failed_items = len((out.get("result") or {}).get("failed") or [])
+            out["ok"] = failed_items == 0
+            out["message"] = (f"更新完成 · {len(selection)} 项"
+                              + (" · 已重新替换" if applied else "")
+                              + (f" · 失败 {failed_items} 项" if failed_items else ""))
+            return out
+        except Exception:
+            if detached:
+                # 中途失败也要把 tacz 恢复成可用状态（可能包含已下载的部分）
+                try:
+                    self.apply_preset(name, ctx)
+                except Exception as restore_exc:
+                    self.add_log(f"更新失败后恢复 tacz 也失败：{restore_exc}",
+                                 "ERROR")
+            raise
+
+    @_locked
+    def publish_auto(self, name: str, ctx=None):
+        """开发者一键发布：收回已应用预设 → 自动计划/递增版本/上传 → 再应用。"""
+        if self.role != "developer":
+            raise PermissionError("只有开发者可以发布")
+        was_applied = bool(
+            self.preset_manager and name in self.preset_manager.presets
+            and self.preset_manager.presets[name].get("applied"))
+        detached = False
+        try:
+            if was_applied:
+                self._stop_watcher()
+                try:
+                    if not self.preset_manager.detach_preset(name):
+                        raise RuntimeError("无法收回当前已应用的预设，已停止发布")
+                    detached = True
+                finally:
+                    self._start_watcher()
+            self.publish_plan(name, ctx=ctx)
+            plan = self._publish_for(name)
+            if plan is None:
+                raise ValueError("没有生成发布计划")
+            if plan.offline:
+                raise ValueError("云端读取失败，已拒绝用缓存计划发布")
+            # 安全默认：只上传新增/变更，不自动删除云端多余文件。
+            selection = [i.path for i in plan.items if i.action == diff.UPLOAD]
+            extras = [i for i in plan.items if i.action == diff.DELETE_CLOUD]
+            if extras:
+                self.add_log(f"一键发布：云端多余 {len(extras)} 项已保留",
+                             "INFO")
+            if not selection:
+                message = ("已是最新，无需发布" if not extras
+                           else "云端多余文件已保留，没有需要上传的内容")
+                self.add_log(f"一键发布：{message}", "SUCCESS", verbose=False)
+                if detached:
+                    restored = self.apply_preset(name, ctx)
+                    return {"result": None, "state": restored["state"],
+                            "changed": 0, "message": message}
+                return {"result": None, "state": self.state(),
+                        "changed": 0, "message": message}
+            base_version = plan.cloud_version or (
+                self.preset_manager.presets[name].get("version")
+                if self.preset_manager and name in self.preset_manager.presets
+                else "")
+            version = self._next_version(base_version)
+            out = self.publish(name, version,
+                               f"一键发布 · 上传 {len(selection)} 项",
+                               "", selection, ctx)
+            result = out.get("result")
+            if isinstance(result, dict) and not result.get("ok", True):
+                raise RuntimeError("发布未完成，请查看日志")
+            if was_applied:
+                applied_out = self.apply_preset(name, ctx)
+                out["state"] = applied_out["state"]
+            out["changed"] = len(selection)
+            out["message"] = f"发布完成 · {version} · {len(selection)} 项"
+            return out
+        except Exception:
+            if detached:
+                try:
+                    self.apply_preset(name, ctx)
+                except Exception as restore_exc:
+                    self.add_log(f"发布失败后恢复 tacz 也失败：{restore_exc}",
+                                 "ERROR")
+            raise
+
     @_locked
     def publish_plan(self, name: str, ctx=None):
         online = self._require_online()
@@ -647,8 +868,8 @@ class AppController:
     @_locked
     def update_settings(self, patch: dict):
         allowed = {"animations", "online_auto_check", "online_sync_clean",
-                   "online_publish_preview", "online_confirm_full",
-                   "storage_mode"}
+                   "online_publish_preview", "advanced_actions",
+                   "online_confirm_full", "storage_mode"}
         for key, value in (patch or {}).items():
             if key in allowed:
                 setattr(self.settings, key, value)

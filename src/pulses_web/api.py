@@ -189,6 +189,22 @@ class Api:
                 job = self.jobs.submit("同步预设",
                                        lambda ctx: self.controller.sync(
                                            name, selection, ctx))
+            elif method == "online.sync.auto":
+                name = params.get("name", "")
+                job = self.jobs.submit("一键更新",
+                                       lambda ctx: self.controller.sync_auto(
+                                           name, ctx))
+            elif method == "online.publish.auto":
+                name = params.get("name", "")
+                job = self.jobs.submit("一键发布",
+                                       lambda ctx: self.controller.publish_auto(
+                                           name, ctx))
+            elif method == "online.sync.all":
+                job = self.jobs.submit("一键更新全部",
+                                       lambda ctx: self.controller.sync_all_auto(ctx))
+            elif method == "online.publish.all":
+                job = self.jobs.submit("一键发布全部",
+                                       lambda ctx: self.controller.publish_all_auto(ctx))
             elif method == "online.publish.plan":
                 name = params.get("name", "")
                 job = self.jobs.submit("生成发布计划",

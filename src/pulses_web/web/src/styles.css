@@ -552,3 +552,36 @@ h3 { font-size: 15px; font-weight: 600; }
 }
 .plan-cta { display: flex; justify-content: flex-end; padding: 8px 0 10px; border-bottom: 1px solid var(--divider); }
 .plan-cta .btn.plan-primary { height: 48px; min-width: 168px; font-size: 14px; }
+
+/* 3.1 边界与安全间距 */
+.toast { bottom: 54px; right: 22px; }
+.card > .button-row:last-child { margin-top: 12px; }
+@media (max-width: 1200px) {
+  .action-deck { grid-template-columns: 1fr; gap: 14px; }
+  .action-buttons { justify-content: flex-start; }
+}
+
+/* 云端表单与卡片底部留出呼吸空间，避免按钮压住卡片边线 */
+.manage-grid .card { padding-bottom: 24px; }
+.manage-grid .field { margin-top: 12px; }
+.manage-grid .button-row:last-child { margin-top: 16px; }
+.publish-row .field { margin-top: 0; }
+
+/* 一键化：只读差异 / 自动化说明 */
+.diff-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); justify-self: center; }
+.diff-dot.download, .diff-dot.repair, .diff-dot.upload { background: var(--accent); }
+.diff-dot.delete_cloud, .diff-dot.delete_local, .diff-dot.ask_delete_local { background: var(--error); }
+.auto-note {
+  margin: 2px 0 10px; padding: 10px 12px; border-radius: 10px;
+  background: var(--input); color: var(--text-2); font-size: 11px; line-height: 1.6;
+}
+.warning-note { background: #F7E8E8; color: var(--error); }
+.safety-lines { display: flex; flex-direction: column; gap: 10px; }
+.safety-lines > div { display: flex; flex-direction: column; gap: 2px; padding-top: 9px; border-top: 1px solid var(--divider); }
+.safety-lines > div:first-child { border-top: 0; padding-top: 0; }
+.safety-lines strong { font-size: 12px; font-weight: 550; }
+.safety-lines span { font-size: 10.5px; color: var(--muted); }
+
+/* 品牌图标：使用项目自己的 SW 标，不再用字母 P */
+.brand-mark { background: transparent; padding: 0; overflow: hidden; }
+.brand-mark img { width: 100%; height: 100%; display: block; object-fit: cover; border-radius: inherit; }

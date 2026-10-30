@@ -130,6 +130,7 @@ jobs:
           python3 -m http.server 8765 -d dist &
           sleep 1
           node test-ui.mjs
+          node test-layout.mjs
 
   release:
     needs: [windows, linux, ui]

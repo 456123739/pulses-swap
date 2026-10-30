@@ -50,6 +50,16 @@ class PlayerDiffTest(unittest.TestCase):
         self.assertEqual(plan.download_bytes, 2048)
         self.assertTrue(plan.has_changes)
 
+    def test_developer_summary_uses_upload_not_download(self):
+        local = [item("a.zip", SHA_B), item("local.zip")]
+        remote = cloud([item("a.zip", SHA_A), item("cloud.zip")])
+        plan = diff.compare(local, remote, role="developer")
+        self.assertIn("待上传 2", plan.summary())
+        self.assertNotIn("待下载", plan.summary())
+        self.assertEqual({i.path: i.action for i in plan.items},
+                         {"a.zip": diff.UPLOAD, "local.zip": diff.UPLOAD,
+                          "cloud.zip": diff.DELETE_CLOUD})
+
     def test_clean_plan(self):
         local = [item("a.zip")]
         plan = diff.compare(local, cloud([item("a.zip")]), role="player")
