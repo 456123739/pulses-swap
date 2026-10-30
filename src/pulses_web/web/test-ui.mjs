@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import assert from 'node:assert'
 
 const state = {
-  revision: 7, version: '3.0.4', role: 'developer',
+  revision: 7, version: '3.1.0', role: 'developer',
   pack: { path: 'D:\\Games\\Minecraft\\PCL\\.minecraft\\versions\\1.20.1-Fabric', name: '1.20.1-Fabric', tacz: 'D:\\Games\\Minecraft\\PCL\\.minecraft\\versions\\1.20.1-Fabric\\tacz', loaded: true },
   presets: [
     { name: '默认枪包', version: 'v1.2.0', applied: true, count: 18, path: '' },
@@ -18,18 +18,18 @@ const state = {
     { name: 'm4_pack.zip', type: 'zip', size: 18210000, file_count: 48 },
     { name: 'pistols.zip', type: 'zip', size: 9210000, file_count: 31 },
   ],
-  plan: { role: 'player', summary: '待下载 3 · 一致 9', counts: { download: 3, skip: 9 }, offline: false,
+  plan: { role: 'developer', summary: '待上传 2 · 云端多余 1 · 一致 9', counts: { upload: 2, delete_cloud: 1, skip: 9 }, offline: false,
     items: [
-      { path: 'modern_warfare.zip', name: 'modern_warfare.zip', action: 'download', label: '下载', size: 48213120, checked: true },
-      { path: 'm4_pack.zip', name: 'm4_pack.zip', action: 'repair', label: '修复', size: 18210000, checked: true },
-      { path: 'pistols.zip', name: 'pistols.zip', action: 'download', label: '下载', size: 9210000, checked: true },
-      { path: 'old_pack.zip', name: 'old_pack.zip', action: 'ask_delete_local', label: '本地多余', size: 1200000, checked: false },
+      { path: 'modern_warfare.zip', name: 'modern_warfare.zip', action: 'upload', label: '上传', size: 48213120, checked: true },
+      { path: 'm4_pack.zip', name: 'm4_pack.zip', action: 'upload', label: '上传', size: 18210000, checked: true },
+      { path: 'pistols.zip', name: 'pistols.zip', action: 'delete_cloud', label: '删除云端', size: 9210000, checked: false },
+      { path: 'old_pack.zip', name: 'old_pack.zip', action: 'skip', label: '一致', size: 1200000, checked: false },
     ] },
-  online: { available: true, account: { label: '186****9816', username: '18651999816', saved: true }, binding: { url: 'https://wwb.lanzouq.com/b01pulses', password: 'pulse', cloud_path: 'PulsesSwap/轻量生存', last_version: 'v1.0.4', history: [] } },
-  settings: { storage_mode: 'isolated', role: 'developer', animations: true, online_sync_clean: true, online_auto_check: true, online_publish_preview: false, online_confirm_full: true },
+  online: { available: true, bound: ['轻量生存', '默认枪包'], bound_count: 2, account: { label: '186****9816', username: '18651999816', saved: true }, binding: { url: 'https://wwb.lanzouq.com/b01pulses', password: 'pulse', cloud_path: 'PulsesSwap/轻量生存', last_version: 'v1.0.4', history: [] } },
+  settings: { storage_mode: 'isolated', role: 'developer', animations: true, online_sync_clean: true, online_auto_check: true, online_publish_preview: false, advanced_actions: false, online_confirm_full: true },
   recent: [{ name: '1.20.1-Fabric', path: 'D:\\Games\\Minecraft\\PCL\\.minecraft\\versions\\1.20.1-Fabric' }],
   logs: [
-    { time: '22:31:07', message: 'Pulses Swap v3.0.4 启动成功，作者: NimShade', level: 'SUCCESS', verbose: false },
+    { time: '22:31:07', message: 'Pulses Swap v3.1.0 启动成功，作者: NimShade', level: 'SUCCESS', verbose: false },
     { time: '22:31:08', message: '数据库位置: D:\\PulsesSwap_database', level: 'INFO', verbose: true },
     { time: '22:31:09', message: '整合包已就绪: 1.20.1-Fabric · 预设 4 个', level: 'SUCCESS', verbose: false },
     { time: '22:31:12', message: '云端检查完成：待下载 3 · 一致 9', level: 'INFO', verbose: false },
@@ -55,8 +55,24 @@ await page.addInitScript((s) => {
       if (method === 'app.role.switch') {
         s.role = params.role
         s.settings.role = params.role
+        s.plan = params.role === 'player'
+          ? { role: 'player', summary: '待下载 3 · 一致 9', items: [
+              { path: 'modern_warfare.zip', name: 'modern_warfare.zip', action: 'download', label: '下载', size: 48213120, checked: true },
+              { path: 'm4_pack.zip', name: 'm4_pack.zip', action: 'repair', label: '修复', size: 18210000, checked: true },
+              { path: 'pistols.zip', name: 'pistols.zip', action: 'download', label: '下载', size: 9210000, checked: true },
+              { path: 'old_pack.zip', name: 'old_pack.zip', action: 'ask_delete_local', label: '本地多余', size: 1200000, checked: false },
+            ] }
+          : { role: 'developer', summary: '待上传 2 · 云端多余 1 · 一致 9', items: [
+              { path: 'modern_warfare.zip', name: 'modern_warfare.zip', action: 'upload', label: '上传', size: 48213120, checked: true },
+              { path: 'm4_pack.zip', name: 'm4_pack.zip', action: 'upload', label: '上传', size: 18210000, checked: true },
+              { path: 'pistols.zip', name: 'pistols.zip', action: 'delete_cloud', label: '删除云端', size: 9210000, checked: false },
+              { path: 'old_pack.zip', name: 'old_pack.zip', action: 'skip', label: '一致', size: 1200000, checked: false },
+            ] }
       } else if (method === 'app.settings.update') {
         Object.assign(s.settings, params)
+      } else if (method === 'online.sync.all' || method === 'online.publish.all') {
+        window.__autoMethod = method
+        return { ok: true, data: { jobId: 'j_auto', cancelable: true } }
       } else if (method === 'preset.select') {
         s.selected = params.name
       }
@@ -132,10 +148,24 @@ await page.waitForTimeout(1400)
 assert.equal(await page.locator('.cover').count(), 0)
 assert.ok(await page.locator('.app.role-player').count(), '身份没有切换为玩家')
 assert.equal(await page.locator('.sidebar-foot').innerText(), '玩家')
+// 玩家管理页：默认一键更新，不需要勾选
+await page.locator('.nav-item').nth(1).click()
+await page.waitForTimeout(1200)
+assert.equal((await page.locator('.manage-action .action-primary').innerText()).trim(), '一键更新全部')
+assert.ok((await page.locator('.plan-card .pill').innerText()).includes('待下载'))
+assert.equal(await page.locator('.plan-card input[type=checkbox]').count(), 0, '玩家默认模式仍有差异勾选框')
+await page.screenshot({ path: '/tmp/web_shots/12-player-manage.png' })
+await page.locator('.manage-action .action-primary').click()
+await page.waitForTimeout(120)
+assert.equal(await page.evaluate(() => window.__autoMethod), 'online.sync.all')
+await page.evaluate(() => window.PS.push({ type: 'job.done', jobId: 'j_auto', data: { result: { message: '一键更新完成', state: null } } }))
+await page.waitForTimeout(120)
 // 切回开发者，保持后续截图一致
-await page.getByRole('button', { name: '开发者', exact: true }).click()
+await page.getByRole('button', { name: '切换为开发者', exact: true }).click()
 await page.waitForTimeout(1400)
 assert.ok(await page.locator('.app.role-developer').count())
+await page.locator('.nav-item').nth(2).click()
+await page.waitForTimeout(1200)
 
 await page.locator('.tabs button').nth(1).click()
 await page.waitForTimeout(200)
@@ -169,8 +199,19 @@ const manageBox = await managePrimary.boundingBox()
 assert.ok(manageBox, '管理页缺少主操作')
 assert.ok(manageBox.height >= 46, `管理页主操作高度 ${manageBox.height}`)
 assert.ok(manageBox.y + manageBox.height <= 812, '管理页主操作不在首屏')
-assert.equal((await managePrimary.innerText()).trim(), '检查云端更新')
+assert.equal((await managePrimary.innerText()).trim(), '一键上传全部')
+assert.ok((await page.locator('.plan-card .pill').innerText()).includes('待上传'))
+assert.equal(await page.getByText('待下载', { exact: false }).count(), 0, '开发者页出现待下载')
+assert.equal(await page.locator('.plan-card input[type=checkbox]').count(), 0, '默认模式仍有勾选框')
+assert.equal(await page.locator('.publish-row').count(), 0, '默认模式仍有版本号表单')
 await page.screenshot({ path: '/tmp/web_shots/10-manage-1140.png' })
+// 主按钮必须真的调用“一键上传全部”
+await managePrimary.click()
+await page.waitForTimeout(120)
+assert.equal(await page.evaluate(() => window.__autoMethod), 'online.publish.all')
+await page.evaluate(() => window.PS.push({ type: 'job.done', jobId: 'j_auto', data: { result: { message: '一键上传完成', state: null } } }))
+await page.waitForTimeout(120)
+assert.equal(await page.locator('.busy-toast').count(), 0)
 await page.setViewportSize({ width: 1280, height: 900 })
 await page.locator('.nav-item').nth(0).click()
 await page.waitForTimeout(1200)
@@ -216,6 +257,23 @@ for (const [w, h, name] of [[1140, 812, '09-1140x812'], [1600, 1000, '10-1600x10
   assert.ok(of <= 1, `${name} overflow ${of}`)
   await page.screenshot({ path: `/tmp/web_shots/${name}.png` })
 }
+// 高级操作默认关闭；开启后才出现版本号/勾选
+await page.locator('.nav-item').nth(2).click()
+await page.waitForTimeout(1200)
+const advancedSwitch = page.getByRole('switch', { name: '高级操作' })
+assert.equal(await advancedSwitch.getAttribute('aria-checked'), 'false')
+await advancedSwitch.click()
+await page.waitForTimeout(200)
+await page.locator('.nav-item').nth(1).click()
+await page.waitForTimeout(1200)
+assert.equal(await page.locator('.publish-row').count(), 1, '高级模式缺少版本号表单')
+assert.ok(await page.locator('.plan-card input[type=checkbox]').count() >= 4, '高级模式缺少差异勾选')
+await page.screenshot({ path: '/tmp/web_shots/13-developer-advanced.png' })
+await page.locator('.nav-item').nth(2).click()
+await page.waitForTimeout(1200)
+await page.getByRole('switch', { name: '高级操作' }).click()
+await page.waitForTimeout(200)
+
 // 关闭动画后切页应一帧到位，不应再出现幕布
 await page.locator('.nav-item').nth(2).click()
 await page.waitForTimeout(1200)

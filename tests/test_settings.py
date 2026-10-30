@@ -34,6 +34,7 @@ class SyncCleanSettingTest(unittest.TestCase):
         settings = self._load()
         self.assertTrue(settings.online_sync_clean)
         self.assertFalse(settings.online_sync_clean_set)
+        self.assertFalse(settings.advanced_actions)
 
     def test_old_false_default_migrates_to_full_sync(self):
         self._write({"storage_mode": "isolated", "role": "player",
@@ -47,6 +48,14 @@ class SyncCleanSettingTest(unittest.TestCase):
                      "online_sync_clean_set": True})
         settings = self._load()
         self.assertFalse(settings.online_sync_clean)
+
+    def test_advanced_actions_defaults_off_and_saves(self):
+        settings = self._load()
+        self.assertFalse(settings.advanced_actions)
+        settings.advanced_actions = True
+        self.assertTrue(settings.save())
+        data = json.loads((self.db / ".settings.json").read_text("utf-8"))
+        self.assertTrue(data["advanced_actions"])
 
     def test_toggle_marks_explicit_and_saves(self):
         settings = self._load()

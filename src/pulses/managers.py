@@ -69,7 +69,9 @@ class AppSettings:
         self.online_sync_clean_set = False
         # 开发者发布前要不要先看差异清单（默认直接发）
         self.online_publish_preview = False
-        # 批量/完整更新前二次确认（需求：完整更新必须有确认）
+        # 高级操作：显示手动差异选择、版本号/发布说明等；默认关闭。
+        self.advanced_actions = False
+        # 批量/完整更新前二次确认（高级选项；一键操作不弹确认）
         self.online_confirm_full = True
         self._settings_file: Path | None = None
 
@@ -98,6 +100,8 @@ class AppSettings:
                 self.online_sync_clean_set = explicit
                 self.online_publish_preview = bool(
                     data.get('online_publish_preview', False))
+                self.advanced_actions = bool(
+                    data.get('advanced_actions', False))
                 self.online_confirm_full = bool(
                     data.get('online_confirm_full', True))
             except Exception:
@@ -116,6 +120,7 @@ class AppSettings:
                            'online_sync_clean': self.online_sync_clean,
                            'online_sync_clean_set': self.online_sync_clean_set,
                            'online_publish_preview': self.online_publish_preview,
+                           'advanced_actions': self.advanced_actions,
                            'online_confirm_full': self.online_confirm_full},
                           f, indent=2, ensure_ascii=False)
             return True
@@ -930,6 +935,40 @@ class PresetManager:
         except Exception as e:
             self.log.log(f"删除 {path.name} 失败: {e}", 'ERROR')
             return False
+
+    def detach_preset(self, preset_name: str, progress_callback=None) -> bool:
+        """把当前已应用的预设从 tacz 收回预设目录，供“同步后再替换”使用。
+
+        只在 preset_name 确实是当前 applied 时动作；调用方负责在失败时恢复。
+        """
+        if preset_name not in self.presets:
+            return False
+        info = self.presets[preset_name]
+        if not info.get("applied"):
+            return True
+        if not self.tacz_path or not self.tacz_path.exists():
+            return False
+        target = Path(info["path"])
+        tacz = Path(self.tacz_path)
+        target.mkdir(parents=True, exist_ok=True)
+        protected = self.PROTECTED_FILES + self.PROTECTED_DIRS
+        moved = self._move_items(tacz, target, protected, progress_callback)
+        leftovers = [p.name for p in tacz.iterdir()
+                     if p.name not in protected]
+        if leftovers:
+            # 把已经搬走的还回去，绝不留下“tacz 空了但标记已应用”的状态
+            self._move_items(target, tacz, list(("description.txt", "index.json",
+                                                "version.txt")) + list(protected))
+            self.log.log(f"收回预设失败，仍有 {len(leftovers)} 项留在 tacz",
+                         "ERROR")
+            return False
+        info["applied"] = False
+        self._update_preset_status(target, False)
+        self.current_preset = None
+        self.save_cache()
+        self.log.log(f"已把预设 '{preset_name}' 从 tacz 收回，准备更新",
+                     "INFO", verbose=True)
+        return True
 
     def apply_preset(self, preset_name: str, progress_callback=None) -> bool:
         if preset_name not in self.presets:

@@ -59,7 +59,7 @@ function Sidebar({ page, onNavigate, role, expanded, setExpanded, version }) {
     <aside className={`sidebar ${expanded ? 'expanded' : ''}`}
       onMouseEnter={() => setExpanded(true)} onMouseLeave={() => setExpanded(false)}>
       <div className="brand-row">
-        <div className="brand-mark">P</div>
+        <div className="brand-mark"><img src="./logo-sw.png" alt="" /></div>
         <div className="brand-copy">
           <strong>PULSES SWAP</strong>
           <span>v{version || '3.0.0'}</span>
@@ -256,9 +256,15 @@ function Home({ snap, actions, busy }) {
                 onClick={() => selected && actions.apply(selected)}>
                 <Icon name="check" size={21} />{celebrate ? '已应用' : (selected?.applied ? '重新替换' : '一键替换')}
               </button>
-              <button className="btn hero-secondary" onClick={openPack}>
-                <Icon name="folder" size={17} />选择整合包
-              </button>
+              {(snap.online.bound_count || 0) > 0
+                ? <button className="btn hero-secondary" disabled={busy}
+                    onClick={() => snap.role === 'player' ? actions.syncAllAuto() : actions.publishAllAuto()}>
+                    <Icon name={snap.role === 'player' ? 'cloud' : 'upload'} size={17} />
+                    {snap.role === 'player' ? '一键更新全部' : '一键上传全部'}
+                  </button>
+                : <button className="btn hero-secondary" onClick={openPack}>
+                    <Icon name="folder" size={17} />选择整合包
+                  </button>}
             </div>
             {busy && <div className="hero-progress"><Progress value={busy.progress} text={busy.text || busy.title} /></div>}
           </motion.section>
@@ -318,7 +324,7 @@ function Home({ snap, actions, busy }) {
 
 function Manage({ snap, actions, busy }) {
   const animations = snap.settings?.animations !== false
-  const [tab, setTab] = useState('overview')
+  const advanced = snap.settings?.advanced_actions === true
   const [url, setUrl] = useState(snap.online.binding?.url || '')
   const [password, setPassword] = useState(snap.online.binding?.password || '')
   const [selection, setSelection] = useState(null)
@@ -327,73 +333,86 @@ function Manage({ snap, actions, busy }) {
   const selected = snap.presets.find((p) => p.name === snap.selected)
   useEffect(() => { setUrl(snap.online.binding?.url || ''); setPassword(snap.online.binding?.password || '') }, [snap.online.binding?.url, snap.online.binding?.password])
   useEffect(() => { setPublishVersion(selected?.version || '') }, [selected?.name, selected?.version])
-  const plan = snap.plan
+  const planMismatch = Boolean(snap.plan && snap.plan.role !== snap.role)
+  const plan = planMismatch ? null : snap.plan
   const selectedPaths = selection ?? new Set((plan?.items || []).filter((i) => i.checked).map((i) => i.path))
   const toggle = (path) => {
     const next = new Set(selectedPaths)
     next.has(path) ? next.delete(path) : next.add(path)
     setSelection(next)
   }
+  const isDeveloper = snap.role === 'developer'
+  const boundCount = snap.online.bound_count || 0
+  const autoLabel = isDeveloper ? '一键上传全部' : '一键更新全部'
+  const autoHint = isDeveloper
+    ? '自动遍历所有已绑定预设，扫描、递增版本并上传变更；不会删除云端多余文件。'
+    : '自动遍历所有已绑定预设，下载更新并清理本地多余项；已应用的预设会自动替换。'
+  const runAuto = () => isDeveloper ? actions.publishAllAuto() : actions.syncAllAuto()
   return (
     <div className="page manage-page">
       <div className="page-head"><div><span className="eyebrow">GLOBAL</span><h1>管理</h1></div>
         <div className="head-actions">
           <button className="btn ghost" onClick={actions.login}>{snap.online.account?.label ? '账号' : '登录蓝奏'}</button>
-          <button className="btn ghost" onClick={() => actions.switchRole(snap.role === 'developer' ? 'player' : 'developer')}>
-            {snap.role === 'developer' ? '切换为玩家' : '切换为开发者'}
+          <button className="btn ghost" onClick={() => actions.switchRole(isDeveloper ? 'player' : 'developer')}>
+            {isDeveloper ? '切换为玩家' : '切换为开发者'}
           </button>
         </div></div>
       <section className="action-deck manage-action" aria-label="管理主要操作">
         <div className="action-copy">
-          <span className="eyebrow">CURRENT PRESET</span>
-          <h2>{selected ? selected.name : '还没有选择预设'}</h2>
-          <p>{selected ? '先检查云端差异，再决定同步或发布。' : '到主页选择一个预设后，这里会显示可执行的云端操作。'}</p>
+          <span className="eyebrow">ONE CLICK</span>
+          <h2>全部云端预设 · {boundCount} 个</h2>
+          <p>{boundCount ? autoHint : '还没有绑定云端来源；先选择一个预设并保存分享链接。'}</p>
           <div className="action-meta">
-            <span>{selected?.version || '—'}</span>
-            <span>{plan?.summary || '尚未检查'}</span>
-            <span>{snap.role === 'developer' ? '开发者' : '玩家'}</span>
+            <span>{boundCount} 个已绑定</span>
+            <span>{plan?.summary || (isDeveloper ? '待上传检查' : '待更新检查')}</span>
+            <span>{isDeveloper ? '开发者' : '玩家'}</span>
           </div>
         </div>
         <div className="action-buttons">
-          <button className="btn xl primary action-primary" disabled={!selected || !url || busy}
-            onClick={() => actions.check(selected.name)}><Icon name="cloud" size={20} />检查云端更新</button>
-          {snap.role === 'developer' && <button className="btn action-secondary" disabled={!selected || busy}
-            onClick={() => actions.publishPlan(selected.name)}><Icon name="upload" size={17} />生成发布计划</button>}
+          <button className="btn xl primary action-primary" disabled={!boundCount || busy}
+            onClick={runAuto}><Icon name={isDeveloper ? 'upload' : 'cloud'} size={20} />{autoLabel}</button>
+          {advanced && <button className="btn action-secondary" disabled={!selected || !url || busy}
+            onClick={() => actions.check(selected.name)}><Icon name="refresh" size={17} />检查差异</button>}
+          {advanced && isDeveloper && <button className="btn action-secondary" disabled={!selected || busy}
+            onClick={() => actions.publishPlan(selected.name)}><Icon name="upload" size={17} />仅生成计划</button>}
         </div>
       </section>
       <div className="stat-grid">
         <div className="stat"><span>预设计数</span><strong>{snap.presets.length}</strong><small>当前整合包</small></div>
-        <div className="stat"><span>云端状态</span><strong>{snap.online.binding?.url ? '已绑定' : '未绑定'}</strong><small>{snap.plan?.summary || '尚未检查'}</small></div>
+        <div className="stat"><span>云端状态</span><strong>{snap.online.binding?.url ? '已绑定' : '未绑定'}</strong><small>{plan?.summary || '尚未检查'}</small></div>
         <div className="stat"><span>账号</span><strong>{snap.online.account?.label ? '已认证' : '未登录'}</strong><small>{snap.online.account?.label || '本地模式'}</small></div>
         <div className="stat"><span>发布历史</span><strong>{(snap.online.binding?.history || []).length}</strong><small>最近记录</small></div>
       </div>
       <section className="card plan-card">
-        <div className="card-head"><div><span className="eyebrow">DIFF</span><h2>差异与同步</h2></div>
+        <div className="card-head"><div><span className="eyebrow">DIFF</span><h2>{isDeveloper ? '待上传差异' : '云端差异'}</h2></div>
           {plan && <span className="pill">{plan.summary}</span>}</div>
-        {!plan ? <p className="muted pad">检查后会在这里显示云端差异</p> : <>
-          {snap.role === 'developer' && <div className="publish-row">
+        {planMismatch ? <p className="auto-note warning-note">当前差异计划属于另一个身份，已隐藏；点上方“{autoLabel}”会按当前身份重新计算。</p>
+          : !plan ? <p className="muted pad">不需要手动检查。点上方“{autoLabel}”，软件会逐个比对所有已绑定预设并完成操作。</p> : <>
+          {advanced && isDeveloper && <div className="publish-row">
             <label className="field"><span>发布版本号</span><input value={publishVersion} onChange={(e) => setPublishVersion(e.target.value)} placeholder={selected?.version || 'v1.0.0'} /></label>
             <label className="field"><span>发布说明</span><input value={publishNotes} onChange={(e) => setPublishNotes(e.target.value)} placeholder="可选" /></label>
           </div>}
-          <div className="plan-cta">
-            {snap.role === 'player'
+          {advanced ? <div className="plan-cta">
+            {!isDeveloper
               ? <button className="btn primary plan-primary" disabled={!selected || !selectedPaths.size || busy} onClick={() => actions.sync(selected.name, [...selectedPaths])}>同步选中</button>
               : snap.publish_ready
               ? <button className="btn primary plan-primary" disabled={busy} onClick={() => actions.publish(selected.name, publishVersion || selected.version, publishNotes, [...selectedPaths])}>发布选中</button>
               : <button className="btn primary plan-primary" disabled={busy || !selected} onClick={() => actions.publishPlan(selected.name)}>生成发布计划</button>}
-          </div>
+          </div> : <p className="auto-note">软件已按最稳妥方案选择：{isDeveloper ? '只上传变更，保留云端多余文件' : '下载更新，并按设置处理本地多余项'}。</p>}
           <div className="plan-list">
             <AnimatePresence mode="popLayout" initial={false}>
               {plan.items.map((item, i) => (
-                <motion.label key={`${snap.selected}:${snap.plan?.generation || 0}:${item.path}`}
+                <motion.div key={`${snap.selected}:${snap.plan?.generation || 0}:${item.path}`}
                   className={`diff-row ${item.action}`}
                   initial={animations ? { opacity: 0, y: 8, scale: 0.99 } : false}
-                  animate={{ opacity: 1, y: 0, scale: animations && busy && ['download', 'repair'].includes(item.action) ? 1.012 : 1 }}
+                  animate={{ opacity: 1, y: 0, scale: animations && busy && ['download', 'repair', 'upload'].includes(item.action) ? 1.012 : 1 }}
                   exit={animations ? { opacity: 0, y: -4 } : { opacity: 1 }}
                   transition={{ duration: animations ? 0.34 : 0, delay: animations ? i * 0.04 : 0, ease: [0.34, 1.3, 0.44, 1] }}>
-                  <input type="checkbox" checked={selectedPaths.has(item.path)} onChange={() => toggle(item.path)} />
+                  {advanced
+                    ? <input type="checkbox" aria-label={`选择 ${item.name}`} checked={selectedPaths.has(item.path)} onChange={() => toggle(item.path)} />
+                    : <span className={`diff-dot ${item.action}`} aria-hidden="true" />}
                   <span className="diff-name">{item.name}</span><span className="diff-label">{item.label}</span>
-                </motion.label>
+                </motion.div>
               ))}
             </AnimatePresence>
           </div>
@@ -402,7 +421,7 @@ function Manage({ snap, actions, busy }) {
       <div className="manage-grid">
         <section className="card">
           <div className="card-head"><div><span className="eyebrow">ACCOUNT</span><h2>{snap.online.account?.label || '未登录'}</h2></div>
-            <span className={`pill ${snap.role === 'developer' ? 'success' : ''}`}>{snap.role === 'developer' ? '开发者' : '玩家'}</span></div>
+            <span className={`pill ${isDeveloper ? 'success' : ''}`}>{isDeveloper ? '开发者' : '玩家'}</span></div>
           <p className="muted">{snap.online.available ? '蓝奏云在线模块已就绪' : '在线模块不可用'}</p>
           <div className="button-row">
             {snap.online.account?.label ? <button className="btn ghost" onClick={actions.logout}>退出认证</button> : <button className="btn primary" onClick={actions.login}>登录蓝奏云</button>}
@@ -414,7 +433,7 @@ function Manage({ snap, actions, busy }) {
             <label className="field"><span>分享链接</span><input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://..." /></label>
             <label className="field"><span>提取密码</span><input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="可留空" /></label>
             <div className="button-row"><button className="btn primary" disabled={!url} onClick={() => actions.bind(selected.name, url, password)}>保存绑定</button>
-              <button className="btn ghost" disabled={!url} onClick={() => actions.check(selected.name)}>检查更新</button></div>
+              {advanced && <button className="btn ghost" disabled={!url} onClick={() => actions.check(selected.name)}>检查差异</button>}</div>
           </> : <p className="muted">先在主页选择一个预设</p>}
         </section>
       </div>
@@ -425,12 +444,11 @@ function Manage({ snap, actions, busy }) {
             : (snap.online.binding.history || []).slice(0, 4).map((h, i) =>
               <div className="history-row" key={i}><strong>{h.version || 'v—'}</strong><span>{h.at ? new Date(h.at * 1000).toLocaleDateString() : ''}</span><span>上传 {h.uploaded || 0}</span></div>)}
         </section>
-        <section className="card"><div className="card-head"><div><span className="eyebrow">SHORTCUTS</span><h2>管理快捷操作</h2></div></div>
-          <div className="quick-grid">
-            <button className="quick" onClick={() => actions.check(snap.selected)}><Icon name="refresh" /><span>检查选中预设</span></button>
-            <button className="quick" onClick={() => actions.publishPlan(snap.selected)}><Icon name="upload" /><span>生成发布计划</span></button>
-            <button className="quick" onClick={actions.login}><Icon name="user" /><span>账号与认证</span></button>
-            <button className="quick" onClick={() => actions.switchRole(snap.role === 'developer' ? 'player' : 'developer')}><Icon name="settings" /><span>切换身份</span></button>
+        <section className="card"><div className="card-head"><div><span className="eyebrow">SAFE DEFAULTS</span><h2>软件如何自动决策</h2></div></div>
+          <div className="safety-lines">
+            <div><strong>{isDeveloper ? '只上传变更' : '只下载必要项'}</strong><span>{isDeveloper ? '不会自动删除云端多余文件' : '删除本地多余项会进入回收站'}</span></div>
+            <div><strong>自动版本</strong><span>{isDeveloper ? '在当前云端版本上递增补丁号' : '使用云端 manifest 的稳定版本'}</span></div>
+            <div><strong>需要精细控制？</strong><span>在设置里开启“高级操作”</span></div>
           </div>
         </section>
       </div>
@@ -456,19 +474,23 @@ function Settings({ snap, actions }) {
             <section className="card"><div className="section-title"><span className="eyebrow">APPEARANCE</span><h2>外观与动效</h2></div>
               <div className="setting-row"><div><strong>界面动画</strong><span>关闭后所有过渡一帧到位</span></div>
                 <button className={`switch ${s.animations ? 'on' : ''}`} role="switch" aria-checked={!!s.animations} aria-label="界面动画" onClick={() => update({ animations: !s.animations })}><span /></button></div>
-              <div className="setting-row"><div><strong>同步方式</strong><span>完全同步会删除本地多余枪包</span></div>
-                <button className={`switch ${s.online_sync_clean ? 'on' : ''}`} role="switch" aria-checked={!!s.online_sync_clean} aria-label="完全同步" onClick={() => update({ online_sync_clean: !s.online_sync_clean })}><span /></button></div>
             </section>
             <section className="card"><div className="section-title"><span className="eyebrow">IDENTITY</span><h2>身份</h2></div>
               <div className="setting-row"><div><strong>用户身份</strong><span>开发者可以发布到云端</span></div>
                 <div className="segmented"><button className={snap.role === 'player' ? 'active' : ''} onClick={() => actions.switchRole('player')}>玩家</button>
                   <button className={snap.role === 'developer' ? 'active' : ''} onClick={() => actions.switchRole('developer')}>开发者</button></div></div>
             </section>
+            <section className="card"><div className="section-title"><span className="eyebrow">OPERATION</span><h2>操作方式</h2></div>
+              <div className="setting-row"><div><strong>高级操作</strong><span>手动选择差异、填写版本号和发布说明；默认关闭</span></div>
+                <button className={`switch ${s.advanced_actions ? 'on' : ''}`} role="switch" aria-checked={!!s.advanced_actions} aria-label="高级操作" onClick={() => update({ advanced_actions: !s.advanced_actions })}><span /></button></div>
+              {s.advanced_actions && <div className="setting-row"><div><strong>完整更新前确认</strong><span>手动模式下，批量更新前先确认差异</span></div>
+                <button className={`switch ${s.online_confirm_full ? 'on' : ''}`} role="switch" aria-checked={!!s.online_confirm_full} aria-label="完整更新前确认" onClick={() => update({ online_confirm_full: !s.online_confirm_full })}><span /></button></div>}
+            </section>
             <section className="card"><div className="section-title"><span className="eyebrow">SYNC</span><h2>同步偏好</h2></div>
               <div className="setting-row"><div><strong>启动时检查更新</strong><span>只检查，不自动下载</span></div>
                 <button className={`switch ${s.online_auto_check ? 'on' : ''}`} role="switch" aria-checked={!!s.online_auto_check} aria-label="启动时检查更新" onClick={() => update({ online_auto_check: !s.online_auto_check })}><span /></button></div>
-              <div className="setting-row"><div><strong>完整更新前确认</strong><span>批量更新前先看差异</span></div>
-                <button className={`switch ${s.online_confirm_full ? 'on' : ''}`} role="switch" aria-checked={!!s.online_confirm_full} aria-label="完整更新前确认" onClick={() => update({ online_confirm_full: !s.online_confirm_full })}><span /></button></div>
+              <div className="setting-row"><div><strong>完全同步</strong><span>本地多余项进入回收站；一键更新会按此设置处理</span></div>
+                <button className={`switch ${s.online_sync_clean ? 'on' : ''}`} role="switch" aria-checked={!!s.online_sync_clean} aria-label="完全同步" onClick={() => update({ online_sync_clean: !s.online_sync_clean })}><span /></button></div>
             </section>
           </div>}
           {tab === 'database' && <section className="card"><div className="section-title"><span className="eyebrow">STORAGE</span><h2>数据库</h2></div>
@@ -583,7 +605,9 @@ export default function App() {
         if (st) setSnap(st)
         else refresh()
         setBusy(null)
-        showToast('操作完成', 'success')
+        const r = event.data?.result
+        const failed = r?.result?.ok === false || r?.ok === false
+        showToast(r?.message || '操作完成', failed ? 'warning' : 'success')
       } else if (type === 'job.error') {
         if (event.jobId !== jobIdRef.current) return
         setBusy(null)
@@ -720,6 +744,10 @@ export default function App() {
   }, [showToast])
   const check = useCallback((name) => startJob('online.check', { name }, '检查更新'), [startJob])
   const sync = useCallback((name, selection) => startJob('online.sync', { name, selection }, '同步预设'), [startJob])
+  const syncAuto = useCallback((name) => startJob('online.sync.auto', { name }, '一键更新'), [startJob])
+  const publishAuto = useCallback((name) => startJob('online.publish.auto', { name }, '一键发布'), [startJob])
+  const syncAllAuto = useCallback(() => startJob('online.sync.all', {}, '一键更新全部'), [startJob])
+  const publishAllAuto = useCallback(() => startJob('online.publish.all', {}, '一键发布全部'), [startJob])
   const publishPlan = useCallback((name) => startJob('online.publish.plan', { name }, '生成发布计划'), [startJob])
   const publish = useCallback((name, version, notes, selection) => {
     if (!version?.trim()) { showToast('请填写版本号', 'warning'); return }
@@ -788,7 +816,7 @@ export default function App() {
     setCover({ active: false, phase: 'idle' })
   }, [snap.role, cover.active, snap.settings?.animations, showToast])
 
-  const actions = { openPack, openDatabase, select, createPreset, rename, delete: remove, saveVersion, apply, bind, check, sync, publishPlan, publish, login, logout, updateSettings, switchRole, prompt, toast: showToast, navigate, cancelJob }
+  const actions = { openPack, openDatabase, select, createPreset, rename, delete: remove, saveVersion, apply, bind, check, sync, syncAuto, publishAuto, syncAllAuto, publishAllAuto, publishPlan, publish, login, logout, updateSettings, switchRole, prompt, toast: showToast, navigate, cancelJob }
   const animations = snap.settings?.animations !== false
   const pageEl = page === 'home' ? <Home snap={snap} actions={actions} busy={busy} />
     : page === 'manage' ? <Manage snap={snap} actions={actions} busy={busy} />

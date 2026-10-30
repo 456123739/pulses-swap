@@ -2,7 +2,7 @@ import { chromium } from 'playwright'
 import fs from 'node:fs'
 
 const base = {
-  revision: 9, version: '3.0.4', role: 'player',
+  revision: 9, version: '3.1.0', role: 'player',
   pack: {
     path: 'D:\\Games\\Minecraft\\PCL\\.minecraft\\versions\\1.20.1-Fabric',
     name: '1.20.1-Fabric',
@@ -35,6 +35,8 @@ const base = {
   publish_ready: false,
   online: {
     available: true,
+    bound: ['轻量生存', '默认枪包'],
+    bound_count: 2,
     account: { label: '186****9816', username: '18651999816', saved: true },
     binding: {
       url: 'https://wwb.lanzouq.com/b01pulses', password: 'pulse',
@@ -48,7 +50,7 @@ const base = {
   },
   recent: [{ name: '1.20.1-Fabric', path: 'D:\\Games\\Minecraft\\PCL\\.minecraft\\versions\\1.20.1-Fabric' }],
   logs: [
-    { time: '21:57:07', message: 'Pulses Swap v3.0.4 启动成功，作者: NimShade', level: 'SUCCESS', verbose: false },
+    { time: '21:57:07', message: 'Pulses Swap v3.1.0 启动成功，作者: NimShade', level: 'SUCCESS', verbose: false },
     { time: '21:57:08', message: '整合包已就绪: 1.20.1-Fabric · 预设 4 个', level: 'SUCCESS', verbose: false },
     { time: '21:57:12', message: '云端检查完成：待下载 3 · 一致 9', level: 'INFO', verbose: false },
   ],
@@ -67,8 +69,22 @@ async function shot(role) {
   const state = JSON.parse(JSON.stringify(base))
   state.role = role
   state.settings.role = role
-  state.plan.role = role
   state.publish_ready = role === 'developer'
+  state.plan = role === 'developer'
+    ? { role: 'developer', summary: '待上传 2 · 云端多余 1 · 一致 9', offline: false,
+        items: [
+          { path: 'modern_warfare.zip', name: 'modern_warfare.zip', action: 'upload', label: '上传', size: 48213120, checked: true },
+          { path: 'm4_pack.zip', name: 'm4_pack.zip', action: 'upload', label: '上传', size: 18210000, checked: true },
+          { path: 'pistols.zip', name: 'pistols.zip', action: 'delete_cloud', label: '删除云端', size: 9210000, checked: false },
+          { path: 'old_pack.zip', name: 'old_pack.zip', action: 'skip', label: '一致', size: 1200000, checked: false },
+        ] }
+    : { role: 'player', summary: '待下载 3 · 一致 9', offline: false,
+        items: [
+          { path: 'modern_warfare.zip', name: 'modern_warfare.zip', action: 'download', label: '下载', size: 48213120, checked: true },
+          { path: 'm4_pack.zip', name: 'm4_pack.zip', action: 'repair', label: '修复', size: 18210000, checked: true },
+          { path: 'pistols.zip', name: 'pistols.zip', action: 'download', label: '下载', size: 9210000, checked: true },
+          { path: 'old_pack.zip', name: 'old_pack.zip', action: 'ask_delete_local', label: '本地多余', size: 1200000, checked: false },
+        ] }
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 1 })
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))
