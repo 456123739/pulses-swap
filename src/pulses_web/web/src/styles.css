@@ -550,3 +550,5 @@ h3 { font-size: 15px; font-weight: 600; }
   transition: background-color 420ms var(--ease-out), color 420ms var(--ease-out),
     box-shadow 420ms var(--ease-out);
 }
+.plan-cta { display: flex; justify-content: flex-end; padding: 8px 0 10px; border-bottom: 1px solid var(--divider); }
+.plan-cta .btn.plan-primary { height: 48px; min-width: 168px; font-size: 14px; }
