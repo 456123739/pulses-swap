@@ -113,7 +113,8 @@ jobs:
           path: dist/PulsesSwap-linux-x86_64.tar.gz
 
   ui:
-    runs-on: ubuntu-latest
+    # Playwright 1.56 不支持 ubuntu-latest 已迁移到的 26.04；固定 22.04。
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

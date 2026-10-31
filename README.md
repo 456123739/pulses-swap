@@ -1,6 +1,6 @@
 # Pulses Swap 3.0
 
-TACZ 枪包一键切换工具 · **PyWebView + React** 版 · v3.1.1
+TACZ 枪包一键切换工具 · **PyWebView + React** 版 · v3.1.2
 
 Pulses Swap 把 Minecraft 的 TACZ 枪包按「预设」分组：拖入整合包、选择预设、
 一键替换，也可以把预设发布到蓝奏云，让玩家增量同步。

@@ -1,5 +1,15 @@
 # 更新日志
 
+## v3.1.2（2026-10-31）
+
+### 构建链修复
+- Web UI 黑盒测试 job 固定到 `ubuntu-22.04`。`ubuntu-latest` 已迁移到 26.04，Playwright 1.56 不支持该平台，导致 3.1.1 的 release job 被 UI job 挡住。
+- 应用代码与 3.1.1 相同：WebView 窗口启动即显示、启动日志/错误框、`MainWindowHandle` 冒烟、一键 API 映射。
+
+### 验证
+- 216 个 Python 测试通过；Web 前端构建、UI/布局黑盒测试通过。
+- Windows 构建冒烟在有主窗口句柄后通过。
+
 ## v3.1.1（2026-10-31）
 
 ### 启动修复
