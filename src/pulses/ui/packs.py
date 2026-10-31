@@ -593,10 +593,10 @@ class PacksMixin:
         """卡片右侧按钮：更新 / 发布 / 绑定 / 检查。"""
         self.on_preset_selected(name)
         if kind == "sync":
-            # 玩家：点了就更新，不弹选择框
-            self._sync_now(name)
+            # 玩家：点了就完整更新，不弹选择框
+            self._auto_sync_named(name)
         elif kind == "publish":
-            self.open_publish_dialog(name)
+            self._auto_publish_named(name)
         elif kind == "source":
             self.open_source_dialog(name)
         elif kind == "check":
@@ -614,12 +614,18 @@ class PacksMixin:
         self.on_preset_selected(name)
         # 自绘菜单：和卡片同一套样式，不再是系统方角菜单
         items = [("详情…", lambda: self.open_preset_detail(name)), None]
+        advanced = bool(getattr(self.settings, "advanced_actions", False))
         if self.is_developer:
-            items.append(("发布到云端…",
-                          lambda: self.open_publish_dialog(name)))
+            items.append(("一键上传当前",
+                          lambda: self._auto_publish_named(name)))
+            if advanced:
+                items.append(("手动发布…",
+                              lambda: self.open_publish_dialog(name)))
         else:
-            items.append(("检查更新", lambda: self._online_check(name)))
-            items.append(("更新这个预设", lambda: self._sync_now(name)))
+            if advanced:
+                items.append(("检查更新", lambda: self._online_check(name)))
+            items.append(("一键更新当前",
+                          lambda: self._auto_sync_named(name)))
         items.append(("云端来源…", lambda: self.open_source_dialog(name)))
         if self.is_developer:
             items += [None, ("迁移预设…", lambda: self.migrate_preset(name))]

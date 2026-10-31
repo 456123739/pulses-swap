@@ -294,6 +294,11 @@ class HomePageMixin:
                                               fg_color="transparent")
         self.home_player_actions = ctk.CTkFrame(manager_actions,
                                                  fg_color="transparent")
+        # 常用一键动作：玩家更新全部 / 开发者上传全部
+        self.home_auto_btn = make_button(
+            manager_actions, "一键更新全部", command=self._auto_all,
+            accent=True, height=30, font_size=FS_SMALL, width=128)
+        self.home_auto_btn.pack(side=LEFT, padx=(0, PAD_GAP))
         # 开发者：上传 / 云端文件 / 检查云端 / 刷新
         # 上传是“下拉菜单”，不是一颗直接弹文件框的按钮：
         # 文件 / 文件夹 / 新建云端文件夹都在同一个入口里。
@@ -324,7 +329,7 @@ class HomePageMixin:
             font_size=FS_SMALL, width=92)
         self.home_download_btn.pack(side=LEFT)
         self.home_sync_btn = make_text_button(
-            self.home_player_actions, "同步当前",
+            self.home_player_actions, "一键更新",
             command=self._sync_current_preset)
         self.home_sync_btn.pack(side=LEFT, padx=(PAD_GAP, 0))
         self.home_player_check_btn = make_text_button(
@@ -661,10 +666,11 @@ class HomePageMixin:
         name = getattr(self, "current_selected_preset", None)
         if not name:
             return
-        if bool(getattr(self.settings, "online_publish_preview", False)):
+        if (bool(getattr(self.settings, "advanced_actions", False))
+                and bool(getattr(self.settings, "online_publish_preview", False))):
             self.open_publish_dialog(name)
         else:
-            self._publish_now(name)
+            self._auto_publish_named(name)
 
     def _apply_role_actions(self):
         """身份决定主操作：玩家「一键替换」，开发者「发布到云端」。
@@ -674,6 +680,11 @@ class HomePageMixin:
         dev = bool(getattr(self, "is_developer", False))
         loaded = bool(getattr(self, "preset_manager", None)
                       or getattr(self, "current_pack_path", None))
+        try:
+            self.home_auto_btn.configure(
+                text="一键上传全部" if dev else "一键更新全部")
+        except Exception:
+            pass
         try:
             # 管理面板：上传只给开发者，下载只给玩家；没有整合包时也保留
             # （开发者可以先登录云端再选包）
@@ -721,11 +732,15 @@ class HomePageMixin:
                     self.aux_row.grid_remove()
         except Exception:
             pass
+        try:
+            self._apply_advanced_controls()
+        except Exception:
+            pass
 
     def _sync_current_preset(self):
         name = getattr(self, "current_selected_preset", None)
         if name:
-            self._sync_now(name)
+            self._auto_sync_named(name)
 
     # ==================== 当前预设的两个入口 ====================
     def _open_current_detail(self):

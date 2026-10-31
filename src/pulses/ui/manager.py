@@ -553,9 +553,14 @@ class ManagerPageMixin:
             font_size=FS_TINY)
         self.manage_current_label.pack(side=RIGHT)
 
+        self.manage_auto_btn = make_button(
+            quick, "一键更新全部", command=self._auto_all,
+            accent=True, height=36, font_size=FS_SMALL)
+        self.manage_auto_btn.pack(fill=X, padx=PAD_CARD_X,
+                                  pady=(0, PAD_TIGHT))
         self.manage_primary_btn = make_button(
             quick, "从云端添加", command=self._manage_primary_action,
-            accent=True, height=36, font_size=FS_SMALL)
+            height=30, font_size=FS_SMALL)
         self.manage_primary_btn.pack(fill=X, padx=PAD_CARD_X,
                                       pady=(0, PAD_TIGHT))
 
@@ -609,14 +614,15 @@ class ManagerPageMixin:
         player_btns.pack(fill=X)
         make_text_button(player_btns, "从云端添加",
                          command=self.open_add_from_cloud).pack(side=LEFT)
-        make_text_button(player_btns, "同步当前",
+        make_text_button(player_btns, "一键更新",
                          command=self._manage_sync_current).pack(
             side=LEFT, padx=(PAD_TIGHT, 0))
-        make_text_button(player_btns, "检查更新",
-                         command=self._manage_check_current).pack(
-            side=LEFT, padx=(PAD_TIGHT, 0))
-        make_text_button(player_btns, "刷新",
-                         command=self._manage_refresh).pack(
+        self.manage_check_btn = make_text_button(
+            player_btns, "检查更新", command=self._manage_check_current)
+        self.manage_check_btn.pack(side=LEFT, padx=(PAD_TIGHT, 0))
+        self.manage_player_refresh_btn = make_text_button(
+            player_btns, "刷新", command=self._manage_refresh)
+        self.manage_player_refresh_btn.pack(
             side=LEFT, padx=(PAD_TIGHT, 0))
         make_text_button(player_btns, "清理缓存",
                          command=self._manage_clean_cache).pack(
@@ -711,6 +717,8 @@ class ManagerPageMixin:
             self.manage_role_label.configure(
                 text="开发者" if dev else "玩家",
                 text_color=C_ACCENT if dev else C_TEXT_SECONDARY)
+            self.manage_auto_btn.configure(
+                text="一键上传全部" if dev else "一键更新全部")
         except Exception:
             pass
         try:
@@ -773,6 +781,10 @@ class ManagerPageMixin:
         self._update_manage_overview()
         self._update_manage_summary()
         self._update_manage_current()
+        try:
+            self._apply_advanced_controls()
+        except Exception:
+            pass
 
     def _update_manage_account(self):
         label = getattr(self, "manage_account_label", None)
@@ -931,22 +943,11 @@ class ManagerPageMixin:
                     pass
         data = self._preset_card_data(name)
         if self.is_developer:
-            if applied:
-                btn.configure(text="发布到云端", state="normal")
-                self._manage_primary_kind = "publish"
-            else:
-                btn.configure(text="先应用当前预设", state="normal")
-                self._manage_primary_kind = "apply"
+            btn.configure(text="一键上传当前", state="normal")
+            self._manage_primary_kind = "publish"
         else:
-            if not applied:
-                btn.configure(text="一键替换", state="normal")
-                self._manage_primary_kind = "apply"
-            elif data.get("action_kind") == "sync":
-                btn.configure(text="同步更新", state="normal")
-                self._manage_primary_kind = "sync"
-            else:
-                btn.configure(text="打开详情", state="normal")
-                self._manage_primary_kind = "detail"
+            btn.configure(text="一键更新当前", state="normal")
+            self._manage_primary_kind = "sync"
 
     def _update_manage_pack_list(self):
         # 旧入口保留：管理页已改成总览，不再单独维护枪包卡
@@ -981,9 +982,9 @@ class ManagerPageMixin:
             except Exception:
                 pass
         if kind == "publish":
-            self.open_publish_dialog(name)
+            self._auto_publish_named(name)
         elif kind == "sync":
-            self._sync_now(name)
+            self._auto_sync_named(name)
         elif kind == "check":
             self._online_check(name)
         elif kind == "apply":
@@ -1010,9 +1011,9 @@ class ManagerPageMixin:
         if not name:
             return
         if kind == "publish":
-            self.open_publish_dialog(name)
+            self._auto_publish_named(name)
         elif kind == "sync":
-            self._sync_now(name)
+            self._auto_sync_named(name)
         elif kind == "apply":
             self.apply_preset()
         elif kind == "detail":
@@ -1062,7 +1063,7 @@ class ManagerPageMixin:
         if not name:
             self.toast("先选择一个预设", "warning")
             return
-        self._sync_now(name)
+        self._auto_sync_named(name)
 
     def _manage_check_current(self):
         name = getattr(self, "current_selected_preset", None)

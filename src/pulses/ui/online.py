@@ -23,6 +23,7 @@ from ..animation import *
 from ..widget import *
 from ..dialogs import *
 from ..dialogs import _OVERLAY_STACK
+from ..auto_actions import AutoActions
 
 try:
     from online import diff as online_diff
@@ -1627,17 +1628,19 @@ class OnlineMixin:
         if pending == "sync":
             # 一路走到一键同步：这里再弹「要更新哪些」就又绕回去了
             if error is None:
-                started = self._sync_now(name)
+                started = self._auto_sync_named(name)
                 if not started:
                     self._bulk_after_sync(name)
             else:
                 # 批量更新时某个预设检查失败：跳过它，继续下一个
                 self._bulk_after_sync(name)
         elif pending == "publish" and error is None:
-            if bool(getattr(self.settings, "online_publish_preview", False)):
+            if (bool(getattr(self.settings, "advanced_actions", False))
+                    and bool(getattr(self.settings,
+                                     "online_publish_preview", False))):
                 self.open_publish_dialog(name)
             else:
-                self._publish_now(name)
+                self._auto_publish_named(name)
         elif pending == "source":
             self.open_source_dialog(name)
         self._bulk_check_mark(name)
@@ -2473,6 +2476,211 @@ class OnlineMixin:
     def _set_online_busy(self, busy: bool) -> None:
         self.online_busy = bool(busy)
 
+    # ==================================================================
+    # 一键更新 / 一键发布（默认完整执行，不弹差异选择）
+    # ==================================================================
+    def _apply_advanced_controls(self):
+        """默认只留一键入口；手动检查/预览/部分同步收进设置。"""
+        adv = bool(getattr(self.settings, "advanced_actions", False))
+        specs = (
+            (getattr(self, "home_check_btn", None),
+             getattr(self, "home_refresh_btn", None), PAD_GAP),
+            (getattr(self, "home_player_check_btn", None),
+             getattr(self, "home_player_refresh_btn", None), PAD_GAP),
+            (getattr(self, "manage_check_btn", None),
+             getattr(self, "manage_player_refresh_btn", None), PAD_TIGHT),
+            (getattr(self, "home_upload_btn", None),
+             getattr(self, "home_cloud_btn", None), PAD_GAP),
+            (getattr(self, "manage_upload_menu", None),
+             getattr(self, "manage_tacz_btn", None), PAD_TIGHT),
+        )
+        for btn, before, gap in specs:
+            if btn is None:
+                continue
+            try:
+                if not adv:
+                    btn.pack_forget()
+                elif not btn.winfo_manager():
+                    if before is not None and before.winfo_exists():
+                        btn.pack(side=LEFT, padx=(gap, 0), before=before)
+                    else:
+                        btn.pack(side=LEFT, padx=(gap, 0))
+            except Exception:
+                pass
+
+    def _auto_role(self):
+        return "developer" if self.is_developer else "player"
+
+    def _auto_names(self):
+        try:
+            runner = AutoActions(
+                self.online, self.preset_manager, self.settings,
+                ref_for=self._preset_ref, apply_preset=lambda n: True)
+            return runner.bound_names(self._auto_role())
+        except Exception:
+            return []
+
+    def _auto_update_current(self):
+        name = getattr(self, "current_selected_preset", None)
+        if not name:
+            self.toast("先选择一个预设", "info")
+            return
+        self._run_auto("sync", [name])
+
+    def _auto_update_all(self):
+        self._run_auto("sync", self._auto_names())
+
+    def _auto_publish_current(self):
+        name = getattr(self, "current_selected_preset", None)
+        if not name:
+            self.toast("先选择一个预设", "info")
+            return
+        self._run_auto("publish", [name])
+
+    def _auto_publish_all(self):
+        self._run_auto("publish", self._auto_names())
+
+    def _auto_all(self):
+        if self.is_developer:
+            self._auto_publish_all()
+        else:
+            self._auto_update_all()
+
+    def _auto_apply(self, name: str) -> bool:
+        """工作线程里同步应用预设；不触碰 Tk 控件。"""
+        pm = self.preset_manager
+        if pm is None:
+            return False
+        self._stop_watcher()
+        try:
+            ok = bool(pm.apply_preset(name))
+            if ok:
+                try:
+                    pm.update_preset_index(pm.current_preset or name,
+                                           from_tacz=True)
+                except Exception:
+                    pass
+            return ok
+        finally:
+            self._start_watcher()
+
+    def _run_auto(self, kind: str, names):
+        if self.online is None or self.preset_manager is None:
+            self.toast("还没有加载整合包或在线模块不可用", "warning")
+            return False
+        if kind == "sync" and self.is_developer:
+            self.toast("开发者身份不执行下载，请切换为玩家", "warning")
+            return False
+        if kind == "publish" and not self.is_developer:
+            self.toast("发布只对开发者开放", "warning")
+            return False
+        if (getattr(self, "is_applying", False)
+                or getattr(self, "online_busy", False)):
+            self.toast("正在处理，完成后再试", "warning")
+            return False
+        names = list(dict.fromkeys(names or []))
+        if not names:
+            self.toast("还没有绑定云端来源的预设", "info")
+            return False
+        label = "更新" if kind == "sync" else "上传"
+        card = make_card(self, None, width=560)
+        card.add_title(f"正在一键{label}" + ("全部" if len(names) > 1 else ""))
+        card.add_subtitle(f"{len(names)} 个预设 · 自动检查并完整执行，失败会自动恢复")
+        panel = self._build_progress_panel(card.body)
+        cancel_flag = {"stop": False}
+
+        def do_cancel():
+            cancel_flag["stop"] = True
+            cancel_btn.configure(state="disabled", text="正在停止…")
+
+        cancel_btn = make_button(panel["buttons"], "取消", command=do_cancel)
+        cancel_btn.pack(side=RIGHT)
+        panel["buttons"].pack(fill=X, pady=(PAD_DIALOG, 0))
+
+        self._set_online_busy(True)
+        self.set_busy_state(True, f"一键{label}")
+        self.set_status(f"正在一键{label} {len(names)} 个预设…", "busy",
+                        progress=0.0)
+
+        def on_progress(pct, text):
+            try:
+                done = int(round((pct if pct is not None else 0) * 100))
+            except Exception:
+                done = 0
+            ui_call(self.root, panel["update"], done, 100, 0, 0, str(text))
+
+        service = self.online
+        pm = self.preset_manager
+        settings = self.settings
+
+        def worker():
+            try:
+                runner = AutoActions(
+                    service, pm, settings,
+                    ref_for=self._preset_ref,
+                    apply_preset=self._auto_apply,
+                    log=self.log_manager.log,
+                    cancel=lambda: cancel_flag["stop"],
+                    progress=on_progress)
+                if len(names) > 1:
+                    out = runner.run_all(kind, names)
+                elif kind == "sync":
+                    one = runner.sync_one(names[0])
+                    out = {"changed": [names[0]] if one.get("changed") else [],
+                           "unchanged": [] if one.get("changed") else [names[0]],
+                           "failed": [], "message": one.get("message", "")}
+                else:
+                    one = runner.publish_one(names[0])
+                    out = {"changed": [names[0]] if one.get("changed") else [],
+                           "unchanged": [] if one.get("changed") else [names[0]],
+                           "failed": [], "message": one.get("message", "")}
+                ui_call(self.root, self._auto_done, card, kind, out, None)
+            except Exception as exc:
+                ui_call(self.root, self._auto_done, card, kind, None, exc)
+
+        threading.Thread(target=worker, daemon=True).start()
+        return True
+
+    def _auto_sync_named(self, name: str) -> bool:
+        return bool(self._run_auto("sync", [name]))
+
+    def _auto_publish_named(self, name: str) -> bool:
+        return bool(self._run_auto("publish", [name]))
+
+    def _auto_done(self, card, kind, out, error):
+        self._set_online_busy(False)
+        self.set_busy_state(False, "")
+        try:
+            card.close(True)
+        except Exception:
+            pass
+        if error is not None:
+            self.log_manager.log(f"一键操作失败：{error}", 'ERROR')
+            self.set_status("一键操作失败", "error")
+            show_error("一键操作失败", str(error))
+            return
+        out = out or {}
+        message = str(out.get("message") or "操作完成")
+        failed = out.get("failed") or []
+        if failed:
+            detail = "\n".join(f"· {name}：{reason}" for name, reason in failed[:6])
+            self.log_manager.log(message + "\n" + detail, 'WARNING')
+            self.set_status(message, "warning")
+            show_warning("部分预设失败", message + "\n\n" + detail)
+        else:
+            self.log_manager.log(message, 'SUCCESS')
+            self.set_status(message, "success")
+            self.toast(message, "success")
+        try:
+            self._update_preset_list()
+            self._refresh_preset_cards()
+            self._update_manage_role()
+            self._update_manage_overview()
+            self._update_manage_summary()
+            self._refresh_sidebar_clouds(force=True)
+        except Exception:
+            pass
+
     def _sync_now(self, name: str) -> bool:
         """玩家点「更新」= 直接同步，不再弹「要更新哪些」的选择框。
 
@@ -2514,6 +2722,9 @@ class OnlineMixin:
         return True
 
     def open_sync_dialog(self, name: str):
+        if not bool(getattr(self.settings, "advanced_actions", False)):
+            self._auto_sync_named(name)
+            return
         if self.is_developer:
             self.toast("开发者身份不执行下载，请切换为玩家", "warning")
             return
@@ -2766,6 +2977,9 @@ class OnlineMixin:
                           str(source.get("last_min_app") or ""))
 
     def open_publish_dialog(self, name: str):
+        if not bool(getattr(self.settings, "advanced_actions", False)):
+            self._auto_publish_named(name)
+            return
         if self.online is None:
             show_warning("在线功能不可用", "在线模块没有加载成功。")
             return

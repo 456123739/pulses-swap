@@ -54,7 +54,7 @@ function Progress({ value, text }) {
   )
 }
 
-function Sidebar({ page, onNavigate, role, expanded, setExpanded, version }) {
+function Sidebar({ page, onNavigate, role, expanded, setExpanded, version, onSwitchRole, pack, presetCount }) {
   return (
     <aside className={`sidebar ${expanded ? 'expanded' : ''}`}
       onMouseEnter={() => setExpanded(true)} onMouseLeave={() => setExpanded(false)}>
@@ -74,9 +74,16 @@ function Sidebar({ page, onNavigate, role, expanded, setExpanded, version }) {
           </button>
         ))}
       </nav>
+      {pack?.loaded && <button className="sidebar-pack" onClick={() => onNavigate('home')} title={pack.name}>
+        <Icon name="folder" size={17} />
+        <span className="sidebar-pack-copy"><strong>{pack.name}</strong><small>{presetCount} 个预设</small></span>
+      </button>}
       <div className="sidebar-foot">
-        <span className={`role-dot ${role}`} />
-        <span>{role === 'developer' ? '开发者' : '玩家'}</span>
+        <button className="role-switch" onClick={onSwitchRole}
+          title={role === 'developer' ? '切换为玩家' : '切换为开发者'}>
+          <span className={`role-dot ${role}`} />
+          <span className="role-copy">{role === 'developer' ? '开发者' : '玩家'}<small>切换身份</small></span>
+        </button>
       </div>
     </aside>
   )
@@ -100,7 +107,9 @@ function Modal({ modal, onClose }) {
     if (submitted.current) return
     submitted.current = true
     const callback = modal.onConfirm
-    const payload = modal.kind === 'login' ? { username: value, password } : value
+    const payload = modal.kind === 'login'
+      ? { username: value, password }
+      : modal.kind === 'cloudadd' ? { url: value, password } : value
     onClose()
     Promise.resolve(callback(payload)).catch(() => {})
   }
@@ -132,6 +141,15 @@ function Modal({ modal, onClose }) {
             <label className="field"><span>蓝奏账号</span>
               <input autoFocus value={value} onChange={(e) => setValue(e.target.value)} placeholder="手机号或邮箱" /></label>
             <label className="field"><span>密码</span>
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') submit() }} /></label>
+          </>
+        )}
+        {modal.kind === 'cloudadd' && (
+          <>
+            <label className="field"><span>分享链接</span>
+              <input autoFocus value={value} onChange={(e) => setValue(e.target.value)} placeholder="https://..." /></label>
+            <label className="field"><span>提取密码</span>
               <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') submit() }} /></label>
           </>
@@ -278,10 +296,12 @@ function Home({ snap, actions, busy }) {
               </div>
             </motion.div>
             <div className="hero-actions">
-              <button className={`btn hero-primary ${celebrate ? 'is-applied' : ''}`} disabled={!selected || busy}
-                onClick={() => selected && actions.apply(selected)}>
-                <Icon name="check" size={21} />{celebrate ? '已应用' : (selected?.applied ? '重新替换' : '一键替换')}
-              </button>
+              {selected?.applied
+                ? <div className={`hero-primary applied-state ${celebrate ? 'is-applied' : ''}`} aria-label="当前预设已应用"><Icon name="check" size={21} />已应用</div>
+                : <button className="btn hero-primary" disabled={!selected || busy}
+                    onClick={() => selected && actions.apply(selected)}>
+                    <Icon name="check" size={21} />一键替换
+                  </button>}
               {(snap.online.bound_count || 0) > 0
                 ? <button className="btn hero-secondary" disabled={busy}
                     onClick={() => snap.role === 'player' ? actions.syncAllAuto() : actions.publishAllAuto()}>
@@ -299,7 +319,9 @@ function Home({ snap, actions, busy }) {
             <section className="card presets-card">
               <div className="card-head">
                 <div><span className="eyebrow">PRESETS</span><h2>预设 <span className="count-badge">{snap.presets.length}</span></h2></div>
-                <button className="btn small" onClick={() => actions.prompt('新建预设', '名称', '', (v) => actions.createPreset(v))}><Icon name="plus" />新建</button>
+                <div className="button-row"><button className="btn small ghost" onClick={actions.addFromCloud}><Icon name="cloud" />从云端</button>
+                  <button className="btn small ghost" onClick={() => actions.select(snap.selected)} disabled={!snap.selected}><Icon name="refresh" />刷新</button>
+                  <button className="btn small" onClick={() => actions.prompt('新建预设', '名称', '', (v) => actions.createPreset(v))}><Icon name="plus" />新建</button></div>
               </div>
               <div className="preset-list">
                 {snap.presets.length === 0 ? <p className="muted pad">还没有预设</p> : snap.presets.map((p) => (
@@ -337,7 +359,8 @@ function Home({ snap, actions, busy }) {
                 </div>
                 <div className="detail-footer">
                   <span className="muted">{snap.online.binding?.url ? '云端已绑定，可增量同步' : '尚未绑定云端来源'}</span>
-                  <button className="btn ghost small" onClick={() => actions.navigate('manage')}>管理云端</button>
+                  <div className="button-row"><button className="btn ghost small" onClick={actions.openTacz}><Icon name="folder" />打开 TACZ</button>
+                    <button className="btn ghost small" onClick={() => actions.navigate('manage')}>管理云端</button></div>
                 </div>
               </> : <div className="detail-empty"><p>从左侧选择一个预设</p><span>选中后可在这里查看版本、云端绑定和枪包列表。</span></div>}
             </motion.section>
@@ -523,7 +546,8 @@ function Settings({ snap, actions }) {
             <div className="info-block"><span>当前数据库</span><strong>{snap.pack.path || '未绑定整合包'}</strong></div>
             <div className="info-block"><span>存储模式</span><strong>{s.storage_mode === 'merged' ? '合并存储' : '隔离存储'}</strong></div>
             <p className="muted">切换整合包时会自动绑定对应数据库；旧版 FGC_database 会在启动时迁移。</p>
-            <button className="btn ghost" onClick={actions.openDatabase}>选择数据库目录</button>
+            <div className="button-row"><button className="btn ghost" onClick={actions.openDatabase}>选择数据库目录</button>
+              <button className="btn ghost" onClick={actions.clearCache}>清理缓存</button></div>
           </section>}
           {tab === 'about' && <section className="card about"><div className="wordmark about-mark"><span className="wordmark-bar" /><span className="wordmark-pulses">Pulses</span><span className="wordmark-swap">Swap</span></div>
             <p>把 Minecraft TACZ 枪包按预设分组，一键替换，支持云端增量同步。</p>
@@ -547,13 +571,14 @@ function Settings({ snap, actions }) {
   )
 }
 
-function LogPage({ logs, snap }) {
+function LogPage({ logs, snap, onClear }) {
   const counts = logs.reduce((acc, l) => { acc[l.level] = (acc[l.level] || 0) + 1; return acc }, {})
   const snapVersion = snap?.version || '3.0.0'
   const roleLabel = snap?.role === 'developer' ? '开发者' : '玩家'
   return <div className="page log-page">
     <div className="page-head"><div><span className="eyebrow">RUNTIME</span><h1>日志</h1></div>
-      <span className="pill">{logs.length} 条记录</span></div>
+      <div className="button-row"><span className="pill">{logs.length} 条记录</span>
+        <button className="btn ghost small" disabled={!logs.length} onClick={onClear}>清空</button></div></div>
     <div className="log-layout">
       <section className="card log-card" aria-live="polite">{logs.length === 0 ? <div className="empty"><div className="empty-orbit" /><h3>暂无日志</h3><p>操作后这里会实时显示运行记录</p></div> : logs.map((l, i) =>
         <div className="log-line" key={`${l.time}-${i}`}><span className={`log-level ${l.level}`}>{l.level}</span><span className="log-time">{l.time}</span><span>{l.message}</span></div>)}
@@ -693,7 +718,18 @@ export default function App() {
       depth = Math.max(0, depth - 1)
       if (depth === 0) setDnd(false)
     }
-    const drop = (e) => { if (hasFiles(e)) e.preventDefault(); depth = 0; setDnd(false) }
+    const drop = (e) => {
+      if (hasFiles(e)) e.preventDefault()
+      depth = 0; setDnd(false)
+      // WebView2 的 DOM drop 在部分冷启动下不触发；直接把原生 files 交给
+      // pywebview，再读回临时路径，避免拖入完全无反应。
+      if (window.chrome?.webview && window.pywebview?.api?.handle_drop_pending && e.dataTransfer?.files?.length) {
+        try {
+          window.chrome.webview.postMessageWithAdditionalObjects('FilesDropped', e.dataTransfer.files)
+          window.pywebview.api.handle_drop_pending().catch(() => {})
+        } catch (_) {}
+      }
+    }
     window.addEventListener('dragenter', enter)
     window.addEventListener('dragover', over)
     window.addEventListener('dragleave', leave)
@@ -733,6 +769,18 @@ export default function App() {
   }, [busy?.jobId, showToast])
 
   const openPack = useCallback((path) => startJob('pack.open', { path }, '打开整合包'), [startJob])
+  const openTacz = useCallback(async () => {
+    try { const data = await invoke('pack.open_tacz'); showToast('已打开 TACZ 文件夹', 'success'); return data }
+    catch (err) { showToast(err.message, 'error') }
+  }, [showToast])
+  const clearCache = useCallback(async () => {
+    try { const data = await invoke('online.clear_cache'); setSnap(data.state); showToast('缓存已清理', 'success') }
+    catch (err) { showToast(err.message, 'error') }
+  }, [showToast])
+  const clearLogs = useCallback(async () => {
+    try { const state = await invoke('app.logs.clear'); setSnap(state); setLogs([]); showToast('日志已清空', 'info') }
+    catch (err) { showToast(err.message, 'error') }
+  }, [showToast])
   const openDatabase = useCallback(async () => {
     try {
       const path = await pickFolder()
@@ -779,6 +827,11 @@ export default function App() {
     if (!version?.trim()) { showToast('请填写版本号', 'warning'); return }
     startJob('online.publish.run', { name, version: version.trim(), notes, selection }, '发布预设')
   }, [startJob, showToast])
+  const addFromCloud = useCallback(() => setModal({ kind: 'cloudadd', title: '从云端添加预设', confirm: '读取并创建',
+    onConfirm: async ({ url, password }) => {
+      if (!url?.trim()) { showToast('请填写分享链接', 'warning'); return }
+      startJob('online.add', { url: url.trim(), password }, '从云端添加')
+    } }), [startJob, showToast])
   const login = useCallback(() => setModal({ kind: 'login', title: '登录蓝奏云', onConfirm: async ({ username, password }) => {
     try { const data = await invoke('account.login', { username, password }); setSnap(data.state); showToast('登录成功', 'success') }
     catch (err) { showToast(err.message, 'error') }
@@ -818,40 +871,29 @@ export default function App() {
   }, [navigate])
 
   const switchRole = useCallback(async (role) => {
-    if (role === snap.role || cover.active || roleSwitchRef.current) return
-    if (snap.settings?.animations === false) {
-      roleSwitchRef.current = true
-      try {
-        const state = await invoke('app.role.switch', { role })
-        setSnap(state)
-        showToast(role === 'developer' ? '已切换为开发者' : '已切换为玩家', 'success')
-      } catch (err) { showToast(err.message, 'error') }
-      roleSwitchRef.current = false
-      return
-    }
+    if (role === snap.role || roleSwitchRef.current) return
     roleSwitchRef.current = true
-    setCover({ active: true, phase: 'cover', note: role === 'developer' ? '正在切换为开发者' : '正在切换为玩家' })
-    await new Promise((r) => setTimeout(r, 250))
-    setCover((s) => ({ ...s, phase: 'hold' }))
-    try { const state = await invoke('app.role.switch', { role }); setSnap(state); showToast(role === 'developer' ? '已切换为开发者' : '已切换为玩家', 'success') }
-    catch (err) { showToast(err.message, 'error') }
-    await new Promise((r) => setTimeout(r, 520))
-    setCover((s) => ({ ...s, phase: 'reveal' }))
-    await new Promise((r) => setTimeout(r, 380))
-    roleSwitchRef.current = false
-    setCover({ active: false, phase: 'idle' })
-  }, [snap.role, cover.active, snap.settings?.animations, showToast])
+    try {
+      const state = await invoke('app.role.switch', { role })
+      setSnap(state)
+      showToast(role === 'developer' ? '已切换为开发者' : '已切换为玩家', 'success')
+    } catch (err) {
+      showToast(err.message, 'error')
+    } finally {
+      roleSwitchRef.current = false
+    }
+  }, [snap.role, showToast])
 
-  const actions = { openPack, openDatabase, select, createPreset, rename, delete: remove, saveVersion, apply, bind, check, sync, syncAuto, publishAuto, syncAllAuto, publishAllAuto, publishPlan, publish, login, logout, updateSettings, switchRole, prompt, toast: showToast, navigate, cancelJob }
+  const actions = { openPack, openTacz, clearCache, clearLogs, addFromCloud, openDatabase, select, createPreset, rename, delete: remove, saveVersion, apply, bind, check, sync, syncAuto, publishAuto, syncAllAuto, publishAllAuto, publishPlan, publish, login, logout, updateSettings, switchRole, prompt, toast: showToast, navigate, cancelJob }
   const animations = snap.settings?.animations !== false
   const pageEl = page === 'home' ? <Home snap={snap} actions={actions} busy={busy} />
     : page === 'manage' ? <Manage snap={snap} actions={actions} busy={busy} />
     : page === 'settings' ? <Settings snap={snap} actions={actions} />
-    : <LogPage logs={logs} snap={snap} />
+    : <LogPage logs={logs} snap={snap} onClear={clearLogs} />
 
   return (
     <div className={`app role-${snap.role} ${expanded ? 'sidebar-open' : ''} ${snap.settings?.animations === false ? 'animations-off' : ''}`}>
-      <Sidebar page={page} onNavigate={(next) => { setExpanded(false); navigate(next) }} role={snap.role} expanded={expanded} setExpanded={setExpanded} version={snap.version} />
+      <Sidebar page={page} onNavigate={navigate} role={snap.role} expanded={expanded} setExpanded={setExpanded} version={snap.version} onSwitchRole={() => actions.switchRole(snap.role === 'developer' ? 'player' : 'developer')} pack={snap.pack} presetCount={snap.presets.length} />
       <main className="workspace">
         <div className="content">
           <AnimatePresence mode="wait" initial={false}>

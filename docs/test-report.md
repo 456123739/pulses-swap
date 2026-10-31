@@ -426,3 +426,10 @@
 - 根因：pywebview 6.x 对 `js_api` 的公开属性做递归 introspection；`Api.controller/jobs/bus/window` 公开导致注入线程过深/卡住，`invoke` 未被挂载。改为全部私有。
 - 前端等待 `typeof window.pywebview.api.invoke === 'function'` 或 `pywebviewready`，不再把空 `api` 对象当成就绪。
 - 增加冷启动延迟注入、Api 公开面、滚动条不可见、布局边界测试；217 个 Python 测试、`test-ui.mjs`、`test-layout.mjs` 全部通过；含无整合包主界面、冷启动延迟注入和滚动条不可见断言。
+
+## 26. 3.1.4 拖入、侧栏与控件补齐
+
+- 拖入双通道：DOM drop + WebView2 FilesDropped/handle_drop_pending。
+- 侧栏所有页面悬停展开；身份切换常驻且不再整页幕布。
+- 已应用预设隐藏替换按钮；补齐从云端添加、打开 TACZ、刷新、清缓存、清日志。
+- 217 个 Python 测试、UI 与布局黑盒通过。

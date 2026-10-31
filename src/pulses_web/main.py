@@ -75,7 +75,7 @@ def _bind_drop(window, api: Api):
 
     try:
         window.dom.document.events.drop += DOMEventHandler(
-            on_drop, prevent_default=True, stop_propagation=True)
+            on_drop, prevent_default=True)
         # dragenter/dragover 不阻断冒泡：React 还要用它们显示覆盖层。
         # drop 必须阻断冒泡，由 Python 拿 pywebviewFullPath 后统一处理。
         window.dom.document.events.dragenter += DOMEventHandler(
@@ -122,10 +122,17 @@ def main():
                traceback.format_exc())
         return
     api.bind_window(window)
-    # 只暴露三个桥接方法，避免 pywebview 递归 introspection 整个 Api 对象。
+    # WebView2 的 FilesDropped 消息只有在 pywebview 认为存在 drop 监听器时
+    # 才会保存路径；提前占一个监听器，DOM 绑定失败时前端兜底仍能拿到路径。
+    try:
+        from webview.dom import _dnd_state
+        _dnd_state['num_listeners'] = max(1, int(_dnd_state.get('num_listeners', 0)))
+    except Exception:
+        pass
+    # 只暴露必要的桥接方法，避免 pywebview 递归 introspection 整个 Api 对象。
     # 这也是 WebView2 冷启动时 invoke 未挂载/窗口卡死的根因防护。
     try:
-        window.expose(api.invoke, api.pick_folder, api.handle_drop)
+        window.expose(api.invoke, api.pick_folder, api.handle_drop, api.handle_drop_pending)
     except Exception:
         _startup_log("window.expose failed:\n" + traceback.format_exc())
     pump_holder = {}

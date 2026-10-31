@@ -56,6 +56,11 @@ class Api:
             "online.bind": lambda p: self._controller.bind_source(
                 p["name"], p.get("url", ""), p.get("password", ""),
                 p.get("cloud_path", "")),
+            "online.add": self._job("online.add"),
+            "pack.open_folder": lambda p: self._controller.open_folder(p["path"]),
+            "pack.open_tacz": lambda p: self._controller.open_tacz(),
+            "online.clear_cache": lambda p: self._controller.clear_cache(),
+            "app.logs.clear": lambda p: self._clear_logs(),
             "online.test": lambda p: self._controller.test_source(
                 p.get("url", ""), p.get("password", "")),
             "online.cloud.browse": lambda p: self._controller.cloud_browse(
@@ -124,6 +129,31 @@ class Api:
             return {"ok": False, "error": {
                 "code": "DIALOG_ERROR", "message": str(exc)}}
 
+    def handle_drop_pending(self) -> dict:
+        """WebView2 原生文件拖入兜底：读取 pywebview 暂存的文件路径。
+
+        某些 WebView2 冷启动时 DOM drop 事件没有绑定成功，前端会直接把
+        dataTransfer.files 交给 chrome.webview，再调用这里。等待消息到达后
+        统一走 handle_drop；没有路径时静默返回，避免和 DOM 正常路径重复报错。
+        """
+        import time
+        try:
+            from webview.dom import _dnd_state
+        except Exception:
+            return {"ok": False, "silent": True, "error": {
+                "code": "NO_DND", "message": "当前后端没有拖入支持"}}
+        paths = []
+        for _ in range(24):
+            if _dnd_state.get("paths"):
+                paths = [p[1] for p in _dnd_state["paths"]]
+                _dnd_state["paths"] = []
+                break
+            time.sleep(0.05)
+        if not paths:
+            return {"ok": False, "silent": True, "error": {
+                "code": "NO_PATH", "message": "没有拿到可用的文件路径"}}
+        return self.handle_drop(paths)
+
     def handle_drop(self, paths) -> dict:
         """由 Python DOM drop handler 调用；路径来自 pywebviewFullPath。"""
         if isinstance(paths, str):
@@ -163,6 +193,12 @@ class Api:
         self._bus.emit("dnd.consumed", {"jobId": job, "path": str(pack)})
         return {"ok": True, "data": {"jobId": job, "path": str(pack)}}
 
+    def _clear_logs(self):
+        with self._controller.lock:
+            self._controller.logs.clear()
+            self._controller._rev += 1
+            return self._controller.state()
+
     # ------------------------------------------------------------------
     # Job wrappers
     # ------------------------------------------------------------------
@@ -178,6 +214,12 @@ class Api:
             elif method == "pack.close":
                 job = self._jobs.submit("关闭整合包",
                                        lambda ctx: self._controller.close_pack())
+            elif method == "online.add":
+                job = self._jobs.submit("从云端添加",
+                                       lambda ctx: self._controller.add_from_cloud(
+                                           params.get("url", ""),
+                                           params.get("password", ""),
+                                           params.get("name", ""), ctx))
             elif method == "preset.apply":
                 name = params.get("name", "")
                 job = self._jobs.submit("应用预设",
