@@ -404,3 +404,13 @@
 - 真实蓝奏云（AppController，非直连 API）：两个预设一键上传全部、玩家一键更新全部、二次增量上传/更新、已应用预设自动替换全部通过。
 - **215 个 Python 测试**、`node test-ui.mjs`、`node test-layout.mjs` 通过；UI 覆盖双端一键按钮、开发者“待上传”、plan.role 隔离、默认无勾选、高级开关、按钮/输入不重叠且离卡片边线至少 12px。
 - 高级操作默认关闭；开发者自动上传只上传变更，不删除云端多余。
+
+## 25. 3.1.1 WebView 启动与一键 API 修复
+
+- **现象**：双击后进程在后台、无主窗口，CPU 约 30%。
+- **根因方向**：`pulses_web.main` 使用 `hidden=True`，窗口只在 `loaded` 事件里 `show()`；该事件在部分 Windows/WebView2 环境不触发，或回调里先做 DOM 绑定/事件泵后异常，窗口就一直隐藏。
+- **修复**：`create_window(..., hidden=False)` 直接出窗口；`on_loaded` 先 `window.show()`，再 try 绑定拖拽和启动事件泵；`webview.start(func=after_start)` 再兜一次显示。
+- **可观测性**：启动阶段写 `PulsesSwap_database/webview-startup.log`；窗口创建/启动异常弹原生错误框，不再无提示留在后台。
+- **一键 API**：补齐 `Api._methods` 中四个 auto/all 方法；新增 `ApiSurfaceTests` 断言映射存在。
+- **构建门禁**：`build-web.yml` Windows 冒烟检查 `MainWindowHandle`，没有主窗口直接失败。
+- **回归**：216 个 Python 测试通过；`npm run build`、`test-ui.mjs`、`test-layout.mjs` 通过。

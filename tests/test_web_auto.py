@@ -209,6 +209,16 @@ class AutoActionTests(unittest.TestCase):
         self.assertEqual(AppController._next_version(""), "v1.0.1")
         self.assertEqual(AppController._next_version("bad"), "v1.0.1")
 
+class ApiSurfaceTests(unittest.TestCase):
+    def test_auto_methods_are_exposed_to_frontend(self):
+        from pulses_web.api import Api
+        api = Api(SimpleNamespace(), SimpleNamespace(), SimpleNamespace())
+        expected = {
+            "online.sync.auto", "online.publish.auto",
+            "online.sync.all", "online.publish.all",
+        }
+        self.assertTrue(expected.issubset(api._methods))
+
 
 if __name__ == "__main__":
     unittest.main()
