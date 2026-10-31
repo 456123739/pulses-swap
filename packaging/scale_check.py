@@ -180,6 +180,7 @@ def child(scale: float, pack: Path) -> int:
         role="player")
     app.online_states[names[0]] = {"phase": "ready", "error": "",
                                    "checked_at": time.time(), "plan": plan}
+    app.settings.advanced_actions = True
     app.open_sync_dialog(names[0])
     pump(root, 500)
     stack = getattr(ps, "_OVERLAY_STACK", [])
