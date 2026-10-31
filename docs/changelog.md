@@ -22,7 +22,7 @@
 - 223 个 Python 测试通过。
 - `ui_process_check`、`ui_audit`、`anim_invariants`、`scale_check`（100/125/150）、`scroll_check`、`startup_check`、`window_anim_check`、`online_ui_check` 全部通过。
 - `online_e2e` 覆盖玩家/开发者一键操作、自动替换、失败隔离、重启状态。
-- `online_smoke` 真实蓝奏下载链路通过；真实上传账号当前被限流，未能重跑。
+- `online_smoke` 真实蓝奏下载链路通过；真实蓝奏上传 smoke（2MB 上传 → 列表 → 匿名下载 → 哈希 → 删除）全部通过。
 
 ## v3.1.4（2026-10-31）
 

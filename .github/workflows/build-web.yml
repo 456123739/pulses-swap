@@ -59,6 +59,34 @@ jobs:
             throw "前端产物没有打进 exe 目录"
           }
           Write-Host ("exe: {0:N1} MB" -f ((Get-Item $exe).Length / 1MB))
+      - name: Windows WebView 实操自测
+        shell: pwsh
+        run: |
+          $pack = Join-Path $PWD "selftest-pack"
+          New-Item -ItemType Directory -Force -Path (Join-Path $pack "tacz") | Out-Null
+          Set-Content -Path (Join-Path $pack "tacz\ci-gun.zip") -Value "ci-selftest" -NoNewline
+          $result = Join-Path $PWD "selftest-result.json"
+          $env:PULSES_WEB_SELFTEST = $result
+          $env:PULSES_WEB_SELFTEST_JS = Join-Path $PWD "packaging\web_selftest.js"
+          $env:PULSES_SELFTEST_PACK = $pack
+          $p = Start-Process "dist/PulsesSwap/PulsesSwap.exe" -PassThru
+          $ok = $false
+          for ($i = 0; $i -lt 90; $i++) {
+            Start-Sleep -Seconds 1
+            if (Test-Path $result) { $ok = $true; break }
+          }
+          if (-not $ok) {
+            if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+            throw "Windows WebView 自测 90 秒内没有产出结果"
+          }
+          Start-Sleep -Seconds 1
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          $data = Get-Content $result -Raw | ConvertFrom-Json
+          $data.results | ForEach-Object { Write-Host ("[{0}] {1} {2}" -f $(if ($_.ok) {"OK"} else {"FAIL"}), $_.name, $_.detail) }
+          if (-not $data.ok) { throw "Windows WebView 功能自测失败" }
+          Remove-Item Env:PULSES_WEB_SELFTEST, Env:PULSES_WEB_SELFTEST_JS, Env:PULSES_SELFTEST_PACK -ErrorAction SilentlyContinue
+          Write-Host "OK: Windows WebView 实操自测通过"
+
       - name: 启动、等待 UI 并截取 Windows 桌面
         shell: pwsh
         run: |
@@ -100,6 +128,12 @@ jobs:
         with:
           name: PulsesSwap-Windows-Screenshot
           path: dist/screenshots/windows-ci.png
+          if-no-files-found: error
+      - name: 上传 Windows 自测结果
+        uses: actions/upload-artifact@v4
+        with:
+          name: PulsesSwap-Windows-Selftest
+          path: selftest-result.json
           if-no-files-found: error
 
       - name: 解析版本号

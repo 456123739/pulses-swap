@@ -1,8 +1,10 @@
 """js_api 桥：只做校验、任务提交和结果信封，不直接做重活。"""
 from __future__ import annotations
 
+import json
 import os
 import threading
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -61,6 +63,7 @@ class Api:
             "pack.open_tacz": lambda p: self._controller.open_tacz(),
             "online.clear_cache": lambda p: self._controller.clear_cache(),
             "app.logs.clear": lambda p: self._clear_logs(),
+            "app.selftest.report": lambda p: self.report_selftest(p),
             "online.test": lambda p: self._controller.test_source(
                 p.get("url", ""), p.get("password", "")),
             "online.cloud.browse": lambda p: self._controller.cloud_browse(
@@ -128,6 +131,22 @@ class Api:
         except Exception as exc:
             return {"ok": False, "error": {
                 "code": "DIALOG_ERROR", "message": str(exc)}}
+
+    def report_selftest(self, result: dict) -> dict:
+        """CI 自测报告入口，只在 PULSES_WEB_SELFTEST 环境变量存在时生效。"""
+        path = os.environ.get("PULSES_WEB_SELFTEST", "").strip()
+        if not path:
+            return {"ok": False, "error": {"code": "NO_SELFTEST",
+                                           "message": "未启用自测"}}
+        try:
+            Path(path).write_text(json.dumps(result, ensure_ascii=False, indent=2),
+                                  encoding="utf-8")
+        except Exception as exc:
+            return {"ok": False, "error": {"code": "REPORT_ERROR",
+                                           "message": str(exc)}}
+        # 给报告写入留一点时间，然后关闭窗口，让 webview.start() 返回。
+        threading.Timer(0.4, self._window.destroy).start()
+        return {"ok": True}
 
     def handle_drop_pending(self) -> dict:
         """WebView2 原生文件拖入兜底：读取 pywebview 暂存的文件路径。

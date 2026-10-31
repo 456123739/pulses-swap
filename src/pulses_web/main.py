@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import ctypes
+import json
 import os
 import sys
 import threading
@@ -149,7 +150,8 @@ def main():
     # 只暴露必要的桥接方法，避免 pywebview 递归 introspection 整个 Api 对象。
     # 这也是 WebView2 冷启动时 invoke 未挂载/窗口卡死的根因防护。
     try:
-        window.expose(api.invoke, api.pick_folder, api.handle_drop, api.handle_drop_pending)
+        window.expose(api.invoke, api.pick_folder, api.handle_drop,
+                       api.handle_drop_pending, api.report_selftest)
     except Exception:
         _startup_log("window.expose failed:\n" + traceback.format_exc())
     pump_holder = {}
@@ -176,6 +178,30 @@ def main():
             pump_holder["pump"] = pump
         except Exception:
             _startup_log("event pump failed:\n" + traceback.format_exc())
+        selftest = os.environ.get("PULSES_WEB_SELFTEST", "").strip()
+        js_path = os.environ.get("PULSES_WEB_SELFTEST_JS", "").strip()
+        pack = os.environ.get("PULSES_SELFTEST_PACK", "").strip()
+        if selftest and js_path and pack:
+            def run_selftest():
+                time.sleep(2.0)
+                try:
+                    script = Path(js_path).read_text(encoding="utf-8")
+                    window.evaluate_js(f"window.__SELFTEST_PACK = {json.dumps(pack)}")
+                    window.evaluate_js(script)
+                except Exception:
+                    _startup_log("selftest failed:\n" + traceback.format_exc())
+                    try:
+                        Path(selftest).write_text(json.dumps(
+                            {"ok": False, "results": [{"name": "selftest.launch",
+                             "ok": False, "detail": traceback.format_exc()}]},
+                            ensure_ascii=False, indent=2), encoding="utf-8")
+                    except Exception:
+                        pass
+                    try:
+                        window.destroy()
+                    except Exception:
+                        pass
+            threading.Thread(target=run_selftest, daemon=True).start()
 
     window.events.loaded += on_loaded
 
