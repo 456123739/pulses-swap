@@ -23,48 +23,48 @@ class Api:
 
     def __init__(self, controller: AppController, bus: EventBus,
                  jobs: JobRunner):
-        self.controller = controller
-        self.bus = bus
-        self.jobs = jobs
-        self.window = None
+        self._controller = controller
+        self._bus = bus
+        self._jobs = jobs
+        self._window = None
         self._lock = threading.RLock()
         self._methods: dict[str, Callable[[dict], Any]] = {
-            "app.bootstrap": lambda p: self.controller.state(),
-            "app.state": lambda p: self.controller.state(),
-            "app.settings.update": lambda p: self.controller.update_settings(p),
-            "app.recent": lambda p: self.controller.recent_packs(),
-            "app.recent.open": lambda p: self.controller.open_recent(p["path"]),
-            "app.role.switch": lambda p: self.controller.switch_role(p.get("role", "player")),
+            "app.bootstrap": lambda p: self._controller.state(),
+            "app.state": lambda p: self._controller.state(),
+            "app.settings.update": lambda p: self._controller.update_settings(p),
+            "app.recent": lambda p: self._controller.recent_packs(),
+            "app.recent.open": lambda p: self._controller.open_recent(p["path"]),
+            "app.role.switch": lambda p: self._controller.switch_role(p.get("role", "player")),
             "db.open": self._job("db.open"),
-            "account.login": lambda p: self.controller.login(
+            "account.login": lambda p: self._controller.login(
                 p.get("username", ""), p.get("password", ""),
                 bool(p.get("remember", True))),
-            "account.logout": lambda p: self.controller.logout(
+            "account.logout": lambda p: self._controller.logout(
                 bool(p.get("forget", True))),
             "pack.open": self._job("pack.open"),
             "pack.close": self._job("pack.close"),
-            "preset.select": lambda p: self.controller.select_preset(p["name"]),
-            "preset.create": lambda p: self.controller.create_preset(
+            "preset.select": lambda p: self._controller.select_preset(p["name"]),
+            "preset.create": lambda p: self._controller.create_preset(
                 p["name"], p.get("version", "v1.0.0")),
-            "preset.rename": lambda p: self.controller.rename_preset(
+            "preset.rename": lambda p: self._controller.rename_preset(
                 p["old"], p["new"]),
-            "preset.delete": lambda p: self.controller.delete_preset(p["name"]),
-            "preset.version": lambda p: self.controller.save_version(
+            "preset.delete": lambda p: self._controller.delete_preset(p["name"]),
+            "preset.version": lambda p: self._controller.save_version(
                 p["name"], p["version"]),
             "preset.apply": self._job("preset.apply"),
-            "preset.gunpacks": lambda p: {"gunpacks": self.controller.gunpacks()},
-            "online.bind": lambda p: self.controller.bind_source(
+            "preset.gunpacks": lambda p: {"gunpacks": self._controller.gunpacks()},
+            "online.bind": lambda p: self._controller.bind_source(
                 p["name"], p.get("url", ""), p.get("password", ""),
                 p.get("cloud_path", "")),
-            "online.test": lambda p: self.controller.test_source(
+            "online.test": lambda p: self._controller.test_source(
                 p.get("url", ""), p.get("password", "")),
-            "online.cloud.browse": lambda p: self.controller.cloud_browse(
+            "online.cloud.browse": lambda p: self._controller.cloud_browse(
                 p.get("path", "")),
-            "online.cloud.mkdir": lambda p: self.controller.cloud_mkdir(
+            "online.cloud.mkdir": lambda p: self._controller.cloud_mkdir(
                 p.get("parent", ""), p.get("name", "")),
-            "online.cloud.quota": lambda p: self.controller.cloud_quota(),
-            "online.account.state": lambda p: self.controller.account_state(),
-            "online.unbind": lambda p: self.controller.unbind_source(p["name"]),
+            "online.cloud.quota": lambda p: self._controller.cloud_quota(),
+            "online.account.state": lambda p: self._controller.account_state(),
+            "online.unbind": lambda p: self._controller.unbind_source(p["name"]),
             "online.check": self._job("online.check"),
             "online.sync": self._job("online.sync"),
             "online.sync.auto": self._job("online.sync.auto"),
@@ -73,11 +73,11 @@ class Api:
             "online.publish.all": self._job("online.publish.all"),
             "online.publish.plan": self._job("online.publish.plan"),
             "online.publish.run": self._job("online.publish.run"),
-            "job.cancel": lambda p: {"cancelled": self.jobs.cancel(p["jobId"])},
+            "job.cancel": lambda p: {"cancelled": self._jobs.cancel(p["jobId"])},
         }
 
     def bind_window(self, window):
-        self.window = window
+        self._window = window
 
     # ------------------------------------------------------------------
     def invoke(self, method: str, params: dict | None = None) -> dict:
@@ -101,7 +101,7 @@ class Api:
                 "code": "INVALID_INPUT", "message": str(exc), "detail": ""}}
         except Exception as exc:
             try:
-                self.controller.add_log(
+                self._controller.add_log(
                     f"API {method} 失败: {exc}", "ERROR", verbose=True)
             except Exception:
                 pass
@@ -111,12 +111,12 @@ class Api:
                 "detail": ""}}
 
     def pick_folder(self) -> dict:
-        if self.window is None:
+        if self._window is None:
             return {"ok": False, "error": {"code": "NO_WINDOW",
                                            "message": "窗口尚未就绪"}}
         try:
             import webview
-            result = self.window.create_file_dialog(
+            result = self._window.create_file_dialog(
                 webview.FileDialog.FOLDER, allow_multiple=False)
             path = str(result[0]) if result else ""
             return {"ok": True, "data": {"path": path}}
@@ -137,7 +137,7 @@ class Api:
             except Exception:
                 continue
         if not clean:
-            self.bus.emit("dnd.error", {"message": "没有拿到可用的文件路径"})
+            self._bus.emit("dnd.error", {"message": "没有拿到可用的文件路径"})
             return {"ok": False, "error": {
                 "code": "NO_PATH", "message": "没有拿到可用的文件路径"}}
         # 拖入 tacz 或整合包目录都可以；优先找包含 tacz 的目录
@@ -154,13 +154,13 @@ class Api:
                     pack = path.parent
                     break
         if pack is None:
-            self.bus.emit("dnd.error", {"message": "拖入的路径里没有 tacz 文件夹"})
+            self._bus.emit("dnd.error", {"message": "拖入的路径里没有 tacz 文件夹"})
             return {"ok": False, "error": {
                 "code": "NO_TACZ", "message": "拖入的路径里没有 tacz 文件夹"}}
-        job = self.jobs.submit("pack.open",
+        job = self._jobs.submit("pack.open",
                                lambda ctx: self._open_pack_job(str(pack), ctx),
                                cancelable=False)
-        self.bus.emit("dnd.consumed", {"jobId": job, "path": str(pack)})
+        self._bus.emit("dnd.consumed", {"jobId": job, "path": str(pack)})
         return {"ok": True, "data": {"jobId": job, "path": str(pack)}}
 
     # ------------------------------------------------------------------
@@ -172,70 +172,70 @@ class Api:
                 path = params.get("path", "")
                 if not path:
                     raise ValueError("缺少整合包路径")
-                job = self.jobs.submit("打开整合包",
+                job = self._jobs.submit("打开整合包",
                                        lambda ctx: self._open_pack_job(path, ctx),
                                        cancelable=False)
             elif method == "pack.close":
-                job = self.jobs.submit("关闭整合包",
-                                       lambda ctx: self.controller.close_pack())
+                job = self._jobs.submit("关闭整合包",
+                                       lambda ctx: self._controller.close_pack())
             elif method == "preset.apply":
                 name = params.get("name", "")
-                job = self.jobs.submit("应用预设",
-                                       lambda ctx: self.controller.apply_preset(name, ctx),
+                job = self._jobs.submit("应用预设",
+                                       lambda ctx: self._controller.apply_preset(name, ctx),
                                        cancelable=False)
             elif method == "online.check":
                 name = params.get("name", "")
-                job = self.jobs.submit("检查更新",
-                                       lambda ctx: self.controller.check(name, ctx))
+                job = self._jobs.submit("检查更新",
+                                       lambda ctx: self._controller.check(name, ctx))
             elif method == "online.sync":
                 name = params.get("name", "")
                 selection = params.get("selection") or []
-                job = self.jobs.submit("同步预设",
-                                       lambda ctx: self.controller.sync(
+                job = self._jobs.submit("同步预设",
+                                       lambda ctx: self._controller.sync(
                                            name, selection, ctx))
             elif method == "online.sync.auto":
                 name = params.get("name", "")
-                job = self.jobs.submit("一键更新",
-                                       lambda ctx: self.controller.sync_auto(
+                job = self._jobs.submit("一键更新",
+                                       lambda ctx: self._controller.sync_auto(
                                            name, ctx))
             elif method == "online.publish.auto":
                 name = params.get("name", "")
-                job = self.jobs.submit("一键发布",
-                                       lambda ctx: self.controller.publish_auto(
+                job = self._jobs.submit("一键发布",
+                                       lambda ctx: self._controller.publish_auto(
                                            name, ctx))
             elif method == "online.sync.all":
-                job = self.jobs.submit("一键更新全部",
-                                       lambda ctx: self.controller.sync_all_auto(ctx))
+                job = self._jobs.submit("一键更新全部",
+                                       lambda ctx: self._controller.sync_all_auto(ctx))
             elif method == "online.publish.all":
-                job = self.jobs.submit("一键发布全部",
-                                       lambda ctx: self.controller.publish_all_auto(ctx))
+                job = self._jobs.submit("一键发布全部",
+                                       lambda ctx: self._controller.publish_all_auto(ctx))
             elif method == "online.publish.plan":
                 name = params.get("name", "")
-                job = self.jobs.submit("生成发布计划",
-                                       lambda ctx: self.controller.publish_plan(name, ctx))
+                job = self._jobs.submit("生成发布计划",
+                                       lambda ctx: self._controller.publish_plan(name, ctx))
             elif method == "db.open":
                 path = params.get("path", "")
                 if not path:
                     raise ValueError("缺少数据库路径")
-                job = self.jobs.submit("打开数据库",
-                                       lambda ctx: {"state": self.controller.set_database(path)},
+                job = self._jobs.submit("打开数据库",
+                                       lambda ctx: {"state": self._controller.set_database(path)},
                                        cancelable=False)
             elif method == "online.publish.run":
                 name = params.get("name", "")
-                job = self.jobs.submit("发布预设",
-                                       lambda ctx: self.controller.publish(
+                job = self._jobs.submit("发布预设",
+                                       lambda ctx: self._controller.publish(
                                            name, params.get("version", ""),
                                            params.get("notes", ""),
                                            params.get("min_app", ""),
                                            params.get("selection") or [], ctx))
             else:
                 raise ValueError("不支持的任务")
-            return {"jobId": job, "cancelable": self.jobs.cancelable(job)}
+            return {"jobId": job, "cancelable": self._jobs.cancelable(job)}
         return run
 
     def _open_pack_job(self, path, ctx):
         ctx.progress(None, phase="pack", message="正在扫描整合包…")
-        state = self.controller.open_pack(path)
+        state = self._controller.open_pack(path)
         ctx.progress(100, phase="pack", message="整合包已加载", force=True)
-        self.bus.emit("state.changed", {"state": state})
+        self._bus.emit("state.changed", {"state": state})
         return {"state": state}

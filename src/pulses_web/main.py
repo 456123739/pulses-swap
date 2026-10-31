@@ -109,7 +109,6 @@ def main():
         window = webview.create_window(
             "Pulses Swap",
             _web_url(),
-            js_api=api,
             width=1280,
             height=900,
             min_size=(1140, 812),
@@ -123,6 +122,12 @@ def main():
                traceback.format_exc())
         return
     api.bind_window(window)
+    # 只暴露三个桥接方法，避免 pywebview 递归 introspection 整个 Api 对象。
+    # 这也是 WebView2 冷启动时 invoke 未挂载/窗口卡死的根因防护。
+    try:
+        window.expose(api.invoke, api.pick_folder, api.handle_drop)
+    except Exception:
+        _startup_log("window.expose failed:\n" + traceback.format_exc())
     pump_holder = {}
     loaded_once = {"done": False}
 

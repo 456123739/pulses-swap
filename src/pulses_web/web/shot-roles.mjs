@@ -2,7 +2,7 @@ import { chromium } from 'playwright'
 import fs from 'node:fs'
 
 const base = {
-  revision: 9, version: '3.1.0', role: 'player',
+  revision: 9, version: '3.1.1', role: 'player',
   pack: {
     path: 'D:\\Games\\Minecraft\\PCL\\.minecraft\\versions\\1.20.1-Fabric',
     name: '1.20.1-Fabric',
@@ -50,7 +50,7 @@ const base = {
   },
   recent: [{ name: '1.20.1-Fabric', path: 'D:\\Games\\Minecraft\\PCL\\.minecraft\\versions\\1.20.1-Fabric' }],
   logs: [
-    { time: '21:57:07', message: 'Pulses Swap v3.1.0 启动成功，作者: NimShade', level: 'SUCCESS', verbose: false },
+    { time: '21:57:07', message: 'Pulses Swap v3.1.1 启动成功，作者: NimShade', level: 'SUCCESS', verbose: false },
     { time: '21:57:08', message: '整合包已就绪: 1.20.1-Fabric · 预设 4 个', level: 'SUCCESS', verbose: false },
     { time: '21:57:12', message: '云端检查完成：待下载 3 · 一致 9', level: 'INFO', verbose: false },
   ],

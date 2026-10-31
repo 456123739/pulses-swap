@@ -420,3 +420,9 @@
 - 3.1.1 的 Windows/Linux 产物构建成功，Windows 冒烟已通过主窗口句柄检查；release 被 `ui` job 的 Playwright 安装失败挡住。
 - 原因：`ubuntu-latest` 迁移到 26.04，Playwright 1.56 不支持；`ui` job 固定 `ubuntu-22.04`。
 - 应用代码与 3.1.1 相同，版本升为 3.1.2 重新完整发布。
+
+## 25. 3.1.1 WebView 启动与滚动条修复
+
+- 根因：pywebview 6.x 对 `js_api` 的公开属性做递归 introspection；`Api.controller/jobs/bus/window` 公开导致注入线程过深/卡住，`invoke` 未被挂载。改为全部私有。
+- 前端等待 `typeof window.pywebview.api.invoke === 'function'` 或 `pywebviewready`，不再把空 `api` 对象当成就绪。
+- 增加冷启动延迟注入、Api 公开面、滚动条不可见、布局边界测试；217 个 Python 测试、`test-ui.mjs`、`test-layout.mjs` 全部通过；含无整合包主界面、冷启动延迟注入和滚动条不可见断言。
