@@ -2,7 +2,7 @@ import { chromium } from 'playwright'
 import fs from 'node:fs'
 
 const base = {
-  revision: 1, version: '3.1.0', role: 'developer',
+  revision: 1, version: '3.1.1', role: 'developer',
   pack: { path: 'D:\\Games\\Minecraft\\PCL\\.minecraft\\versions\\1.20.1-Fabric', name: '1.20.1-Fabric', tacz: 'x', loaded: true },
   presets: [{ name: '轻量生存', version: 'v1.0.4', applied: false, count: 11, path: '' }],
   selected: '轻量生存', gunpacks: [{ name: 'a.zip', type: 'zip' }],
@@ -47,6 +47,10 @@ for (const advanced of [false, true]) {
         const visible = (e) => {
           const r = e.getBoundingClientRect()
           return r.width > 0 && r.height > 0
+        }
+        const content = document.querySelector('.content')
+        if (content && getComputedStyle(content).scrollbarWidth !== 'none') {
+          out.push(['scrollbar-visible'])
         }
         const els = [...document.querySelectorAll('button, input')]
           .filter(visible)

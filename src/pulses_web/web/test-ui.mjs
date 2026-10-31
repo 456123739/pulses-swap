@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import assert from 'node:assert'
 
 const state = {
-  revision: 7, version: '3.1.0', role: 'developer',
+  revision: 7, version: '3.1.1', role: 'developer',
   pack: { path: 'D:\\Games\\Minecraft\\PCL\\.minecraft\\versions\\1.20.1-Fabric', name: '1.20.1-Fabric', tacz: 'D:\\Games\\Minecraft\\PCL\\.minecraft\\versions\\1.20.1-Fabric\\tacz', loaded: true },
   presets: [
     { name: '默认枪包', version: 'v1.2.0', applied: true, count: 18, path: '' },
@@ -29,7 +29,7 @@ const state = {
   settings: { storage_mode: 'isolated', role: 'developer', animations: true, online_sync_clean: true, online_auto_check: true, online_publish_preview: false, advanced_actions: false, online_confirm_full: true },
   recent: [{ name: '1.20.1-Fabric', path: 'D:\\Games\\Minecraft\\PCL\\.minecraft\\versions\\1.20.1-Fabric' }],
   logs: [
-    { time: '22:31:07', message: 'Pulses Swap v3.1.0 启动成功，作者: NimShade', level: 'SUCCESS', verbose: false },
+    { time: '22:31:07', message: 'Pulses Swap v3.1.1 启动成功，作者: NimShade', level: 'SUCCESS', verbose: false },
     { time: '22:31:08', message: '数据库位置: D:\\PulsesSwap_database', level: 'INFO', verbose: true },
     { time: '22:31:09', message: '整合包已就绪: 1.20.1-Fabric · 预设 4 个', level: 'SUCCESS', verbose: false },
     { time: '22:31:12', message: '云端检查完成：待下载 3 · 一致 9', level: 'INFO', verbose: false },
@@ -283,6 +283,47 @@ await page.locator('.nav-item').nth(3).click()
 await page.waitForTimeout(60)
 assert.equal(await page.locator('.cover').count(), 0, '关闭动画后仍出现幕布')
 assert.equal(await page.locator('h1').innerText(), '日志')
+// 冷启动：pywebview 先暴露空的 api 对象，再稍后挂载 invoke；
+// 前端必须等 invoke 可用，不能在这一瞬间报 “invoke is not a function”。
+const delayed = await browser.newPage({ viewport: { width: 1280, height: 900 } })
+const delayedErrors = []
+delayed.on('pageerror', e => delayedErrors.push(e.message))
+await delayed.addInitScript((s) => {
+  window.pywebview = { api: {} }
+  setTimeout(() => {
+    window.pywebview.api.invoke = async () => ({ ok: true, data: JSON.parse(JSON.stringify(s)) })
+    window.dispatchEvent(new Event('pywebviewready'))
+  }, 350)
+}, state)
+await delayed.goto('http://127.0.0.1:8765/index.html', { waitUntil: 'networkidle' })
+await delayed.waitForTimeout(1000)
+assert.equal(await delayed.locator('h1').innerText(), '枪包预设')
+assert.equal(await delayed.locator('.bridge-error').count(), 0)
+assert.deepEqual(delayedErrors, [], JSON.stringify(delayedErrors))
+await delayed.close()
+
+// 没有整合包时仍然直接进入主界面，不做整页 onboarding
+const emptyState = JSON.parse(JSON.stringify(state))
+emptyState.pack = { path: '', name: '', tacz: '', loaded: false }
+emptyState.presets = []; emptyState.selected = null; emptyState.gunpacks = []
+emptyState.plan = null; emptyState.online.binding = {}; emptyState.online.bound = []; emptyState.online.bound_count = 0
+const emptyPage = await browser.newPage({ viewport: { width: 1280, height: 900 } })
+await emptyPage.addInitScript((s) => {
+  window.pywebview = { api: {
+    async invoke() { return { ok: true, data: JSON.parse(JSON.stringify(s)) } },
+    async pick_folder() { return { ok: true, data: { path: '' } } },
+    async handle_drop() { return { ok: true, data: {} } },
+  } }
+}, emptyState)
+await emptyPage.goto('http://127.0.0.1:8765/index.html', { waitUntil: 'networkidle' })
+await emptyPage.waitForTimeout(650)
+assert.equal(await emptyPage.locator('h1').innerText(), '枪包预设')
+assert.equal(await emptyPage.locator('.hero-empty').count(), 0, '仍在显示整页 onboarding')
+assert.equal(await emptyPage.locator('.empty-hero').count(), 1)
+assert.equal(await emptyPage.locator('.home-grid .presets-card').count(), 1)
+await emptyPage.screenshot({ path: '/tmp/web_shots/14-no-pack.png' })
+await emptyPage.close()
+
 assert.deepEqual(errors, [], JSON.stringify(errors))
 await browser.close()
 console.log('UI tests passed')

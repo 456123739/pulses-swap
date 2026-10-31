@@ -1,14 +1,19 @@
 /* pywebview bridge: the only place that talks to Python. */
+function apiReady() {
+  return typeof window.pywebview?.api?.invoke === 'function'
+}
+
 export function whenReady() {
-  // 不缓存 false：WebView2 冷启动/杀软扫描时注入可能晚于 1.8s，
-  // 调用方可以稍后重试，而不是永久卡在错误态。
-  if (window.pywebview?.api) return Promise.resolve(true)
+  // pywebview 会先暴露 window.pywebview.api 对象，再异步挂载方法。
+  // 只看对象存在会在冷启动时过早调用 api.invoke（WebView2 上就是
+  // “invoke is not a function”并卡在错误态），必须等方法和 ready 事件。
+  if (apiReady()) return Promise.resolve(true)
   return new Promise((resolve) => {
     let settled = false
     const done = () => {
       if (settled) return
       settled = true
-      resolve(Boolean(window.pywebview?.api))
+      resolve(apiReady())
     }
     window.addEventListener('pywebviewready', done, { once: true })
     setTimeout(done, 1800)
@@ -16,11 +21,12 @@ export function whenReady() {
 }
 
 export function hasBridge() {
-  return Boolean(window.pywebview?.api)
+  return apiReady()
 }
 
 export async function invoke(method, params = {}) {
-  if (!window.pywebview?.api) throw new Error('桌面桥接尚未就绪')
+  const ready = await whenReady()
+  if (!ready || !apiReady()) throw new Error('桌面桥接尚未就绪')
   const result = await window.pywebview.api.invoke(method, params)
   if (!result?.ok) {
     const error = new Error(result?.error?.message || '操作失败')

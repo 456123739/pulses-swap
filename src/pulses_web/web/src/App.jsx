@@ -220,15 +220,41 @@ function Home({ snap, actions, busy }) {
       </div>
 
       {!snap.pack.loaded ? (
-        <div className="hero-empty">
-          <Empty title="还没有加载整合包" hint="把整合包文件夹拖进来，或手动选择包含 tacz 的目录">
-            <button className="btn xl primary" onClick={openPack}><Icon name="folder" size={20} />选择整合包</button>
-          </Empty>
-          {snap.recent?.length > 0 && <div className="recent"><span className="eyebrow">最近</span>
-            {snap.recent.map((r) => <button key={r.path} className="recent-row" onClick={() => actions.openPack(r.path)}>
-              <strong>{r.name || r.path}</strong><span>{r.path}</span></button>)}
-          </div>}
-        </div>
+        <>
+          <motion.section className="home-hero empty-hero" aria-label="导入整合包"
+            initial={animations ? { opacity: 0, y: 8 } : false} animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: animations ? 0.34 : 0, ease: [0.22, 1, 0.36, 1] }}>
+            <div className="hero-copy">
+              <span className="eyebrow">WORKSPACE READY</span>
+              <div className="hero-title"><h2>把整合包拖进窗口</h2><span className="pill">自动定位 tacz</span></div>
+              <p>拖入整合包文件夹后会直接创建默认预设并进入工作区；也可以手动选择目录。</p>
+              <div className="hero-facts">
+                <span><b>0</b> 个预设</span>
+                <span><b>待导入</b> 整合包</span>
+                <span><b>拖入</b> 或选择</span>
+              </div>
+            </div>
+            <div className="hero-actions">
+              <button className="btn hero-primary" onClick={openPack}><Icon name="folder" size={21} />选择整合包</button>
+              <span className="drop-caption">或把文件夹直接拖进来</span>
+            </div>
+          </motion.section>
+          <div className="home-grid empty-home-grid">
+            <section className="card presets-card">
+              <div className="card-head"><div><span className="eyebrow">PRESETS</span><h2>预设 <span className="count-badge">0</span></h2></div>
+                <button className="btn small" disabled><Icon name="plus" />新建</button></div>
+              <div className="empty-list"><Icon name="folder" size={22} /><strong>导入后自动生成</strong><span>整合包里的 tacz 会被识别为第一个预设。</span></div>
+            </section>
+            <section className="card detail-card">
+              <div className="card-head"><div><span className="eyebrow">DETAIL</span><h2>等待整合包</h2></div></div>
+              <div className="empty-list"><Icon name="download" size={22} /><strong>拖入即可开始</strong><span>预设、枪包列表和云端绑定会显示在这里。</span></div>
+              {snap.recent?.length > 0 && <div className="recent-strip">
+                <span className="eyebrow">最近</span>
+                {snap.recent.slice(0, 3).map((r) => <button key={r.path} className="recent-chip" onClick={() => actions.openPack(r.path)} title={r.path}>{r.name || r.path}</button>)}
+              </div>}
+            </section>
+          </div>
+        </>
       ) : (
         <>
           <motion.section className="home-hero" aria-label="主要操作"

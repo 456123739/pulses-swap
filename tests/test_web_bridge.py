@@ -45,6 +45,15 @@ class WebBridgeTests(unittest.TestCase):
                 return event
         return None
 
+    def test_api_does_not_expose_internal_objects(self):
+        # pywebview 6.x 会递归 introspection 所有公开属性；controller/jobs 这类
+        # 对象一旦公开，可能在注入 JS API 时递归过深，导致 invoke 永远不可用。
+        public_objects = [
+            name for name in dir(self.api)
+            if not name.startswith("_") and not callable(getattr(self.api, name))
+        ]
+        self.assertEqual(public_objects, [])
+
     def test_unknown_method_and_validation(self):
         result = self.api.invoke("nope", {})
         self.assertFalse(result["ok"])

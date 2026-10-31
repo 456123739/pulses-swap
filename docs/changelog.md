@@ -28,6 +28,17 @@
 ### 版本
 - 版本 3.1.1。
 
+## v3.1.1（2026-10-31）
+
+### 启动与窗口
+- 修复 WebView2 冷启动卡死、左下角 `window.pywebview.api.invoke is not a function`：pywebview 会先暴露 `api` 空对象再异步挂载方法，前端现在等 `invoke` 函数真正可用和 `pywebviewready` 后再调用。
+- `Api` 的内部 controller/jobs/bus/window 全部改为私有属性，并改用 `window.expose(invoke, pick_folder, handle_drop)` 只暴露三个桥接方法，避免 pywebview 递归 introspection 整个应用对象。
+- 隐藏 WebView 的网页滚动条（内容仍可滚动），窗口恢复为普通桌面应用观感。
+- 未加载整合包时也直接进入主界面：显示拖入区、空预设卡和详情卡，不再出现整页 onboarding；拖入/选择后直接进入工作区。
+
+### 回归
+- 新增冷启动延迟注入 UI 测试、Api 公开面测试、滚动条不可见断言；布局检查同时覆盖按钮/输入不重叠和卡片边距。
+
 ## v3.1.0（2026-10-30）
 
 ### 一键化（默认）
