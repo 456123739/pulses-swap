@@ -1,4 +1,4 @@
-# Pulses Swap 交接文档（v3.1.0 WebView）
+# Pulses Swap 交接文档（v3.1.1 WebView）
 
 > 给接手的人 / AI 看的：这个软件被拆成了哪些文件、每个文件干什么、
 > 数据怎么流动、改哪里、怎么跑测试、怎么打包。
@@ -12,7 +12,7 @@
 一键把某组枪包换进游戏的 `tacz` 目录；同时把预设发布到**蓝奏云**，
 玩家绑定分享链接后可以增量同步。
 
-- 版本：`3.1.0`（`src/pulses/core/paths.py` 里的 `VERSION`）
+- 版本：`3.1.1`（`src/pulses/core/paths.py` 里的 `VERSION`）
 - 入口：`src/main.py` → `pulses.ui.app.main()`
 - 依赖：`customtkinter` `tkinterdnd2` `watchdog` `Pillow`（见 `requirements.txt`）
 - 不依赖任何第三方网络库（HTTP 全用标准库 `urllib`）
@@ -29,7 +29,7 @@ pulses-swap/
 │   ├── pulses/                 界面 + 本地逻辑
 │   └── online/                 在线同步（不依赖 tkinter，可命令行跑）
 ├── packaging/                  打包配置 + 各种验证脚本
-├── tests/                      单元 / 集成测试（194 个）
+├── tests/                      单元 / 集成测试（216 个）
 ├── docs/                       方案、教程、交接文档
 └── requirements.txt
 ```
@@ -596,3 +596,11 @@ export DISPLAY=:99          # weston headless + Xwayland
 5. **本地资源走 HTTP**：PyWebView 相对路径自动启 server；不要用 file:// 直接加载 ES Modules/CSS，否则 CSP/CORS 和字体都可能失败。
 6. **WebView2 Runtime**：Windows 安装器缺失时运行 Bootstrapper；绿色版必须提示用户安装 Evergreen Runtime。PyInstaller 要带 `pulses_web/web/dist` 和 webview 平台数据。
 7. **改 UI 必须过两套测试**：Python 200 个测试 + `src/pulses_web/web/test-ui.mjs`；再跑打包启动冒烟。UI 截图放 `docs/web-ui/`。
+
+## v3.1.1 新增坑位（务必保留）
+
+1. **WebView 窗口不要用 hidden=True 等 loaded 再显示**：`loaded` 事件在少数 Windows/WebView2 环境不触发或回调里先做 DOM 绑定/事件泵会阻塞，窗口永远隐藏。`create_window(..., hidden=False)` 先出窗口，`on_loaded` 第一件事再 `window.show()`。
+2. **窗口显示必须早于 DOM 绑定/事件泵**：`_bind_drop()` 和 `EventPump.start()` 都可能在某些后端抛错；先 show，再 try 绑定，任何一步失败都不能让窗口留在后台。
+3. **启动异常要能看见**：窗口版无控制台；`pulses_web.main` 写 `PulsesSwap_database/webview-startup.log`，创建窗口/启动失败时弹原生 MessageBox（WebView2 缺失也要有提示）。
+4. **构建冒烟必须检查主窗口句柄**：只检查进程不退出会被 hidden 启动骗过；`build-web.yml` 现在用 `MainWindowHandle -eq 0` 直接判失败。
+5. **前端调用的一键 API 必须在 `Api._methods` 注册**：`_job()` 支持不等于前端可调用；`online.sync.auto`、`online.publish.auto`、`online.sync.all`、`online.publish.all` 都要在映射表里。

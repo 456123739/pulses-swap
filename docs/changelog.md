@@ -1,5 +1,23 @@
 # 更新日志
 
+## v3.1.1（2026-10-31）
+
+### 启动修复
+- 修复双击后进程在后台、不出现窗口、CPU 占用偏高：WebView 窗口不再用 `hidden=True` 等 `loaded` 事件才显示，改为创建即显示；`on_loaded` 第一件事也先 `window.show()`。
+- `loaded` 回调里先显示窗口，再绑定拖拽/启动事件泵；任何后续步骤异常都不会把窗口留在后台。
+- 启动失败写 `PulsesSwap_database/webview-startup.log`；WebView2 缺失/窗口创建失败时弹原生错误框。
+- 构建冒烟从“进程没退出”升级为“进程有主窗口句柄”，防止 hidden 启动回归再次漏过。
+
+### 一键操作修复
+- 补齐 `online.sync.auto` / `online.publish.auto` / `online.sync.all` / `online.publish.all` 的 `Api._methods` 映射；此前前端按钮会得到“未知操作”。
+
+### 验证
+- 216 个 Python 单元/集成测试通过；Web 前端 `npm run build`、`test-ui.mjs`、`test-layout.mjs` 通过。
+- Windows 构建冒烟新增主窗口句柄检查；没有主窗口直接失败。
+
+### 版本
+- 版本 3.1.1。
+
 ## v3.1.0（2026-10-30）
 
 ### 一键化（默认）

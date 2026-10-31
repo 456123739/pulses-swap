@@ -44,12 +44,16 @@ jobs:
         shell: pwsh
         run: |
           $p = Start-Process "dist/PulsesSwap/PulsesSwap.exe" -PassThru
-          Start-Sleep -Seconds 8
+          Start-Sleep -Seconds 10
+          $p.Refresh()
           if ($p.HasExited) {
             throw "打包产物提前退出，exit code = $($p.ExitCode)"
           }
+          if ($p.MainWindowHandle -eq 0) {
+            throw "进程在运行，但没有主窗口（hidden 启动回归）"
+          }
           Stop-Process -Id $p.Id -Force
-          Write-Host "OK: 打包产物启动并持续运行"
+          Write-Host "OK: 打包产物启动并有主窗口"
       - name: 安装 Inno Setup
         run: choco install innosetup --no-progress -y
       - name: 下载 WebView2 Bootstrapper
