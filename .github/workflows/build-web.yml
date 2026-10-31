@@ -95,6 +95,13 @@ jobs:
           if (-not (Test-Path $out)) { throw "没有生成桌面截图" }
           Stop-Process -Id $p.Id -Force
           Write-Host "OK: Windows UI screenshot -> $out"
+      - name: 上传 Windows 桌面截图
+        uses: actions/upload-artifact@v4
+        with:
+          name: PulsesSwap-Windows-Screenshot
+          path: dist/screenshots/windows-ci.png
+          if-no-files-found: error
+
       - name: 解析版本号
         id: ver
         shell: pwsh
