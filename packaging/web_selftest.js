@@ -47,7 +47,8 @@
     await call('pack.open', { path: window.__SELFTEST_PACK });
     s = await waitState((x) => x.pack.loaded);
     check('pack.loaded', s.pack.loaded, s.pack.name);
-    await sleep(500);
+    document.querySelectorAll('.nav-item')[0]?.click();
+    await sleep(900);
     check('home.applied-hidden', !document.querySelector('button.hero-primary') && !!document.querySelector('.applied-state'));
 
     // 新建预设后应出现一键替换

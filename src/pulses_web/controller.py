@@ -79,7 +79,7 @@ class AppController:
         self._publish_owner = None
         self._rev = 0
         self._init_online()
-        self.add_log(f"Pulses Swap Web {getattr(config, 'VERSION', '')}",
+        self.add_log(f"Pulses Swap Web {getattr(paths, 'VERSION', '')}",
                      "SUCCESS", verbose=False)
 
     @staticmethod
@@ -147,7 +147,7 @@ class AppController:
         try:
             self.online = OnlineService(
                 db_path or self.db_path, log=LogBus(self).log,
-                app_version=getattr(config, "VERSION", ""),
+                app_version=getattr(paths, "VERSION", ""),
                 account_db=str(paths.DEFAULT_DB_DIR))
             for note in self.online.recover_all():
                 self.add_log("在线：" + note, "INFO", verbose=True)
@@ -175,7 +175,7 @@ class AppController:
                     else None)
             return {
                 "revision": self._rev,
-                "version": getattr(config, "VERSION", ""),
+                "version": getattr(paths, "VERSION", ""),
                 "role": self.role,
                 "database": str(self.db_path),
                 "pack": {
