@@ -283,6 +283,38 @@ check("身份切回玩家并撤掉幕布",
       ok and app.settings.role == "player",
       (app.settings.role, role_cover.phase))
 
+print("== 4c. 默认一键化与高级控件折叠 ==")
+app.show_page("home")
+pump(600)
+check("默认关闭高级操作", app.settings.advanced_actions is False,
+      app.settings.advanced_actions)
+check("默认不显示手动检查按钮", not app.home_player_check_btn.winfo_manager(),
+      app.home_player_check_btn.winfo_manager())
+check("默认显示一键更新全部", app.home_auto_btn.winfo_ismapped())
+captured = {}
+_orig_run_auto = app._run_auto
+app._run_auto = lambda kind, names: captured.update(kind=kind, names=list(names))
+app.home_auto_btn.invoke()
+app._run_auto = _orig_run_auto
+check("首页一键按钮调用全部更新", captured.get("kind") == "sync",
+      captured)
+app.settings_page._on_advanced_selected("on")
+pump(300)
+check("开启高级操作后显示手动检查",
+      bool(app.home_player_check_btn.winfo_manager()),
+      app.home_player_check_btn.winfo_manager())
+check("开启高级操作后显示同步方式",
+      bool(app.settings_page.online_confirm_line.winfo_manager()),
+      app.settings_page.online_confirm_line.winfo_manager())
+app.settings_page._on_advanced_selected("off")
+pump(300)
+check("关闭高级操作后重新隐藏手动检查",
+      not app.home_player_check_btn.winfo_manager(),
+      app.home_player_check_btn.winfo_manager())
+check("关闭高级操作后隐藏同步方式",
+      not app.settings_page.online_confirm_line.winfo_manager(),
+      app.settings_page.online_confirm_line.winfo_manager())
+
 print("== 5. 预设详情弹窗：首帧尺寸、内容、选项卡选中 ==")
 app.open_preset_detail("Beta", tab="source")
 pump(80)

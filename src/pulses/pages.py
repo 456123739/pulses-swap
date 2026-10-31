@@ -324,6 +324,7 @@ class SettingsPage:
             font_size=FS_SMALL, bold_active=True, text_anchor="center",
             duration_ms=220, width=184, height=36, track_color=C_PANEL_ALT_BG)
         self.online_advanced_seg.pack(side=RIGHT)
+        self.online_advanced_line = line
 
         line, width = row(box, "完整更新前确认", "批量更新再确认")
         self.online_confirm_line = line
@@ -419,16 +420,17 @@ class SettingsPage:
             except Exception:
                 pass
         if enabled:
-            before = getattr(self, "online_auto_line", None)
+            previous = getattr(self, "online_advanced_line", None)
             for line in rows:
                 if line is None:
                     continue
                 try:
-                    if before is not None and before.winfo_exists():
+                    if previous is not None and previous.winfo_exists():
                         line.pack(fill=X, padx=PAD_CARD_X,
-                                  pady=PAD_TIGHT, before=before)
+                                  pady=PAD_TIGHT, after=previous)
                     else:
                         line.pack(fill=X, padx=PAD_CARD_X, pady=PAD_TIGHT)
+                    previous = line
                 except Exception:
                     pass
 

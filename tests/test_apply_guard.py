@@ -47,6 +47,8 @@ class ApplyGuardTest(unittest.TestCase):
             pass
         self.temp.cleanup()
 
+    @unittest.skipIf(sys.platform == "win32",
+                     "Windows 下 chmod 不会让管理员进程失去写权限")
     def test_readonly_tacz_refuses_without_touching_state(self):
         os.chmod(self.tacz, 0o500)
         ok = self.manager.apply_preset("B")
