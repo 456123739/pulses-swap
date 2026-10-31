@@ -106,11 +106,18 @@ def main():
     # 1024×768 等小屏上不要强行超出桌面；正常屏保持 1280×900。
     win_w, win_h = 1280, 900
     try:
-        screens = webview.screens()
-        if screens:
-            sw, sh = int(screens[0].width), int(screens[0].height)
-            win_w = max(960, min(1280, int(sw * 0.94)))
-            win_h = max(640, min(900, int(sh * 0.90)))
+        if sys.platform.startswith("win"):
+            # webview.screens() 在部分 WebView2/DPI 组合下返回虚拟屏尺寸；
+            # 直接用 Win32 的主屏尺寸，确保 1024×768 的 CI/小屏也不会超出。
+            sw = int(ctypes.windll.user32.GetSystemMetrics(0))
+            sh = int(ctypes.windll.user32.GetSystemMetrics(1))
+        else:
+            screens = webview.screens()
+            sw = int(screens[0].width) if screens else 0
+            sh = int(screens[0].height) if screens else 0
+        if sw > 0 and sh > 0:
+            win_w = min(1280, max(900, sw - 48))
+            win_h = min(900, max(600, sh - 80))
     except Exception:
         pass
     try:
