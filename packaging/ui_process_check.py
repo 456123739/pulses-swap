@@ -294,7 +294,9 @@ check("默认显示一键更新全部", app.home_auto_btn.winfo_ismapped())
 captured = {}
 _orig_run_auto = app._run_auto
 app._run_auto = lambda kind, names: captured.update(kind=kind, names=list(names))
+app.home_auto_btn.configure(state="normal")
 app.home_auto_btn.invoke()
+app.home_auto_btn.configure(state="disabled")
 app._run_auto = _orig_run_auto
 check("首页一键按钮调用全部更新", captured.get("kind") == "sync",
       captured)

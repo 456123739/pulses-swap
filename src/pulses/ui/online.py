@@ -23,7 +23,10 @@ from ..animation import *
 from ..widget import *
 from ..dialogs import *
 from ..dialogs import _OVERLAY_STACK
-from ..auto_actions import AutoActions
+try:
+    from ..auto_actions import AutoActions
+except Exception:                    # 打包漏 online 时仍允许本地功能
+    AutoActions = None
 
 try:
     from online import diff as online_diff
@@ -718,11 +721,15 @@ class OnlineMixin:
             self._make_sidebar_cloud_row(box, row)
         try:
             self.sb_cloud_all_btn.configure(
-                text="全部更新" if not self.is_developer else "全部检查",
+                text="一键上传" if self.is_developer else "一键更新",
                 state="normal")
             if not self.sb_cloud_all_btn.winfo_manager():
                 self.sb_cloud_all_btn.pack(
                     side=BOTTOM, anchor=W, pady=(PAD_XS, 0))
+        except Exception:
+            pass
+        try:
+            self._apply_advanced_controls()
         except Exception:
             pass
 
@@ -818,25 +825,9 @@ class OnlineMixin:
         if self.online is None:
             return
         if self.is_developer:
-            self._online_check_all()
+            self._auto_publish_all()
             return
-        if not self.preset_manager:
-            self.toast("先加载一个整合包", "info")
-            return
-        names = [n for n in self.preset_manager.presets
-                 if self.online.is_bound(n)]
-        if not names:
-            self.toast("还没有预设绑定云端源", "info")
-            return
-        confirm = bool(getattr(self.settings, "online_confirm_full", True))
-        if confirm and len(names) >= 1 and not ask_yes_no(
-                "全部更新",
-                f"将依次检查并更新 {len(names)} 个云端预设。\n\n"
-                f"更新过程中会写入本地预设/TACZ 目录，确定继续吗？"):
-            return
-        self._bulk_sync_queue = list(names)
-        self.set_status(f"全部更新：0/{len(names)}", "busy", progress=0.0)
-        self._bulk_sync_next()
+        self._auto_update_all()
 
     def _bulk_sync_next(self):
         queue = getattr(self, "_bulk_sync_queue", None)
@@ -2507,11 +2498,21 @@ class OnlineMixin:
                         btn.pack(side=LEFT, padx=(gap, 0))
             except Exception:
                 pass
+        try:
+            state = "normal" if self._auto_names() else "disabled"
+            for name in ("home_auto_btn", "manage_auto_btn"):
+                btn = getattr(self, name, None)
+                if btn is not None:
+                    btn.configure(state=state)
+        except Exception:
+            pass
 
     def _auto_role(self):
         return "developer" if self.is_developer else "player"
 
     def _auto_names(self):
+        if AutoActions is None:
+            return []
         try:
             runner = AutoActions(
                 self.online, self.preset_manager, self.settings,
@@ -2565,6 +2566,9 @@ class OnlineMixin:
             self._start_watcher()
 
     def _run_auto(self, kind: str, names):
+        if AutoActions is None:
+            self.toast("在线模块不可用", "warning")
+            return False
         if self.online is None or self.preset_manager is None:
             self.toast("还没有加载整合包或在线模块不可用", "warning")
             return False
@@ -2621,7 +2625,9 @@ class OnlineMixin:
                     apply_preset=self._auto_apply,
                     log=self.log_manager.log,
                     cancel=lambda: cancel_flag["stop"],
-                    progress=on_progress)
+                    progress=on_progress,
+                    watch_stop=self._stop_watcher,
+                    watch_start=self._start_watcher)
                 if len(names) > 1:
                     out = runner.run_all(kind, names)
                 elif kind == "sync":
@@ -2636,7 +2642,12 @@ class OnlineMixin:
                            "failed": [], "message": one.get("message", "")}
                 ui_call(self.root, self._auto_done, card, kind, out, None)
             except Exception as exc:
-                ui_call(self.root, self._auto_done, card, kind, None, exc)
+                if cancel_flag["stop"]:
+                    ui_call(self.root, self._auto_done, card, kind,
+                            {"message": "已取消", "failed": [], "cancelled": True},
+                            None)
+                else:
+                    ui_call(self.root, self._auto_done, card, kind, None, exc)
 
         threading.Thread(target=worker, daemon=True).start()
         return True
@@ -2648,6 +2659,8 @@ class OnlineMixin:
         return bool(self._run_auto("publish", [name]))
 
     def _auto_done(self, card, kind, out, error):
+        self._last_auto_result = out
+        self._last_auto_error = error
         self._set_online_busy(False)
         self.set_busy_state(False, "")
         try:
@@ -2662,6 +2675,11 @@ class OnlineMixin:
         out = out or {}
         message = str(out.get("message") or "操作完成")
         failed = out.get("failed") or []
+        if out.get("cancelled"):
+            self.log_manager.log(message, 'WARNING')
+            self.set_status(message, "warning")
+            self.toast(message, "info")
+            return
         if failed:
             detail = "\n".join(f"· {name}：{reason}" for name, reason in failed[:6])
             self.log_manager.log(message + "\n" + detail, 'WARNING')

@@ -39,6 +39,8 @@ class AutoActions:
         log: Callable[..., None] | None = None,
         cancel: Callable[[], bool] | None = None,
         progress: Callable[[float | None, str], None] | None = None,
+        watch_stop: Callable[[], None] | None = None,
+        watch_start: Callable[[], None] | None = None,
     ):
         self.service = service
         self.manager = preset_manager
@@ -48,6 +50,8 @@ class AutoActions:
         self.log = log or (lambda *a, **k: None)
         self.cancel = cancel or (lambda: False)
         self.progress = progress or (lambda _p, _m: None)
+        self.watch_stop = watch_stop or (lambda: None)
+        self.watch_start = watch_start or (lambda: None)
 
     # ------------------------------------------------------------------
     def bound_names(self, role: str) -> list[str]:
@@ -73,8 +77,12 @@ class AutoActions:
         try:
             if was_applied:
                 self.progress(None, f"收回已应用预设「{name}」…")
-                if not self.manager.detach_preset(name):
-                    raise RuntimeError("无法收回当前已应用的预设，已停止更新")
+                self.watch_stop()
+                try:
+                    if not self.manager.detach_preset(name):
+                        raise RuntimeError("无法收回当前已应用的预设，已停止更新")
+                finally:
+                    self.watch_start()
                 detached = True
                 info["applied"] = False
             ref = self.ref_for(name)
@@ -142,8 +150,12 @@ class AutoActions:
         try:
             if was_applied:
                 self.progress(None, f"收回已应用预设「{name}」…")
-                if not self.manager.detach_preset(name):
-                    raise RuntimeError("无法收回当前已应用的预设，已停止发布")
+                self.watch_stop()
+                try:
+                    if not self.manager.detach_preset(name):
+                        raise RuntimeError("无法收回当前已应用的预设，已停止发布")
+                finally:
+                    self.watch_start()
                 detached = True
                 info["applied"] = False
             ref = self.ref_for(name)
@@ -213,8 +225,10 @@ class AutoActions:
         names = list(names)
         total = len(names)
         changed, unchanged, failed = [], [], []
+        cancelled = False
         for index, name in enumerate(names, 1):
             if self.cancel():
+                cancelled = True
                 break
             self.progress((index - 1) / max(1, total) * 100.0,
                           f"{index}/{total} · {name}")
@@ -230,8 +244,11 @@ class AutoActions:
                          f"{name} · {exc}", "ERROR")
         self.progress(100.0, "完成")
         verb = "更新" if kind == "sync" else "发布"
-        message = (f"{verb}完成 · {len(changed)} 个"
-                   + (f" · 无变更 {len(unchanged)} 个" if unchanged else "")
-                   + (f" · 失败 {len(failed)} 个" if failed else ""))
+        if cancelled:
+            message = f"已取消 · 已完成 {len(changed)} 个"
+        else:
+            message = (f"{verb}完成 · {len(changed)} 个"
+                       + (f" · 无变更 {len(unchanged)} 个" if unchanged else "")
+                       + (f" · 失败 {len(failed)} 个" if failed else ""))
         return {"changed": changed, "unchanged": unchanged,
-                "failed": failed, "message": message}
+                "failed": failed, "cancelled": cancelled, "message": message}
