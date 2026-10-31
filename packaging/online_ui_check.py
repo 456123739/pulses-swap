@@ -208,6 +208,7 @@ def main() -> int:
     _close_top_card(root)
     app.online_states[name] = {"phase": "ready", "error": "", "checked_at": time.time(),
                                "plan": _fake_plan()}
+    app.settings.advanced_actions = True
     app.open_sync_dialog(name)
     pump(root, 300)
     check(True, "同步框构建成功")

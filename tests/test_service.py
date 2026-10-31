@@ -15,7 +15,7 @@ from online import diff, hashing, packing, paths
 from online.errors import ManifestError, NetworkError, SourceError
 from online.manifest import dumps, normalize
 from online.provider_lanzou import MANIFEST_NAME, LanzouShare
-from online.service import OnlineService, PresetRef
+from online.service import OnlineService, PresetRef, SourceStore
 
 
 def write(path: Path, data: bytes) -> None:
@@ -465,6 +465,31 @@ class CloudProbeTest(unittest.TestCase):
         data = self.service._cloud_manifest_for_publish(
             "测试预设", BrokenAccount(), 1)
         self.assertEqual(data.get("generation"), 7)
+
+
+class SourceStoreConcurrencyTests(unittest.TestCase):
+    def test_concurrent_puts_do_not_lose_temp_file(self):
+        import tempfile
+        import threading
+        with tempfile.TemporaryDirectory() as tmp:
+            store = SourceStore(str(Path(tmp) / "sources.json"))
+            errors = []
+
+            def worker(index):
+                try:
+                    for n in range(25):
+                        store.put(f"p{index}-{n}", {"n": n})
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(exc)
+
+            threads = [threading.Thread(target=worker, args=(i,))
+                       for i in range(4)]
+            for th in threads:
+                th.start()
+            for th in threads:
+                th.join()
+            self.assertFalse(errors, errors)
+            self.assertTrue(Path(tmp, "sources.json").exists())
 
 
 if __name__ == "__main__":

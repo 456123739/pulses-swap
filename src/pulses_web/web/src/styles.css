@@ -644,3 +644,9 @@ h3 { font-size: 15px; font-weight: 600; }
 .sidebar-pack-copy strong { font-size: 10.5px; font-weight: 550; }
 .sidebar-pack-copy small { font-size: 9px; color: var(--muted); }
 .sidebar.expanded .sidebar-pack-copy { display: flex; }
+
+@media (max-width: 1050px) {
+  .hero-actions { width: 100%; min-width: 0; flex-direction: column; align-items: stretch; }
+  .hero-actions .btn { width: 100%; flex: none; }
+  .drop-caption { text-align: center; }
+}

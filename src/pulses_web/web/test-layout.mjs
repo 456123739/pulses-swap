@@ -25,7 +25,7 @@ const browser = await chromium.launch({
 })
 const failures = []
 for (const advanced of [false, true]) {
-  for (const [w, h] of [[1280, 900], [1140, 812]]) {
+  for (const [w, h] of [[1280, 900], [1140, 812], [1024, 700]]) {
     const state = JSON.parse(JSON.stringify(base))
     state.settings.advanced_actions = advanced
     const page = await browser.newPage({ viewport: { width: w, height: h }, deviceScaleFactor: 1 })

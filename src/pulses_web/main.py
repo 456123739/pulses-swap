@@ -103,15 +103,25 @@ def main():
         return
 
     window = None
+    # 1024×768 等小屏上不要强行超出桌面；正常屏保持 1280×900。
+    win_w, win_h = 1280, 900
+    try:
+        screens = webview.screens()
+        if screens:
+            sw, sh = int(screens[0].width), int(screens[0].height)
+            win_w = max(960, min(1280, int(sw * 0.94)))
+            win_h = max(640, min(900, int(sh * 0.90)))
+    except Exception:
+        pass
     try:
         # 不再使用 hidden=True：先让窗口出现，前端没加载完时显示纯色底，
         # 也比“进程在后台、用户看不到窗口”可靠。on_loaded 里仍会再 show 一次兜底。
         window = webview.create_window(
             "Pulses Swap",
             _web_url(),
-            width=1280,
-            height=900,
-            min_size=(1140, 812),
+            width=win_w,
+            height=win_h,
+            min_size=(min(1140, win_w), min(812, win_h)),
             background_color="#F2F3F5",
             hidden=False,
             text_select=True,

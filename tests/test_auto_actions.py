@@ -111,6 +111,18 @@ class AutoActionsTests(unittest.TestCase):
         self.assertEqual(len(service.published[0]), 2)
         self.assertNotIn("f2.zip", service.published[0])
 
+    def test_run_all_isolates_failure_and_continues(self):
+        class S(FakeService):
+            def sync(self, ref, plan, selection, on_progress=None, cancel=None):
+                if ref.name == "P":
+                    raise RuntimeError("boom")
+                return super().sync(ref, plan, selection,
+                                    on_progress=on_progress, cancel=cancel)
+        service = S(self.plan("player", diff.DOWNLOAD))
+        out = self.runner(service).run_all("sync", ["P", "Q"])
+        self.assertEqual(out["failed"][0][0], "P")
+        self.assertIn("Q", out["changed"])
+
     def test_next_version(self):
         self.assertEqual(next_version("v1.2.3"), "v1.2.4")
         self.assertEqual(next_version("1.9.9"), "v1.9.10")

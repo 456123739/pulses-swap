@@ -207,6 +207,7 @@ class SourceStore:
     def __init__(self, path):
         self.path = str(path)
         self.items: dict[str, dict] = {}
+        self._lock = threading.RLock()
         self.load()
 
     def load(self) -> None:
@@ -227,23 +228,29 @@ class SourceStore:
     def save(self) -> None:
         os.makedirs(os.path.dirname(os.path.abspath(self.path)) or ".",
                     exist_ok=True)
-        temp = self.path + ".tmp"
-        with open(temp, "w", encoding="utf-8") as fh:
-            json.dump({"version": self.VERSION, "sources": self.items},
-                      fh, ensure_ascii=False, indent=1, sort_keys=True)
-        os.replace(temp, self.path)
+        with self._lock:
+            # 固定 `.tmp` 名会被两个同时读源的线程抢：一个 replace 后
+            # 另一个的源文件已经不存在。用唯一临时文件，写入仍原子。
+            temp = f"{self.path}.{os.getpid()}.{threading.get_ident()}.tmp"
+            with open(temp, "w", encoding="utf-8") as fh:
+                json.dump({"version": self.VERSION, "sources": self.items},
+                          fh, ensure_ascii=False, indent=1, sort_keys=True)
+            os.replace(temp, self.path)
 
     def get(self, name: str) -> dict:
-        return dict(self.items.get(name) or {})
+        with self._lock:
+            return dict(self.items.get(name) or {})
 
     def put(self, name: str, data: dict) -> None:
-        self.items[name] = dict(data)
-        self.save()
+        with self._lock:
+            self.items[name] = dict(data)
+            self.save()
 
     def remove(self, name: str) -> None:
-        if name in self.items:
-            self.items.pop(name)
-            self.save()
+        with self._lock:
+            if name in self.items:
+                self.items.pop(name)
+                self.save()
 
     def names(self) -> list[str]:
         return sorted(self.items)

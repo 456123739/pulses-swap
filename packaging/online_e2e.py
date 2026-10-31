@@ -260,6 +260,17 @@ def main() -> int:
         check("generation = 1", result and result.generation == 1)
         close_overlays(root)
 
+        print("[3b] 开发者一键上传全部（真实界面 worker）")
+        app._last_auto_result = None
+        app._last_auto_error = None
+        app._auto_publish_all()
+        check("一键上传完成",
+              pump_until(root, lambda: app._last_auto_result is not None, 60))
+        auto_out = app._last_auto_result or {}
+        check("一键上传没有失败", not auto_out.get("failed"),
+              (auto_out.get("failed"), app._last_auto_error))
+        close_overlays(root)
+
         folder_id = account.folder_id("测试预设",
                                       account.folder_id("PulsesSwap"))
         cloud_files = account.files_in(folder_id) if folder_id else {}
@@ -509,6 +520,18 @@ def main() -> int:
         check("文件已恢复成云端版本",
               (tacz / "alpha.zip").read_bytes() == b"changed alpha payload",
               (tacz / "alpha.zip").read_bytes()[:24])
+
+        # ============================================================
+        print("\n=== 一键操作界面路径 ===")
+        print("[16] 玩家一键更新全部（真实界面 worker）")
+        app._last_auto_result = None
+        app._last_auto_error = None
+        app._auto_update_all()
+        check("一键更新完成",
+              pump_until(root, lambda: app._last_auto_result is not None, 60))
+        out = app._last_auto_result or {}
+        check("一键更新没有失败", not out.get("failed"),
+              (out.get("failed"), app._last_auto_error))
 
         # ============================================================
         print("\n=== 重启后状态 ===")
