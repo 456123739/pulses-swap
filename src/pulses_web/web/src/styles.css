@@ -611,3 +611,36 @@ h3 { font-size: 15px; font-weight: 600; }
   font-size: 10.5px;
 }
 .recent-chip:hover { background: var(--accent-soft); color: var(--accent); }
+
+/* 侧栏身份切换：收起时只显示状态点，展开时显示可点击文字 */
+.sidebar-foot { display: flex; opacity: 1; padding: 8px 2px; }
+.role-switch {
+  width: 100%; min-height: 42px; border-radius: 10px; display: flex; align-items: center;
+  gap: 9px; padding: 6px 8px; color: var(--text-2); text-align: left;
+}
+.role-switch:hover { background: var(--input); }
+.role-copy { display: none; flex-direction: column; gap: 1px; font-size: 11px; white-space: nowrap; }
+.role-copy small { font-size: 9px; color: var(--muted); }
+.sidebar.expanded .role-copy { display: flex; }
+.sidebar.expanded .sidebar-foot { padding: 8px 4px; }
+
+.hero-primary.applied-state {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  min-width: 212px; height: 58px; border-radius: 16px;
+  background: var(--accent-soft); color: var(--accent-hover);
+  font-size: 15px; font-weight: 650;
+}
+.presets-card .card-head .button-row { gap: 6px; }
+
+/* 侧栏当前整合包 */
+.sidebar-pack {
+  margin-top: 14px; width: 100%; min-height: 44px; padding: 7px 8px;
+  border-radius: 10px; display: flex; align-items: center; gap: 10px;
+  color: var(--text-2); text-align: left;
+}
+.sidebar-pack:hover { background: var(--input); }
+.sidebar-pack-copy { display: none; min-width: 0; flex-direction: column; gap: 1px; }
+.sidebar-pack-copy strong, .sidebar-pack-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-pack-copy strong { font-size: 10.5px; font-weight: 550; }
+.sidebar-pack-copy small { font-size: 9px; color: var(--muted); }
+.sidebar.expanded .sidebar-pack-copy { display: flex; }

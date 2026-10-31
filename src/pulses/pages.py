@@ -311,8 +311,22 @@ class SettingsPage:
             bold_active=True, text_anchor="center", duration_ms=220,
             width=184, height=36, track_color=C_PANEL_ALT_BG)
         self.online_auto_seg.pack(side=RIGHT)
+        self.online_auto_line = line
+
+        line, width = row(box, "高级操作", "手动差异 / 版本号 / 部分同步，默认关闭")
+        self.online_advanced_seg = CanvasSegmented(
+            line, [("off", "关闭"), ("on", "开启")],
+            command=self._on_advanced_selected,
+            orientation="horizontal", item_height=30, pad=3,
+            gap=3, radius=R_CONTROL, bg_color=C_CARD_BG,
+            pill_color=C_ACCENT, hover_color=C_ACCENT_SOFT,
+            text_color=C_TEXT_SECONDARY, active_text_color=C_TEXT_INVERSE,
+            font_size=FS_SMALL, bold_active=True, text_anchor="center",
+            duration_ms=220, width=184, height=36, track_color=C_PANEL_ALT_BG)
+        self.online_advanced_seg.pack(side=RIGHT)
 
         line, width = row(box, "完整更新前确认", "批量更新再确认")
+        self.online_confirm_line = line
         self.online_confirm_seg = CanvasSegmented(
             line, [("on", "确认"), ("off", "直接执行")],
             command=self._on_online_confirm_selected,
@@ -325,6 +339,7 @@ class SettingsPage:
         self.online_confirm_seg.pack(side=RIGHT)
 
         line, width = row(box, "发布前预览", "发布前列出变更")
+        self.online_preview_line = line
         self.online_preview_seg = CanvasSegmented(
             line, [("off", "直接发布"), ("on", "先看差异")],
             command=self._on_online_preview_selected,
@@ -337,6 +352,7 @@ class SettingsPage:
         self.online_preview_seg.pack(side=RIGHT)
 
         line, width = row(box, "同步方式", "完全同步会删除本地多余（进回收站）")
+        self.online_clean_line = line
         self.online_clean_seg = CanvasSegmented(
             line, [("on", "完全同步"), ("off", "保留多余")],
             command=self._on_online_clean_selected,
@@ -377,6 +393,44 @@ class SettingsPage:
             self.app.settings.save()
         except Exception:
             pass
+
+    def _on_advanced_selected(self, key):
+        self.app.settings.advanced_actions = (key == "on")
+        try:
+            self.app.settings.save()
+        except Exception:
+            pass
+        self._apply_advanced_visibility()
+        try:
+            self.app._apply_advanced_controls()
+        except Exception:
+            pass
+
+    def _apply_advanced_visibility(self):
+        enabled = bool(getattr(self.app.settings, "advanced_actions", False))
+        rows = [getattr(self, name, None) for name in
+                ("online_confirm_line", "online_preview_line",
+                 "online_clean_line")]
+        for line in rows:
+            if line is None:
+                continue
+            try:
+                line.pack_forget()
+            except Exception:
+                pass
+        if enabled:
+            before = getattr(self, "online_auto_line", None)
+            for line in rows:
+                if line is None:
+                    continue
+                try:
+                    if before is not None and before.winfo_exists():
+                        line.pack(fill=X, padx=PAD_CARD_X,
+                                  pady=PAD_TIGHT, before=before)
+                    else:
+                        line.pack(fill=X, padx=PAD_CARD_X, pady=PAD_TIGHT)
+                except Exception:
+                    pass
 
     def _refresh_online_cache_label(self):
         label = getattr(self, "online_cache_label", None)
@@ -544,6 +598,10 @@ class SettingsPage:
                               "on" if getattr(self.settings,
                                               "online_auto_check", True)
                               else "off"),
+                             (getattr(self, "online_advanced_seg", None),
+                              "on" if getattr(self.settings,
+                                              "advanced_actions", False)
+                              else "off"),
                              (getattr(self, "online_clean_seg", None),
                               "on" if getattr(self.settings,
                                               "online_sync_clean", True)
@@ -562,7 +620,12 @@ class SettingsPage:
             pass
         self._update_db_labels()
         self._refresh_online_cache_label()
+        self._apply_advanced_visibility()
         self._loading = False
+        try:
+            self.app._apply_advanced_controls()
+        except Exception:
+            pass
 
     def _update_db_labels(self):
         db_str = (str(self.settings._settings_file.parent)

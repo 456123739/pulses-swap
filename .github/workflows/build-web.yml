@@ -29,6 +29,25 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-web.txt pyinstaller
+      - name: 核心测试
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -q
+      - name: 安装 Playwright Chromium
+        working-directory: src/pulses_web/web
+        run: npx playwright install chromium
+      - name: 黑盒 UI 测试
+        working-directory: src/pulses_web/web
+        shell: pwsh
+        run: |
+          $srv = Start-Process python -ArgumentList "-m","http.server","8765","-d","dist" -PassThru
+          Start-Sleep -Seconds 1
+          try {
+            node test-ui.mjs
+            node test-layout.mjs
+          } finally {
+            Stop-Process -Id $srv.Id -Force -ErrorAction SilentlyContinue
+          }
       - name: PyInstaller
         run: pyinstaller packaging/pulses_web.spec --noconfirm --clean
       - name: 检查产物
@@ -40,11 +59,11 @@ jobs:
             throw "前端产物没有打进 exe 目录"
           }
           Write-Host ("exe: {0:N1} MB" -f ((Get-Item $exe).Length / 1MB))
-      - name: 启动冒烟（隐藏窗口）
+      - name: 启动、等待 UI 并截取 Windows 桌面
         shell: pwsh
         run: |
           $p = Start-Process "dist/PulsesSwap/PulsesSwap.exe" -PassThru
-          Start-Sleep -Seconds 10
+          Start-Sleep -Seconds 12
           $p.Refresh()
           if ($p.HasExited) {
             throw "打包产物提前退出，exit code = $($p.ExitCode)"
@@ -52,8 +71,41 @@ jobs:
           if ($p.MainWindowHandle -eq 0) {
             throw "进程在运行，但没有主窗口（hidden 启动回归）"
           }
+          Add-Type @"
+          using System;
+          using System.Runtime.InteropServices;
+          public class WinApi {
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+            [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+          }
+          "@
+          [WinApi]::ShowWindow($p.MainWindowHandle, 9) | Out-Null
+          [WinApi]::SetForegroundWindow($p.MainWindowHandle) | Out-Null
+          Start-Sleep -Seconds 2
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
+          $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+          $graphics = [System.Drawing.Graphics]::FromImage($bmp)
+          $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+          New-Item -ItemType Directory -Force -Path "dist/screenshots" | Out-Null
+          $out = "dist/screenshots/windows-ci.png"
+          $bmp.Save($out, [System.Drawing.Imaging.ImageFormat]::Png)
+          $graphics.Dispose(); $bmp.Dispose()
+          if (-not (Test-Path $out)) { throw "没有生成桌面截图" }
           Stop-Process -Id $p.Id -Force
-          Write-Host "OK: 打包产物启动并有主窗口"
+          Write-Host "OK: Windows UI screenshot -> $out"
+      - name: 解析版本号
+        id: ver
+        shell: pwsh
+        run: |
+          if ("${{ github.ref }}" -like "refs/tags/v*") {
+            $v = "${{ github.ref_name }}".TrimStart("v")
+          } else {
+            $v = (python -c 'import re,pathlib; print(re.search(r"VERSION = \"([^\"]+)\"", pathlib.Path("src/pulses/core/paths.py").read_text(encoding="utf-8")).group(1))').Trim()
+          }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "版本号: $v"
       - name: 安装 Inno Setup
         run: choco install innosetup --no-progress -y
       - name: 下载 WebView2 Bootstrapper
@@ -64,13 +116,13 @@ jobs:
       - name: 编译安装器
         shell: pwsh
         run: |
-          $v = "${{ github.ref_name }}".TrimStart("v")
+          $v = "${{ steps.ver.outputs.version }}"
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
             "packaging\installer.iss" "/DMyAppVersion=$v"
       - name: 绿色版
         shell: pwsh
         run: |
-          $v = "${{ github.ref_name }}".TrimStart("v")
+          $v = "${{ steps.ver.outputs.version }}"
           $stage = "dist/portable/PulsesSwap-$v"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           Copy-Item "dist/PulsesSwap/*" $stage -Recurse -Force
@@ -81,6 +133,7 @@ jobs:
           path: |
             dist/installer/*.exe
             dist/portable/*.zip
+            dist/screenshots/*.png
 
   linux:
     runs-on: ubuntu-latest
@@ -148,7 +201,7 @@ jobs:
           path: artifacts
       - run: |
           mkdir -p release
-          find artifacts -type f \( -name "*.exe" -o -name "*.zip" -o -name "*.tar.gz" \) -exec cp {} release/ \;
+          find artifacts -type f \( -name "*.exe" -o -name "*.zip" -o -name "*.tar.gz" -o -name "*.png" \) -exec cp {} release/ \;
           git archive --format=zip --prefix=PulsesSwap/ -o "release/PulsesSwap-src-${GITHUB_REF_NAME}.zip" HEAD
       - uses: softprops/action-gh-release@v2
         with:

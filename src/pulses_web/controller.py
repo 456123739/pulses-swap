@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sys
 import threading
 import time
 import traceback
@@ -487,6 +488,62 @@ class AppController:
         info.pop("uid", None)
         return {"available": True, "account": info}
 
+    def open_folder(self, path: str):
+        import subprocess
+        target = Path(str(path or "")).expanduser()
+        if not target.exists():
+            raise ValueError("文件夹不存在")
+        try:
+            if os.name == "nt":
+                os.startfile(str(target))          # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(target)])
+            else:
+                subprocess.Popen(["xdg-open", str(target)])
+        except Exception as exc:
+            raise RuntimeError(f"无法打开文件夹：{exc}") from exc
+        return {"path": str(target)}
+
+    def open_tacz(self):
+        if not self.tacz_path:
+            raise ValueError("还没有加载整合包")
+        return self.open_folder(str(self.tacz_path))
+
+    def clear_cache(self):
+        if not self.online:
+            raise RuntimeError("在线模块不可用")
+        count = self.online.clear_caches()
+        self._clear_plans()
+        self._rev += 1
+        self.add_log(f"已清理缓存：{count} 个文件", "SUCCESS")
+        return {"cleared": count, "state": self.state()}
+
+    @_locked
+    def add_from_cloud(self, url: str, password: str = "", name: str = "",
+                       ctx=None):
+        """从分享链接创建预设并立即下载，全部由软件完成。"""
+        if not self.online:
+            raise RuntimeError("在线模块不可用")
+        url = str(url or "").strip()
+        if not url:
+            raise ValueError("请填写分享链接")
+        if not self.preset_manager:
+            raise ValueError("请先加载整合包")
+        info = self.online.inspect_share(url, password)
+        preset_name = str(name or info.get("name") or "云端预设").strip()
+        if not preset_name:
+            preset_name = "云端预设"
+        base = preset_name
+        n = 1
+        while preset_name in self.preset_manager.presets:
+            n += 1
+            preset_name = f"{base}-{n}"
+        self.create_preset(preset_name)
+        self.bind_source(preset_name, url, password)
+        out = self.sync_auto(preset_name, ctx=ctx)
+        out["message"] = f"已从云端添加「{preset_name}」 · {out.get('message', '')}"
+        return out
+
     @_locked
     def bind_source(self, name: str, url: str, password: str = "", cloud_path=""):
         data = self._require_online().bind(
@@ -671,8 +728,6 @@ class AppController:
     @_locked
     def sync_auto(self, name: str, ctx=None):
         """玩家一键更新：收回已应用预设 → 检查/下载/清理 → 再自动替换。"""
-        if self.role != "player":
-            raise PermissionError("一键更新只适用于玩家身份")
         was_applied = bool(
             self.preset_manager and name in self.preset_manager.presets
             and self.preset_manager.presets[name].get("applied"))
