@@ -414,3 +414,9 @@
 - **一键 API**：补齐 `Api._methods` 中四个 auto/all 方法；新增 `ApiSurfaceTests` 断言映射存在。
 - **构建门禁**：`build-web.yml` Windows 冒烟检查 `MainWindowHandle`，没有主窗口直接失败。
 - **回归**：216 个 Python 测试通过；`npm run build`、`test-ui.mjs`、`test-layout.mjs` 通过。
+
+## 26. 3.1.2 构建链修复
+
+- 3.1.1 的 Windows/Linux 产物构建成功，Windows 冒烟已通过主窗口句柄检查；release 被 `ui` job 的 Playwright 安装失败挡住。
+- 原因：`ubuntu-latest` 迁移到 26.04，Playwright 1.56 不支持；`ui` job 固定 `ubuntu-22.04`。
+- 应用代码与 3.1.1 相同，版本升为 3.1.2 重新完整发布。
