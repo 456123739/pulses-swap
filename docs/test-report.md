@@ -439,4 +439,4 @@
 - 223 个 Python 单元/集成测试通过。
 - `ui_process_check` 验证默认隐藏手动检查、高级开关显隐、一键按钮调用、身份/页面幕布与收尾残留；`ui_audit`、`anim_invariants`、`scale_check`、`scroll_check`、`startup_check`、`window_anim_check`、`online_ui_check` 全部通过。
 - `online_e2e` 使用真实界面 worker + 本地蓝奏模拟，覆盖发布 → 同步 → 改版 → 玩家一键更新全部 → 开发者一键上传全部 → 重启，全部通过。
-- `online_smoke` 真实蓝奏分享列表/下载/哈希通过；真实上传账号被蓝奏限流（密码错误次数过多），本轮未能重跑真实上传。
+- `online_smoke` 真实蓝奏分享列表/下载/哈希通过；`lanzou_live_upload.py` 真实上传 smoke（2MB 上传 → 列表 → 匿名下载 → SHA-256 → 删除）全部通过。完整正式发布未在测试账号上执行。
