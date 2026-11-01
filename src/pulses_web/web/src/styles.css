@@ -792,3 +792,43 @@ h3 { font-size: 15px; font-weight: 600; }
 @media (max-width: 1050px) {
   .recent-popover { left: 0; right: auto; width: min(330px, 100%); }
 }
+
+/* 未绑定预设：显眼的上传到云端入口 */
+.create-cloud-action { border: 1px solid var(--accent); color: var(--accent); background: var(--accent-soft); }
+.create-cloud-action:hover { background: var(--accent); color: #fff; }
+.create-cloud-panel {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 12px 14px; margin: 4px 0 14px; border-radius: 12px;
+  background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.create-cloud-panel > div { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.create-cloud-panel strong { font-size: 12px; font-weight: 600; color: var(--accent-hover); }
+.create-cloud-panel span { font-size: 10.5px; color: var(--text-2); line-height: 1.5; }
+.create-cloud-panel .btn { flex: none; }
+@media (max-width: 760px) {
+  .create-cloud-panel { align-items: flex-start; flex-direction: column; }
+}
+
+/* 云端一键入口：玩家拉取/更新，开发者上传 */
+.btn.hero-secondary.cloud-action { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 24%, transparent); background: var(--accent-soft); }
+.btn.hero-secondary.cloud-action:hover { background: #fff; color: var(--accent-hover); }
+
+/* 预设详情弹窗 */
+.preset-detail-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 12px; color: var(--text-2); font-size: 11px; }
+.preset-detail-fields { display: grid; grid-template-columns: 1fr 120px; gap: 10px; }
+.preset-detail-fields .field { margin-top: 0; }
+.preset-cloud-info { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: var(--input); display: flex; flex-direction: column; gap: 7px; }
+.preset-cloud-info > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 11px; }
+.preset-cloud-info span { color: var(--muted); }
+.preset-cloud-info strong { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preset-cloud-info .path { max-width: 330px; }
+.preset-gunpack-stats { margin-top: 12px; display: flex; gap: 12px; font-size: 11px; }
+.preset-gunpack-stats > span { flex: none; color: var(--muted); }
+.preset-gunpack-stats > div { display: flex; gap: 5px; flex-wrap: wrap; min-width: 0; }
+.preset-gunpack-stats > div > span { padding: 3px 7px; border-radius: 6px; background: var(--input); color: var(--text-2); font-size: 10px; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preset-gunpack-stats em { color: var(--muted); font-style: normal; }
+.modal-hint { margin-top: 12px; color: var(--muted); font-size: 10.5px; }
+@media (max-width: 760px) { .preset-detail-fields { grid-template-columns: 1fr; } }
+
+/* 未检查差异时不要留一整块空白 */
+.plan-card.plan-empty { min-height: 0; }

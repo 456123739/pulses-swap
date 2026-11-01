@@ -329,6 +329,30 @@ class AppController:
         return self.state()
 
     @_locked
+    def preset_details(self, name: str):
+        pm = self.preset_manager
+        if not pm or name not in pm.presets:
+            raise ValueError("预设不存在")
+        info = pm.presets[name]
+        source = self.online.source_of(name) if self.online else {}
+        lanzou = source.get("lanzou") or {}
+        history = list(source.get("history") or [])
+        return {
+            "name": name,
+            "version": info.get("version", ""),
+            "applied": bool(info.get("applied")),
+            "count": len(info.get("gunpacks") or {}),
+            "gunpacks": [str(k) for k in (info.get("gunpacks") or {})],
+            "cloud": {
+                "url": lanzou.get("url", ""),
+                "password": lanzou.get("password", ""),
+                "cloud_path": source.get("cloud_path", ""),
+                "last_version": source.get("last_version", ""),
+                "history": history[:6],
+            },
+        }
+
+    @_locked
     def create_preset(self, name: str, version: str = "v1.0.0"):
         if not self.preset_manager:
             raise ValueError("请先加载整合包")
@@ -854,6 +878,28 @@ class AppController:
                     self.add_log(f"发布失败后恢复 tacz 也失败：{restore_exc}",
                                  "ERROR")
             raise
+
+    @_locked
+    def publish_new(self, name: str, ctx=None):
+        """开发者把未绑定本地预设上传到云端，自动创建 /PulsesSwap/<name>。"""
+        if self.role != "developer":
+            raise PermissionError("只有开发者可以发布")
+        if not self.preset_manager or name not in self.preset_manager.presets:
+            raise ValueError("预设不存在")
+        if self.online.is_bound(name):
+            return self.publish_auto(name, ctx=ctx)
+        source = self.online.source_of(name) or {}
+        cloud_path = str(source.get("cloud_path") or "").strip()
+        if not cloud_path:
+            safe = str(name).replace("/", "-").strip() or "预设"
+            cloud_path = f"/PulsesSwap/{safe}"
+        # 先把云端路径绑定到该预设；发布成功后 _remember_share 会补上分享链接。
+        self.bind_source(name, "", "", cloud_path=cloud_path)
+        out = self.publish_auto(name, ctx=ctx)
+        if not out.get("changed"):
+            raise ValueError("预设里还没有枪包，先拖入枪包再上传到云端")
+        out["message"] = out.get("message", "上传完成") + f" · 云端 {cloud_path}"
+        return out
 
     @_locked
     def publish_plan(self, name: str, ctx=None):
