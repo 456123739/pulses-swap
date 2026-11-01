@@ -95,7 +95,7 @@ jobs:
           $pack = Join-Path $root "drag-pack"
           New-Item -ItemType Directory -Force -Path (Join-Path $pack "tacz") | Out-Null
           Set-Content -Path (Join-Path $pack "tacz\drag-gun.zip") -Value "drag-test" -NoNewline
-          python packaging/windows_drag_test.py --app "dist/PulsesSwap/PulsesSwap.exe" --source $pack --report (Join-Path $PWD "drag-result.json")
+          python packaging/windows_drag_test.py --app "dist/PulsesSwap/PulsesSwap.exe" --source (Join-Path $pack "tacz\drag-gun.zip") --report (Join-Path $PWD "drag-result.json")
           if (-not (Test-Path "drag-result.json")) { throw "拖拽测试没有结果文件" }
           Get-Content "drag-result.json"
 

@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import assert from 'node:assert'
 
 const state = {
-  revision: 7, version: '3.1.6', role: 'developer',
+  revision: 7, version: '3.1.7', role: 'developer',
   pack: { path: 'D:\\Games\\Minecraft\\PCL\\.minecraft\\versions\\1.20.1-Fabric', name: '1.20.1-Fabric', tacz: 'D:\\Games\\Minecraft\\PCL\\.minecraft\\versions\\1.20.1-Fabric\\tacz', loaded: true },
   presets: [
     { name: '默认枪包', version: 'v1.2.0', applied: true, count: 18, path: '' },
@@ -29,7 +29,7 @@ const state = {
   settings: { storage_mode: 'isolated', role: 'developer', animations: true, online_sync_clean: true, online_auto_check: true, online_publish_preview: false, advanced_actions: false, online_confirm_full: true },
   recent: [{ name: '1.20.1-Fabric', path: 'D:\\Games\\Minecraft\\PCL\\.minecraft\\versions\\1.20.1-Fabric' }],
   logs: [
-    { time: '22:31:07', message: 'Pulses Swap v3.1.6 启动成功，作者: NimShade', level: 'SUCCESS', verbose: false },
+    { time: '22:31:07', message: 'Pulses Swap v3.1.7 启动成功，作者: NimShade', level: 'SUCCESS', verbose: false },
     { time: '22:31:08', message: '数据库位置: D:\\PulsesSwap_database', level: 'INFO', verbose: true },
     { time: '22:31:09', message: '整合包已就绪: 1.20.1-Fabric · 预设 4 个', level: 'SUCCESS', verbose: false },
     { time: '22:31:12', message: '云端检查完成：待下载 3 · 一致 9', level: 'INFO', verbose: false },
@@ -143,7 +143,7 @@ assert.ok((await page.locator('.cover-kicker').innerText()).includes('切换为�
 const roleCover = page.locator('.cover')
 assert.equal(await roleCover.evaluate(el => getComputedStyle(el).position), 'fixed')
 await page.screenshot({ path: '/tmp/web_shots/03-role-cover.png' })
-await page.waitForTimeout(1400)
+await page.waitForTimeout(1700)
 assert.equal(await page.locator('.cover').count(), 0)
 assert.ok(await page.locator('.app.role-player').count(), '身份没有切换为玩家')
 assert.equal(await page.locator('.role-switch').getAttribute('title'), '切换为开发者')
@@ -163,7 +163,7 @@ await page.waitForTimeout(120)
 await page.locator('.role-switch').click()
 await page.waitForTimeout(110)
 assert.ok(await page.locator('.cover').count(), '切回开发者缺少渐变覆盖层')
-await page.waitForTimeout(1300)
+await page.waitForTimeout(1700)
 assert.equal(await page.locator('.cover').count(), 0)
 assert.ok(await page.locator('.app.role-developer').count())
 await page.locator('.nav-item').nth(2).click()

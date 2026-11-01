@@ -5,7 +5,7 @@ import time
 import unittest
 from pathlib import Path
 
-from pulses_web.api import Api
+from pulses_web.api import Api, find_pack_root
 from pulses_web.controller import AppController
 from pulses_web.events import EventBus, EventPump, JobRunner
 
@@ -60,6 +60,24 @@ class WebBridgeTests(unittest.TestCase):
         self.assertEqual(result["error"]["code"], "UNKNOWN_METHOD")
         result = self.api.invoke("pack.open", {})
         self.assertFalse(result["ok"])
+
+    def test_drop_any_descendant_finds_pack_root(self):
+        pack = Path(self.tmp.name) / "pack-desc"
+        deep = pack / "tacz" / "guns" / "rifles"
+        deep.mkdir(parents=True)
+        gun = deep / "ak.zip"
+        gun.write_bytes(b"x")
+        self.assertEqual(find_pack_root([str(gun)]), pack)
+        self.assertEqual(find_pack_root([str(deep)]), pack)
+        self.assertEqual(find_pack_root([str(pack / "tacz")]), pack)
+        self.assertEqual(find_pack_root([str(pack)]), pack)
+
+    def test_drop_outside_pack_returns_none(self):
+        outside = Path(self.tmp.name) / "outside"
+        outside.mkdir()
+        f = outside / "a.zip"
+        f.write_bytes(b"x")
+        self.assertIsNone(find_pack_root([str(f)]))
 
     def test_job_events_have_job_id_and_sequence(self):
         pack = Path(self.tmp.name) / "pack"

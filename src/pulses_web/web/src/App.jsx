@@ -31,7 +31,7 @@ function Logo() {
 function Cover({ state }) {
   if (!state.active) return null
   return (
-    <div className={`cover cover-${state.phase}`} aria-hidden="true">
+    <div className={`cover cover-${state.phase} ${state.target ? `cover-to-${state.target}` : ''}`} aria-hidden="true">
       <div className="cover-panel cover-left" />
       <div className="cover-panel cover-right" />
       <div className="cover-aura" />
@@ -54,7 +54,7 @@ function Progress({ value, text }) {
   )
 }
 
-function Sidebar({ page, onNavigate, role, expanded, setExpanded, version, onSwitchRole, pack, presetCount }) {
+function Sidebar({ page, onNavigate, role, loggedIn, expanded, setExpanded, version, onSwitchRole, pack, presetCount }) {
   return (
     <aside className={`sidebar ${expanded ? 'expanded' : ''}`}
       onMouseEnter={() => setExpanded(true)} onMouseLeave={() => setExpanded(false)}>
@@ -79,10 +79,14 @@ function Sidebar({ page, onNavigate, role, expanded, setExpanded, version, onSwi
         <span className="sidebar-pack-copy"><strong>{pack.name}</strong><small>{presetCount} 个预设</small></span>
       </button>}
       <div className="sidebar-foot">
-        <button className="role-switch" onClick={onSwitchRole}
-          title={role === 'developer' ? '切换为玩家' : '切换为开发者'}>
-          <span className={`role-dot ${role}`} />
-          <span className="role-copy">{role === 'developer' ? '开发者' : '玩家'}<small>切换身份</small></span>
+        <button className={`role-switch ${loggedIn ? '' : 'logged-out'}`} onClick={onSwitchRole}
+          title={loggedIn ? (role === 'developer' ? '切换为玩家' : '切换为开发者') : '未登录 · 无法切换身份'}
+          aria-label={loggedIn ? '切换身份' : '未登录 · 无法切换身份'}>
+          <span className={`role-dot ${loggedIn ? role : 'offline'}`} />
+          <span className="role-copy">
+            {loggedIn ? (role === 'developer' ? '开发者' : '玩家') : '未登录'}
+            <small>{loggedIn ? '切换身份' : '无法切换身份'}</small>
+          </span>
         </button>
       </div>
     </aside>
@@ -263,13 +267,21 @@ function Home({ snap, actions, busy }) {
                 <button className="btn small" disabled><Icon name="plus" />新建</button></div>
               <div className="empty-list"><Icon name="folder" size={22} /><strong>导入后自动生成</strong><span>整合包里的 tacz 会被识别为第一个预设。</span></div>
             </section>
-            <section className="card detail-card">
-              <div className="card-head"><div><span className="eyebrow">DETAIL</span><h2>等待整合包</h2></div></div>
-              <div className="empty-list"><Icon name="download" size={22} /><strong>拖入即可开始</strong><span>预设、枪包列表和云端绑定会显示在这里。</span></div>
-              {snap.recent?.length > 0 && <div className="recent-strip">
-                <span className="eyebrow">最近</span>
-                {snap.recent.slice(0, 3).map((r) => <button key={r.path} className="recent-chip" onClick={() => actions.openPack(r.path)} title={r.path}>{r.name || r.path}</button>)}
-              </div>}
+            <section className="card detail-card recent-card">
+              <div className="card-head"><div><span className="eyebrow">RECENT</span><h2>最近打开</h2></div>
+                <span className="pill">{(snap.recent || []).length}</span></div>
+              {(snap.recent || []).length > 0 ? <>
+                <p className="recent-hint">拖入整合包内的任意文件/文件夹也能识别；也可以直接选择最近记录。</p>
+                <div className="recent-open-scroll">
+                  {snap.recent.map((r) => (
+                    <button key={r.path} className="recent-open-row" onClick={() => actions.openPack(r.path)} title={r.path}>
+                      <span className="recent-open-icon"><Icon name="folder" size={16} /></span>
+                      <span className="recent-open-copy"><strong>{r.name || r.path}</strong><small>{r.path}</small></span>
+                      <Icon name="chevron" size={14} />
+                    </button>
+                  ))}
+                </div>
+              </> : <div className="empty-list"><Icon name="download" size={22} /><strong>拖入即可开始</strong><span>拖入整合包内的任意文件/文件夹都能定位到 tacz；预设和枪包列表会显示在这里。</span></div>}
             </section>
           </div>
         </>
@@ -831,7 +843,7 @@ export default function App() {
       if (!url?.trim()) { showToast('请填写分享链接', 'warning'); return }
       startJob('online.add', { url: url.trim(), password }, '从云端添加')
     } }), [startJob, showToast])
-  const login = useCallback(() => setModal({ kind: 'login', title: '登录蓝奏云', onConfirm: async ({ username, password }) => {
+  const login = useCallback(() => setModal({ kind: 'login', title: '登录蓝奏云', body: '登录后即可切换身份。', onConfirm: async ({ username, password }) => {
     try { const data = await invoke('account.login', { username, password }); setSnap(data.state); showToast('登录成功', 'success') }
     catch (err) { showToast(err.message, 'error') }
   } }), [showToast])
@@ -867,21 +879,25 @@ export default function App() {
 
   const switchRole = useCallback(async (role) => {
     if (role === snap.role || roleSwitchRef.current) return
+    if (role === 'developer' && !snap.online.account?.label) {
+      login()
+      return
+    }
     roleSwitchRef.current = true
     const label = role === 'developer' ? '开发者' : '玩家'
     const animate = snap.settings?.animations !== false
-    if (animate) setCover({ active: true, phase: 'role-cover', note: `正在切换为${label}` })
+    if (animate) setCover({ active: true, phase: 'role-cover', note: `正在切换为${label}`, target: role })
     try {
       const state = await invoke('app.role.switch', { role })
       if (!animate) { setSnap(state); }
       else {
         // 至少让渐变铺开，再在覆盖层下换主题
-        await new Promise((r) => setTimeout(r, 260))
+        await new Promise((r) => setTimeout(r, 320))
         setSnap(state)
         setCover((s) => ({ ...s, phase: 'role-hold', note: `已切换为${label}` }))
-        await new Promise((r) => setTimeout(r, 300))
+        await new Promise((r) => setTimeout(r, 380))
         setCover((s) => ({ ...s, phase: 'role-reveal' }))
-        await new Promise((r) => setTimeout(r, 430))
+        await new Promise((r) => setTimeout(r, 520))
         setCover({ active: false, phase: 'idle' })
       }
       showToast(role === 'developer' ? '已切换为开发者' : '已切换为玩家', 'success')
@@ -891,7 +907,7 @@ export default function App() {
     } finally {
       roleSwitchRef.current = false
     }
-  }, [snap.role, snap.settings?.animations, showToast])
+  }, [snap.role, snap.online.account?.label, snap.settings?.animations, login, showToast])
 
   const actions = { openPack, openTacz, clearCache, clearLogs, addFromCloud, openDatabase, select, createPreset, rename, delete: remove, saveVersion, apply, bind, check, sync, syncAuto, publishAuto, syncAllAuto, publishAllAuto, publishPlan, publish, login, logout, updateSettings, switchRole, prompt, toast: showToast, navigate, cancelJob }
   const animations = snap.settings?.animations !== false
@@ -902,7 +918,7 @@ export default function App() {
 
   return (
     <div className={`app role-${snap.role} ${expanded ? 'sidebar-open' : ''} ${snap.settings?.animations === false ? 'animations-off' : ''}`}>
-      <Sidebar page={page} onNavigate={navigate} role={snap.role} expanded={expanded} setExpanded={setExpanded} version={snap.version} onSwitchRole={() => actions.switchRole(snap.role === 'developer' ? 'player' : 'developer')} pack={snap.pack} presetCount={snap.presets.length} />
+      <Sidebar page={page} onNavigate={navigate} role={snap.role} loggedIn={Boolean(snap.online.account?.label)} expanded={expanded} setExpanded={setExpanded} version={snap.version} onSwitchRole={() => actions.switchRole(snap.role === 'developer' ? 'player' : 'developer')} pack={snap.pack} presetCount={snap.presets.length} />
       <main className="workspace">
         <div className="content">
           <AnimatePresence mode="wait" initial={false}>
