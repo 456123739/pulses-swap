@@ -79,36 +79,27 @@ def main():
         time.sleep(0.8)
         item = None
         for _ in range(10):
-            for kwargs in ({"title": source.name},
-                           {"title": source.name, "control_type": "DataItem"},
-                           {"title": source.name, "control_type": "ListItem"},
-                           {"title": source.name, "control_type": "TreeItem"}):
-                try:
-                    candidate = dlg.child_window(**kwargs)
-                    if candidate.exists(timeout=1):
-                        item = candidate
-                        break
-                except Exception:
-                    item = None
+            try:
+                for child in dlg.descendants():
+                    try:
+                        if (child.window_text() == source.name
+                                and child.element_info.control_type in
+                                ("ListItem", "DataItem", "TreeItem")):
+                            item = child
+                            break
+                    except Exception:
+                        continue
+            except Exception:
+                item = None
             if item is not None:
                 break
             time.sleep(0.4)
         if item is None:
-            names = []
-            try:
-                for child in dlg.descendants()[:80]:
-                    try:
-                        names.append((child.element_info.control_type,
-                                      child.window_text(),
-                                      child.rectangle()))
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-            raise RuntimeError(f"Explorer 里找不到文件项 {source.name}: {names}")
+            raise RuntimeError(f"Explorer 里找不到文件项 {source.name}")
         rect = item.rectangle()
         print('DRAG: item rect', rect, flush=True)
-        start = ((rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2)
+        # 文件项在 Details 视图里横跨所有列，取文件名左侧，避免用到窗口外坐标
+        start = (rect.left + 24, (rect.top + rect.bottom) // 2)
         # 目标在 Explorer 右侧、WebView2 窗口内
         print('DRAG: dragging', start, '->', (700,340), flush=True)
         drag(start, (700, 340))
