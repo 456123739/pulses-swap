@@ -96,25 +96,28 @@ def main():
                 break
             time.sleep(0.4)
         if item is None:
-            raise RuntimeError(f"Explorer 里找不到文件项 {source.name}")
-        rect = item.rectangle()
-        for _ in range(12):
-            if (rect.right - rect.left) > 2 and (rect.bottom - rect.top) > 2:
-                break
-            time.sleep(0.5)
-            try:
-                item.scroll_into_view()
-                dlg.set_focus()
-            except Exception:
-                pass
-            rect = item.rectangle()
-        print('DRAG: item rect', rect, flush=True)
-        if (rect.right - rect.left) <= 2 or (rect.bottom - rect.top) <= 2:
-            # Explorer 偶发还没画完；文件在列表第一行，使用稳定的行坐标兜底
+            # Explorer 的 UIA 文件项在不同视图/系统语言下不稳定；/select 已保证
+            # 目标在首行，直接使用文件列表首行的稳定坐标。
             start = (220, 180)
+            print('DRAG: item not found, using first-row fallback', flush=True)
         else:
-            # 文件项在 Details 视图里横跨所有列，取文件名左侧，避免用到窗口外坐标
-            start = (rect.left + 24, (rect.top + rect.bottom) // 2)
+            rect = item.rectangle()
+            for _ in range(12):
+                if (rect.right - rect.left) > 2 and (rect.bottom - rect.top) > 2:
+                    break
+                time.sleep(0.5)
+                try:
+                    item.scroll_into_view()
+                    dlg.set_focus()
+                except Exception:
+                    pass
+                rect = item.rectangle()
+            print('DRAG: item rect', rect, flush=True)
+            if (rect.right - rect.left) <= 2 or (rect.bottom - rect.top) <= 2:
+                start = (220, 180)
+            else:
+                # 文件项在 Details 视图里横跨所有列，取文件名左侧，避免用到窗口外坐标
+                start = (rect.left + 24, (rect.top + rect.bottom) // 2)
         # 目标在 Explorer 右侧、WebView2 窗口内
         print('DRAG: dragging', start, '->', (700,340), flush=True)
         drag(start, (700, 340))
