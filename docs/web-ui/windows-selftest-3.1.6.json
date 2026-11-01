@@ -1,0 +1,140 @@
+{
+  "ok": true,
+  "results": [
+    {
+      "name": "bridge.invoke",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "bridge.pending_drop",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "bootstrap",
+      "ok": true,
+      "detail": "3.1.6"
+    },
+    {
+      "name": "main-no-onboarding",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "nav.管理",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "nav.管理.no-cover",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "nav.设置",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "nav.设置.no-cover",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "nav.日志",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "nav.日志.no-cover",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "nav.枪包预设",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "nav.枪包预设.no-cover",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "sidebar.hover-manage",
+      "ok": true,
+      "detail": "200px"
+    },
+    {
+      "name": "sidebar.role-switch",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "pack.loaded",
+      "ok": true,
+      "detail": "selftest-pack"
+    },
+    {
+      "name": "home.applied-hidden",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "home.apply-button",
+      "ok": true,
+      "detail": "PULSES SWAP\nv3.1.6\n主页\n管理\n设置\n日志\nselftest-pack\n2 个预设\n玩家\n切换身份\nWORKSPACE\n枪包预设\nselfte"
+    },
+    {
+      "name": "cloud-add-button",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "cloud-add-dialog",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "settings.advanced-switch",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "settings.advanced-on",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "settings.advanced-off",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "log.clear-button",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "log.cleared",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "manage.one-click",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "manage.plan-guard",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "no-scrollbar",
+      "ok": true,
+      "detail": ""
+    }
+  ]
+}
