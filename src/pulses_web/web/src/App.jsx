@@ -623,7 +623,6 @@ export default function App() {
   const [dnd, setDnd] = useState(false)
   const [bridgeError, setBridgeError] = useState('')
   const jobIdRef = useRef('')
-  const coverTimers = useRef([])
   const roleSwitchRef = useRef(false)
   const toastTimer = useRef(null)
 
@@ -846,14 +845,10 @@ export default function App() {
   }, [showToast])
 
   const navigate = useCallback((next) => {
-    if (next === page || cover.active) return
-    if (snap.settings?.animations === false) { setPage(next); return }
-    setCover({ active: true, phase: 'cover', note: `正在打开${NAV.find((n) => n.key === next)?.label || ''}` })
-    clearTimeout(coverTimers.current[0]); clearTimeout(coverTimers.current[1]); clearTimeout(coverTimers.current[2])
-    coverTimers.current[0] = setTimeout(() => { setPage(next); setCover((s) => ({ ...s, phase: 'hold' })) }, 250)
-    coverTimers.current[1] = setTimeout(() => setCover((s) => ({ ...s, phase: 'reveal' })), 770)
-    coverTimers.current[2] = setTimeout(() => setCover({ active: false, phase: 'idle' }), 1150)
-  }, [page, cover.active, snap.settings?.animations])
+    if (next === page) return
+    // 页面切换只用内容区过渡，不再盖整页幕布
+    setPage(next)
+  }, [page])
 
   useEffect(() => {
     const onKey = (e) => {
@@ -873,16 +868,30 @@ export default function App() {
   const switchRole = useCallback(async (role) => {
     if (role === snap.role || roleSwitchRef.current) return
     roleSwitchRef.current = true
+    const label = role === 'developer' ? '开发者' : '玩家'
+    const animate = snap.settings?.animations !== false
+    if (animate) setCover({ active: true, phase: 'role-cover', note: `正在切换为${label}` })
     try {
       const state = await invoke('app.role.switch', { role })
-      setSnap(state)
+      if (!animate) { setSnap(state); }
+      else {
+        // 至少让渐变铺开，再在覆盖层下换主题
+        await new Promise((r) => setTimeout(r, 260))
+        setSnap(state)
+        setCover((s) => ({ ...s, phase: 'role-hold', note: `已切换为${label}` }))
+        await new Promise((r) => setTimeout(r, 300))
+        setCover((s) => ({ ...s, phase: 'role-reveal' }))
+        await new Promise((r) => setTimeout(r, 430))
+        setCover({ active: false, phase: 'idle' })
+      }
       showToast(role === 'developer' ? '已切换为开发者' : '已切换为玩家', 'success')
     } catch (err) {
+      setCover({ active: false, phase: 'idle' })
       showToast(err.message, 'error')
     } finally {
       roleSwitchRef.current = false
     }
-  }, [snap.role, showToast])
+  }, [snap.role, snap.settings?.animations, showToast])
 
   const actions = { openPack, openTacz, clearCache, clearLogs, addFromCloud, openDatabase, select, createPreset, rename, delete: remove, saveVersion, apply, bind, check, sync, syncAuto, publishAuto, syncAllAuto, publishAllAuto, publishPlan, publish, login, logout, updateSettings, switchRole, prompt, toast: showToast, navigate, cancelJob }
   const animations = snap.settings?.animations !== false

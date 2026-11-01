@@ -650,3 +650,54 @@ h3 { font-size: 15px; font-weight: 600; }
   .hero-actions .btn { width: 100%; flex: none; }
   .drop-caption { text-align: center; }
 }
+
+/* 身份切换专用覆盖层：页面切换不再使用幕布 */
+.cover-role-cover, .cover-role-hold, .cover-role-reveal {
+  background: linear-gradient(112deg, #E4F1EE 0%, #F4F6F8 48%, #E8EDF6 100%);
+  background-size: 220% 220%;
+  animation: role-cover-in 300ms var(--ease-out) both;
+}
+.cover-role-cover .cover-panel, .cover-role-hold .cover-panel, .cover-role-reveal .cover-panel {
+  background: transparent;
+  transform: none;
+  animation: none;
+}
+.cover-role-cover .cover-aura, .cover-role-hold .cover-aura {
+  opacity: 1;
+  background:
+    radial-gradient(58% 72% at 18% 34%, rgba(91, 168, 154, .30), transparent 70%),
+    radial-gradient(60% 76% at 82% 66%, rgba(107, 134, 181, .27), transparent 72%);
+  background-size: 200% 200%;
+  animation: role-wash 980ms ease-in-out both;
+}
+.cover-role-cover .cover-brand, .cover-role-hold .cover-brand, .cover-role-reveal .cover-brand {
+  opacity: 1;
+  animation: role-brand-in 420ms var(--ease-spring) both;
+}
+.cover-role-hold .cover-brand { animation: none; opacity: 1; }
+.cover-role-reveal {
+  animation: role-cover-out 430ms var(--ease-out) both;
+}
+.cover-role-reveal .cover-brand { animation: role-brand-out 240ms var(--ease-out) both; }
+.cover-role-reveal .cover-aura { opacity: .45; transition: opacity 300ms ease; }
+@keyframes role-cover-in {
+  from { opacity: 0; transform: scale(1.025); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes role-cover-out {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(1.018); }
+}
+@keyframes role-wash {
+  0% { background-position: 0% 40%; opacity: 0; transform: scale(1.03); }
+  45% { opacity: 1; }
+  100% { background-position: 100% 60%; opacity: .82; transform: scale(1); }
+}
+@keyframes role-brand-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes role-brand-out {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-4px); }
+}
