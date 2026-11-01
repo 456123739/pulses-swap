@@ -48,15 +48,17 @@
     s = await waitState((x) => x.pack.loaded);
     check('pack.loaded', s.pack.loaded, s.pack.name);
     document.querySelectorAll('.nav-item')[0]?.click();
-    await sleep(900);
+    await sleep(1200);
     check('home.applied-hidden', !document.querySelector('button.hero-primary') && !!document.querySelector('.applied-state'));
 
-    // 新建预设后应出现一键替换
+    // 新建预设后应出现一键替换；再推一次，避免 pack.open 的 job.done 晚到覆盖
     const created = await call('preset.create', { name: 'CI 自测预设' });
     window.PS.push({ type: 'state.changed', data: { state: created } });
     s = await waitState((x) => x.selected === 'CI 自测预设');
-    await sleep(400);
-    check('home.apply-button', !!document.querySelector('button.hero-primary'));
+    await sleep(700);
+    window.PS.push({ type: 'state.changed', data: { state: created } });
+    await sleep(350);
+    check('home.apply-button', !!document.querySelector('button.hero-primary'), document.body.innerText.slice(0, 80));
 
     // 云端添加弹窗字段
     const cloudBtn = [...document.querySelectorAll('button')].find((b) => b.innerText.includes('从云端'));
