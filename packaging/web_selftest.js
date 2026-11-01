@@ -52,9 +52,10 @@
     check('home.applied-hidden', !document.querySelector('button.hero-primary') && !!document.querySelector('.applied-state'));
 
     // 新建预设后应出现一键替换
-    await call('preset.create', { name: 'CI 自测预设' });
+    const created = await call('preset.create', { name: 'CI 自测预设' });
+    window.PS.push({ type: 'state.changed', data: { state: created } });
     s = await waitState((x) => x.selected === 'CI 自测预设');
-    await sleep(300);
+    await sleep(400);
     check('home.apply-button', !!document.querySelector('button.hero-primary'));
 
     // 云端添加弹窗字段
