@@ -1,0 +1,12 @@
+{
+  "ok": true,
+  "pack": {
+    "path": "D:\\a\\pulses-swap\\pulses-swap\\drag-source\\drag-pack",
+    "name": "drag-pack",
+    "tacz": "D:\\a\\pulses-swap\\pulses-swap\\drag-source\\drag-pack\\tacz",
+    "loaded": true
+  },
+  "presets": [
+    "default"
+  ]
+}
