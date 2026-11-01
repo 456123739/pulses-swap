@@ -106,6 +106,7 @@ def main():
     window = None
     # 1024×768 等小屏上不要强行超出桌面；正常屏保持 1280×900。
     win_w, win_h = 1280, 900
+    win_x = win_y = None
     try:
         if sys.platform.startswith("win"):
             # webview.screens() 在部分 WebView2/DPI 组合下返回虚拟屏尺寸；
@@ -119,8 +120,13 @@ def main():
         if sw > 0 and sh > 0:
             win_w = min(1280, max(900, sw - 48))
             win_h = min(900, max(600, sh - 80))
+            win_x = max(0, (sw - win_w) // 2)
+            win_y = max(0, (sh - win_h) // 2)
     except Exception:
         pass
+    if os.environ.get("PULSES_WEB_CI") == "1":
+        win_w, win_h = 960, 700
+        win_x, win_y = 20, 20
     try:
         # 不再使用 hidden=True：先让窗口出现，前端没加载完时显示纯色底，
         # 也比“进程在后台、用户看不到窗口”可靠。on_loaded 里仍会再 show 一次兜底。
@@ -129,6 +135,8 @@ def main():
             _web_url(),
             width=win_w,
             height=win_h,
+            x=win_x,
+            y=win_y,
             min_size=(min(1140, win_w), min(812, win_h)),
             background_color="#F2F3F5",
             hidden=False,
