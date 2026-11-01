@@ -20,6 +20,26 @@ class ApiError(Exception):
         self.detail = detail
 
 
+def find_pack_root(paths) -> Path | None:
+    """从拖入的文件/文件夹一路向上找包含 tacz 的整合包根目录。
+
+    支持：整合包根、tacz 本身、tacz 内文件、整合包任意深层子文件/子目录。
+    不做“拖入目录下必须有 tacz”的限制。
+    """
+    for raw in paths or []:
+        try:
+            path = Path(str(raw)).expanduser()
+            if not path.exists():
+                continue
+            start = path if path.is_dir() else path.parent
+            for candidate in (start, *start.parents):
+                if (candidate / "tacz").is_dir():
+                    return candidate
+        except Exception:
+            continue
+    return None
+
+
 class Api:
     """pywebview 只暴露 invoke / pick_folder / handle_drop 等少量方法。"""
 
@@ -189,19 +209,8 @@ class Api:
             self._bus.emit("dnd.error", {"message": "没有拿到可用的文件路径"})
             return {"ok": False, "error": {
                 "code": "NO_PATH", "message": "没有拿到可用的文件路径"}}
-        # 拖入 tacz 或整合包目录都可以；优先找包含 tacz 的目录
-        pack = None
-        for p in clean:
-            path = Path(p)
-            if path.is_dir() and (path / "tacz").is_dir():
-                pack = path
-                break
-        if pack is None:
-            for p in clean:
-                path = Path(p)
-                if path.name.lower() == "tacz":
-                    pack = path.parent
-                    break
+        # 任意文件/文件夹拖入：向上找到包含 tacz 的整合包根目录
+        pack = find_pack_root(clean)
         if pack is None:
             self._bus.emit("dnd.error", {"message": "拖入的路径里没有 tacz 文件夹"})
             return {"ok": False, "error": {

@@ -701,3 +701,71 @@ h3 { font-size: 15px; font-weight: 600; }
   from { opacity: 1; transform: translateY(0); }
   to { opacity: 0; transform: translateY(-4px); }
 }
+
+/* 未登录身份按钮 */
+.role-switch.logged-out .role-copy { color: var(--text-2); }
+.role-switch.logged-out .role-copy small { color: var(--text-3); letter-spacing: .01em; }
+.role-dot.offline { background: var(--text-3); box-shadow: 0 0 0 3px var(--input); }
+.role-switch.logged-out:hover { background: var(--input); }
+
+/* 身份切换：渐变覆盖层里的细环与扫光 */
+.cover-to-player { background: linear-gradient(112deg, #E8EDF6 0%, #F4F6F8 48%, #E4F1EE 100%); }
+.cover-to-developer { background: linear-gradient(112deg, #E4F1EE 0%, #F4F6F8 48%, #E8EDF6 100%); }
+.cover-role-cover::after, .cover-role-hold::after {
+  content: ""; position: absolute; inset: -20% -10%;
+  background: linear-gradient(110deg, transparent 38%, rgba(255,255,255,.52) 49%, transparent 60%);
+  transform: translateX(-58%) skewX(-8deg);
+  animation: role-sheen 1.25s cubic-bezier(.22,1,.36,1) both;
+  pointer-events: none;
+}
+.cover-role-cover .cover-brand::before, .cover-role-hold .cover-brand::before {
+  content: ""; position: absolute; top: 50%; left: 50%; width: 310px; height: 310px; border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: 0 0 0 1px rgba(255,255,255,.36) inset;
+  animation: role-ring 1.55s cubic-bezier(.22,1,.36,1) both;
+  pointer-events: none;
+}
+.cover-role-cover .cover-brand::after, .cover-role-hold .cover-brand::after {
+  content: ""; position: absolute; top: 50%; left: 50%; width: 430px; height: 430px; border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--accent) 10%, transparent);
+  animation: role-ring 1.8s cubic-bezier(.22,1,.36,1) .06s both;
+  pointer-events: none;
+}
+@keyframes role-sheen {
+  from { transform: translateX(-58%) skewX(-8deg); opacity: 0; }
+  22% { opacity: 1; }
+  to { transform: translateX(58%) skewX(-8deg); opacity: 0; }
+}
+@keyframes role-ring {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(.82); }
+  28% { opacity: 1; }
+  to { opacity: .55; transform: translate(-50%, -50%) scale(1); }
+}
+
+/* 首页列表填满可用高度 */
+.page-motion { display: flex; flex-direction: column; }
+.page-motion > .page { flex: 1 1 auto; width: 100%; }
+.home-page { flex: 1 1 auto; }
+.home-page .home-grid { flex: 1 1 auto; height: auto; min-height: 380px; }
+.home-page .empty-home-grid { flex: 1 1 auto; min-height: 300px; height: auto; }
+
+/* 最近打开：可滚动列表 */
+.recent-card { min-height: 0; }
+.recent-hint { color: var(--muted); font-size: 11px; line-height: 1.6; margin: -2px 0 10px; }
+.recent-open-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 4px; padding-right: 3px; }
+.recent-open-row {
+  flex: none; display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 10px 10px; border-radius: 10px; text-align: left;
+  transition: background 150ms, transform 120ms;
+}
+.recent-open-row:hover { background: var(--input); }
+.recent-open-row:active { transform: scale(.99); }
+.recent-open-icon { flex: none; width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
+.recent-open-copy { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.recent-open-copy strong { font-size: 12px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-open-copy small { color: var(--muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-open-row > svg { flex: none; color: var(--muted); }
+@media (max-width: 1050px) {
+  .home-page .home-grid { flex: none; height: auto; min-height: 0; grid-template-rows: 320px 360px; }
+  .home-page .empty-home-grid { flex: none; height: auto; min-height: 0; grid-template-rows: 300px 340px; }
+}

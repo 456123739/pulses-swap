@@ -43,6 +43,14 @@
     await sleep(500);
     check('sidebar.hover-manage', sidebar && getComputedStyle(sidebar).width === '200px', sidebar && getComputedStyle(sidebar).width);
     check('sidebar.role-switch', !!document.querySelector('.role-switch'));
+    const rs = document.querySelector('.role-switch');
+    check('role.logged-out-label', !!rs && rs.innerText.includes('未登录') && rs.innerText.includes('无法切换身份'), rs?.innerText);
+    rs?.click();
+    await sleep(220);
+    check('role.login-opened', document.querySelectorAll('.modal-card input').length >= 2);
+    check('role.login-title', (document.querySelector('#modal-title')?.innerText || '').includes('登录蓝奏云'));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await sleep(150);
 
     // 打开测试整合包
     await call('pack.open', { path: window.__SELFTEST_PACK });
