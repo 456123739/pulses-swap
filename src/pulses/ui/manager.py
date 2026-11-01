@@ -15,6 +15,7 @@ from tkinter import filedialog
 
 import customtkinter as ctk
 
+from ..core.platform import role_color
 from ..config import *
 from ..utils import *
 from ..animation import *
@@ -163,7 +164,7 @@ class CloudBrowser(ctk.CTkFrame):
             self._error[path] = str(error)
             if path == self._current:
                 self.status.configure(text=f"读取失败：{error}",
-                                      text_color=C_ERROR)
+                                      text_color=role_color("error", C_ERROR))
                 self.app.set_status(f"云端读取失败：{error}", "error")
         else:
             self._cache[path] = data
@@ -717,7 +718,7 @@ class ManagerPageMixin:
         try:
             self.manage_role_label.configure(
                 text="开发者" if dev else "玩家",
-                text_color=C_ACCENT if dev else C_TEXT_SECONDARY)
+                text_color=(role_color("accent", C_ACCENT) if dev else C_TEXT_SECONDARY))
             self.manage_auto_btn.configure(
                 text="一键上传全部" if dev else "一键更新全部")
         except Exception:
@@ -769,8 +770,8 @@ class ManagerPageMixin:
                     text=("云端已连接" if state == "online"
                           else "云端无法连接" if state == "offline"
                           else "未登录蓝奏云"),
-                    text_color=(C_SUCCESS if state == "online"
-                                else C_ERROR if state == "offline"
+                    text_color=(role_color("success", C_SUCCESS) if state == "online"
+                                else role_color("error", C_ERROR) if state == "offline"
                                 else C_TEXT_MUTED))
             else:
                 self.manage_status.configure(
@@ -803,7 +804,7 @@ class ManagerPageMixin:
         if text:
             label.configure(text=text, text_color=C_TEXT_SECONDARY)
         else:
-            label.configure(text="未登录", text_color=C_WARNING)
+            label.configure(text="未登录", text_color=role_color("warning", C_WARNING))
 
     # ---------- 总览列表 ----------
     def _manage_overview_rows(self):
@@ -847,7 +848,7 @@ class ManagerPageMixin:
                     "meta": "云端文件夹",
                     "path": path,
                     "status": "未加载整合包，仅浏览",
-                    "color": C_INFO,
+                    "color": role_color("info", C_INFO),
                     "action": "浏览",
                     "kind": "browse",
                     "applied": False,

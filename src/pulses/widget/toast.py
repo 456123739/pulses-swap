@@ -43,6 +43,7 @@ except ImportError:
     Observer = None
     FileSystemEventHandler = object
 
+from ..core.platform import role_color
 from .. import config
 from ..config import *
 from ..utils import *
@@ -53,8 +54,11 @@ class Toast:
 
     def __init__(self, host, text, kind="success", duration_ms=1700):
         self.host = host
-        self.color = {"success": C_SUCCESS, "info": C_ACCENT,
-                      "warning": C_WARNING, "error": C_ERROR}.get(kind, C_ACCENT)
+        self.color = {"success": role_color("success", C_SUCCESS),
+                      "info": role_color("accent", C_ACCENT),
+                      "warning": role_color("warning", C_WARNING),
+                      "error": role_color("error", C_ERROR)}.get(
+                          kind, role_color("accent", C_ACCENT))
         self.frame = ctk.CTkFrame(host.overlay_host, fg_color=C_PANEL_BG,
                                    corner_radius=R_CONTROL,
                                    border_width=BORDER_W,

@@ -45,6 +45,7 @@ except ImportError:
     FileSystemEventHandler = object
 
 from .. import config
+from ..core.platform import role_color
 from ..config import *
 from ..utils import *
 from .. import config
@@ -657,7 +658,7 @@ class HomePageMixin:
         info = online.account_info()
         account = str(info.get("label") or "")
         if state == "offline":
-            label.configure(text="云端 · 无法连接", text_color=C_ERROR)
+            label.configure(text="云端 · 无法连接", text_color=role_color("error", C_ERROR))
         elif account:
             label.configure(text=f"云端 · {account}", text_color=C_TEXT_SECONDARY)
         else:

@@ -23,6 +23,7 @@ sys.path.insert(0, str(ROOT / "src"))
 import customtkinter as ctk  # noqa: E402
 
 import pulses_swap as ps  # noqa: E402
+from pulses.core.platform import role_color  # noqa: E402
 
 FAIL = []
 NOTES = []
@@ -275,6 +276,23 @@ ok = wait_until(lambda: not role_cover.visible, 4.0)
 check("身份在幕布下切到开发者",
       ok and app.settings.role == "developer",
       (app.settings.role, role_cover.phase))
+check("开发者强调色是石板蓝",
+      role_color("accent").lower() == "#4e5f84", role_color("accent"))
+check("开发者成功色不再用玩家青绿",
+      role_color("success").lower() == "#4e5f84", role_color("success"))
+try:
+    selected_card = next(c for c in app.preset_cards._cards.values()
+                         if c._selected)
+    check("开发者选中卡片使用石板软色",
+          str(selected_card.cget("fg_color")).lower() == "#e6ebf4",
+          selected_card.cget("fg_color"))
+    check("开发者日志成功色使用石板蓝",
+          str(app.log_manager.widgets[0]._textbox.tag_cget(
+              "SUCCESS", "foreground")).lower() == "#4e5f84",
+          app.log_manager.widgets[0]._textbox.tag_cget(
+              "SUCCESS", "foreground"))
+except Exception as exc:
+    check("开发者配色检查可执行", False, repr(exc))
 app._set_role_visual("player")
 pump(120)
 check("切回玩家也使用 logo 幕布", role_cover.visible, role_cover.phase)
@@ -282,6 +300,18 @@ ok = wait_until(lambda: not role_cover.visible, 4.0)
 check("身份切回玩家并撤掉幕布",
       ok and app.settings.role == "player",
       (app.settings.role, role_cover.phase))
+check("玩家强调色仍为青绿",
+      role_color("accent").lower() == "#5ba89a", role_color("accent"))
+check("玩家成功色仍为青绿",
+      role_color("success").lower() == "#5ba89a", role_color("success"))
+try:
+    selected_card = next(c for c in app.preset_cards._cards.values()
+                         if c._selected)
+    check("玩家选中卡片恢复青绿软色",
+          str(selected_card.cget("fg_color")).lower() == "#d6e8e4",
+          selected_card.cget("fg_color"))
+except Exception as exc:
+    check("玩家选中卡片配色检查可执行", False, repr(exc))
 
 print("== 4c. 默认一键化与高级控件折叠 ==")
 app.show_page("home")

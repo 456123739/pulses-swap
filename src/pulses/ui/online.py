@@ -17,7 +17,7 @@ from tkinter import *
 
 from .. import config
 from ..config import *
-from ..core.platform import ROLE_THEME
+from ..core.platform import ROLE_THEME, role_color
 from ..utils import *
 from ..animation import *
 from ..widget import *
@@ -290,6 +290,10 @@ class OnlineMixin:
                 theme_widgets(roots, previous, new_role)
             except Exception:
                 pass
+            try:
+                self.log_manager.refresh_colors()
+            except Exception:
+                pass
             self._rebuild_settings_role_dependent()
             try:
                 self._refresh_role_widgets(new_role)
@@ -364,7 +368,7 @@ class OnlineMixin:
         try:
             self.identity_badge.configure(
                 text="开发者" if dev else "玩家",
-                text_color=C_ACCENT if dev else C_TEXT_SECONDARY)
+                text_color=(role_color("accent", C_ACCENT) if dev else C_TEXT_SECONDARY))
             self.identity_btn.configure(text="账号" if account else "切换身份")
         except Exception:
             pass
@@ -475,9 +479,9 @@ class OnlineMixin:
         text, color = "未登录", C_TEXT_MUTED
         if dev and self.online is not None:
             if state == "online":
-                text, color = "已连接", C_SUCCESS
+                text, color = "已连接", role_color("success", C_SUCCESS)
             elif state == "offline":
-                text, color = "无法连接", C_ERROR
+                text, color = "无法连接", role_color("error", C_ERROR)
             elif self.online.has_account():
                 text, color = "已登录", C_TEXT_SECONDARY
         elif not dev:
@@ -615,7 +619,7 @@ class OnlineMixin:
             for item in list(getattr(self, "_cloud_root_cache", []) or []):
                 cloud_path = "/" + str(item.get("name") or "")
                 rows.append({"name": str(item.get("name") or ""),
-                             "status": "云端文件夹", "color": C_INFO,
+                             "status": "云端文件夹", "color": role_color("info", C_INFO),
                              "meta": cloud_path, "date": "", "path": cloud_path,
                              "local": False})
         return rows
@@ -968,12 +972,12 @@ class OnlineMixin:
             except Exception:
                 pass
             if note:
-                status.configure(text=note, text_color=C_ACCENT)
+                status.configure(text=note, text_color=role_color("accent", C_ACCENT))
 
         def fail(message):
             """登录失败：留在弹窗里，保住已填的内容，直接改密码重试。"""
             set_busy(False)
-            status.configure(text=message, text_color=C_ERROR)
+            status.configure(text=message, text_color=role_color("error", C_ERROR))
             # 先聚焦再标红：聚焦动画会抢描边，顺序反了红色就被盖掉了
             try:
                 inner = getattr(pwd_field.entry, "_entry", None)
@@ -1016,7 +1020,7 @@ class OnlineMixin:
             if state["busy"]:
                 return
             pwd_field.hint("大写锁定已开启" if self._caps_lock_on() else "",
-                           C_WARNING)
+                           role_color("warning", C_WARNING))
 
         card.register_focusable(uid_field.entry)
         card.register_focusable(pwd_field.entry)
@@ -1225,20 +1229,20 @@ class OnlineMixin:
 
         if phase == "checking":
             data.update(status=str(state.get("phase_text") or "检查中…"),
-                        status_color=C_ACCENT,
-                        dot_color=DOT_IDLE, action="", action_kind="")
+                        status_color=role_color("accent", C_ACCENT),
+                        dot_color=role_color("info", DOT_IDLE), action="", action_kind="")
             return data
 
         if not bound:
             # 不在每张卡片上挂「绑定」按钮：双击进详情，「来源」页直接填
             data.update(status="未绑定来源", status_color=C_TEXT_MUTED,
-                        dot_color=DOT_IDLE, action="", action_kind="")
+                        dot_color=role_color("info", DOT_IDLE), action="", action_kind="")
             return data
 
         if error:
             data.update(status=f"连接失败：{_short(error, 22)}",
-                        status_color=C_ERROR,
-                        dot_color=DOT_ERROR,
+                        status_color=role_color("error", C_ERROR),
+                        dot_color=role_color("error", DOT_ERROR),
                         action="重试", action_kind="check")
             return data
 
@@ -1250,14 +1254,14 @@ class OnlineMixin:
 
         if getattr(plan, "blocked", None):
             data.update(status=_short(plan.blocked[0], 30),
-                        status_color=C_ERROR,
-                        dot_color=DOT_ERROR, action="", action_kind="")
+                        status_color=role_color("error", C_ERROR),
+                        dot_color=role_color("error", DOT_ERROR), action="", action_kind="")
             return data
 
         if getattr(plan, "offline", False):
             # 云端这次没连上，计划来自缓存：只允许「重试」，不允许发布/同步
-            data.update(status="无法连接（用缓存）", status_color=C_ERROR,
-                        dot_color=DOT_ERROR, action="重试", action_kind="check")
+            data.update(status="无法连接（用缓存）", status_color=role_color("error", C_ERROR),
+                        dot_color=role_color("error", DOT_ERROR), action="重试", action_kind="check")
             return data
 
         suffix = "（离线）" if getattr(plan, "offline", False) else ""
@@ -1267,11 +1271,11 @@ class OnlineMixin:
             if pending:
                 data.update(
                     status=f"有 {pending} 项待发布{suffix}",
-                    status_color=C_WARNING, dot_color=DOT_UPDATE,
+                    status_color=role_color("warning", C_WARNING), dot_color=role_color("warning", DOT_UPDATE),
                     action="发布", action_kind="publish", pulse=True)
             else:
                 data.update(status=f"云端已是最新{suffix}",
-                            status_color=C_SUCCESS, dot_color=DOT_OK,
+                            status_color=role_color("success", C_SUCCESS), dot_color=role_color("success", DOT_OK),
                             action="", action_kind="")
             return data
 
@@ -1281,13 +1285,13 @@ class OnlineMixin:
             data.update(
                 status=f"有 {updates} 个更新 · {_human_size(plan.download_bytes)}"
                        f"{suffix}",
-                status_color=C_WARNING, dot_color=DOT_UPDATE,
+                status_color=role_color("warning", C_WARNING), dot_color=role_color("warning", DOT_UPDATE),
                 action="更新", action_kind="sync", pulse=True)
         else:
             stamp = state.get("checked_at")
             when = _time_ago(stamp)
             data.update(status=f"已是最新{' · ' + when if when else ''}{suffix}",
-                        status_color=C_SUCCESS, dot_color=DOT_OK,
+                        status_color=role_color("success", C_SUCCESS), dot_color=role_color("success", DOT_OK),
                         action="", action_kind="")
         return data
 
@@ -1310,10 +1314,10 @@ class OnlineMixin:
             # 详情条只放一句人话：连不上就是「无法连接」，具体原因在卡片/来源页。
             plan = state.get("plan")
             if phase == "error" or text.startswith("连接失败"):
-                text, color = "无法连接", C_ERROR
+                text, color = "无法连接", role_color("error", C_ERROR)
             elif plan is not None and getattr(plan, "offline", False):
                 # 有缓存所以还能列差异，但云端这次确实没连上
-                text, color = "无法连接 · 用缓存", C_WARNING
+                text, color = "无法连接 · 用缓存", role_color("warning", C_WARNING)
             elif phase == "checking":
                 text = str(state.get("phase_text") or "连接中…")
                 # 左边已经写了「云端」，这里不要再出现「连接云端…」。
@@ -1321,7 +1325,7 @@ class OnlineMixin:
                     text = "连接中…"
                 elif text.startswith("读取云端"):
                     text = "读取中…"
-                color = C_ACCENT
+                color = role_color("accent", C_ACCENT)
             else:
                 # 左边已经写了「云端」，去掉状态里的「云端」前缀
                 if text == "未绑定来源":
@@ -1785,7 +1789,7 @@ class OnlineMixin:
             add_btn.configure(state="normal", text="读取并创建")
             url_field.set_enabled(True)
             pwd_field.set_enabled(True)
-            status.configure(text=message, text_color=C_ERROR)
+            status.configure(text=message, text_color=role_color("error", C_ERROR))
 
         def do_inspect(event=None):
             if state["busy"]:
@@ -1803,7 +1807,7 @@ class OnlineMixin:
             add_btn.configure(state="disabled", text="正在读取…")
             url_field.set_enabled(False)
             pwd_field.set_enabled(False)
-            status.configure(text="正在读取云端 manifest…", text_color=C_ACCENT)
+            status.configure(text="正在读取云端 manifest…", text_color=role_color("accent", C_ACCENT))
             service = self.online
             # 主线程里先把输入读出来：Tk 变量不能在工作线程里 get()
             password = pwd_var.get()
@@ -2205,19 +2209,19 @@ class OnlineMixin:
                         if phase == "checking":
                             status.configure(
                                 text=str(st.get("phase_text") or "检查中…"),
-                                text_color=C_ACCENT)
+                                text_color=role_color("accent", C_ACCENT))
                         elif phase == "error":
                             status.configure(
                                 text=f"连接失败：{st.get('error') or '未知原因'}",
-                                text_color=C_ERROR)
+                                text_color=role_color("error", C_ERROR))
                         elif phase == "ready":
                             summary = self._check_summary(name)
                             if summary:
                                 status.configure(
                                     text=summary,
-                                    text_color=C_SUCCESS
+                                    text_color=role_color("success", C_SUCCESS)
                                     if summary.startswith(("云端", "已"))
-                                    else C_WARNING)
+                                    else role_color("warning", C_WARNING))
             except Exception:
                 pass
             try:
@@ -2247,7 +2251,7 @@ class OnlineMixin:
             except Exception:
                 pass
             if note:
-                status.configure(text=note, text_color=C_ACCENT)
+                status.configure(text=note, text_color=role_color("accent", C_ACCENT))
 
         def save(event=None):
             if state["busy"]:
@@ -2262,7 +2266,7 @@ class OnlineMixin:
                               (path_var.get().strip() if path_field else ""),
                               bool(auto_var.get()),
                               fb_url_var.get().strip(), fb_pwd_var.get())
-            status.configure(text="已保存，正在检查云端…", text_color=C_SUCCESS)
+            status.configure(text="已保存，正在检查云端…", text_color=role_color("success", C_SUCCESS))
             return "break"
 
         def test(event=None):
@@ -2282,7 +2286,7 @@ class OnlineMixin:
             def done(info, error):
                 set_busy(False)
                 if error is not None:
-                    status.configure(text=str(error), text_color=C_ERROR)
+                    status.configure(text=str(error), text_color=role_color("error", C_ERROR))
                     return
                 if info.get("path"):
                     text = (f"连接成功 · {info['path']} · "
@@ -2290,20 +2294,20 @@ class OnlineMixin:
                     if not info.get("has_manifest"):
                         text += " · 还没有发布内容"
                     status.configure(text=text,
-                                     text_color=C_SUCCESS if info.get("has_manifest")
-                                     else C_INFO)
+                                     text_color=role_color("success", C_SUCCESS) if info.get("has_manifest")
+                                     else role_color("info", C_INFO))
                     self.log_manager.log(text, 'INFO')
                     return
                 if info.get("manifest_ok"):
                     text = (f"连接成功 · {info['count']} 个文件 · "
                             f"{_human_size(info['total_bytes'])} · 已发布")
-                    color = C_SUCCESS
+                    color = role_color("success", C_SUCCESS)
                 elif info.get("has_manifest"):
                     text = "能连上，但云端 manifest 读不出来"
-                    color = C_WARNING
+                    color = role_color("warning", C_WARNING)
                 else:
                     text = f"能连上 · {info['count']} 个文件 · 还没有发布内容"
-                    color = C_INFO
+                    color = role_color("info", C_INFO)
                 status.configure(text=text, text_color=color)
                 self.log_manager.log(text, 'INFO')
 
@@ -2343,7 +2347,7 @@ class OnlineMixin:
                 pwd_var.set("")
                 self.online_states.pop(name, None)
                 self._update_preset_list()
-                status.configure(text="已清除云端绑定", text_color=C_SUCCESS)
+                status.configure(text="已清除云端绑定", text_color=role_color("success", C_SUCCESS))
 
             make_text_button(actions, "清除云端绑定",
                              command=clear_source).pack(side=LEFT,
@@ -2368,7 +2372,7 @@ class OnlineMixin:
             rows.append({
                 "name": f"v{record.get('version') or '?'}",
                 "tag": f"#{record.get('generation') or 0}",
-                "color": C_ACCENT,
+                "color": role_color("accent", C_ACCENT),
                 "size": int(record.get("bytes") or 0),
                 "subtitle": f"{when} · 上传 {record.get('uploaded') or 0} 项",
             })
@@ -2430,7 +2434,7 @@ class OnlineMixin:
                     rows.append({
                         "name": item["name"],
                         "tag": "通过" if item["ok"] else "异常",
-                        "color": C_SUCCESS if item["ok"] else C_ERROR,
+                        "color": role_color("success", C_SUCCESS) if item["ok"] else role_color("error", C_ERROR),
                         "size": 0,
                         "subtitle": item.get("detail") or "",
                     })
@@ -2442,7 +2446,7 @@ class OnlineMixin:
                                                             "发现问题")):
                     child.configure(
                         text="全部通过" if ok else "发现问题（见下面标红的项）",
-                        text_color=C_SUCCESS if ok else C_ERROR)
+                        text_color=role_color("success", C_SUCCESS) if ok else C_ERROR)
                     break
         except Exception:
             pass

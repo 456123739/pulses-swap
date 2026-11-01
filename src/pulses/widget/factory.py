@@ -44,6 +44,7 @@ except ImportError:
     FileSystemEventHandler = object
 
 from .. import config
+from ..core.platform import role_color
 from ..config import *
 from ..utils import *
 from ..animation import *
@@ -62,7 +63,7 @@ def make_button(parent, text, command=None, width=None, state="normal",
     """
     kwargs = dict(
         text=text, command=command,
-        text_color=C_TEXT_INVERSE if accent else C_ACCENT,
+        text_color=(C_TEXT_INVERSE if accent else role_color("accent", C_ACCENT)),
         border_width=0, corner_radius=R_CONTROL,
         # 按钮文字统一加粗：小字号下不加粗会显得发灰、不够"可点"
         font=(config.FONT_FAMILY, font_size or FS_BODY, "bold"),
@@ -71,12 +72,16 @@ def make_button(parent, text, command=None, width=None, state="normal",
         kwargs['width'] = width
     if accent:
         # 按下要更沉一档：之前 press_color 直接用了 hover 色，按下去看不出变化
-        return AnimatedButton(parent, C_ACCENT, C_ACCENT_HOVER,
-                               press_color=C_ACCENT_PRESSED, **kwargs)
+        return AnimatedButton(parent, role_color("accent", C_ACCENT),
+                               role_color("accent_hover", C_ACCENT_HOVER),
+                               press_color=role_color("accent_pressed", C_ACCENT_PRESSED), **kwargs)
     # 次级按钮：白底 + 强调色文字，hover 浮一层浅绿。
     # 用白底而不是 "transparent"，是因为补间要在两个色值之间插值。
-    return AnimatedButton(parent, C_CARD_BG, C_ACCENT_SOFT,
-                           press_color=lerp_color(C_ACCENT_SOFT, C_ACCENT, 0.25),
+    return AnimatedButton(parent, C_CARD_BG,
+                           role_color("accent_soft", C_ACCENT_SOFT),
+                           press_color=lerp_color(
+                               role_color("accent_soft", C_ACCENT_SOFT),
+                               role_color("accent", C_ACCENT), 0.25),
                            **kwargs)
 
 
@@ -111,7 +116,7 @@ def make_menu_button(parent, text=None, items=None, width=None, as_text=False):
         button = ctk.CTkButton(
             parent, text=text or "更多", width=1, height=H_CONTROL - 6,
             fg_color="transparent", hover_color=C_PANEL_ALT_BG,
-            text_color=C_ACCENT, corner_radius=R_CONTROL - 6,
+            text_color=role_color("accent", C_ACCENT), corner_radius=R_CONTROL - 6,
             border_width=0, font=(config.FONT_FAMILY, FS_SMALL, "bold"))
     else:
         button = ctk.CTkButton(
@@ -149,7 +154,7 @@ def make_text_button(parent, text, command=None, state="normal", color=None,
     return ctk.CTkButton(
         parent, text=text, command=command, width=1, height=H_CONTROL - 6,
         fg_color="transparent", hover_color=C_PANEL_ALT_BG,
-        text_color=color or C_ACCENT, corner_radius=R_CONTROL - 6,
+        text_color=color or role_color("accent", C_ACCENT), corner_radius=R_CONTROL - 6,
         border_width=0, state=state, anchor="center",
         font=(config.FONT_FAMILY, FS_SMALL, "bold"))
 
@@ -179,7 +184,7 @@ def attach_entry_focus(entry, base_color=None, accent_color=None):
     全部走补间，不改变布局，也不会和 CTk 自己的绘制打架。
     """
     base = base_color or C_BORDER_SOFT
-    accent = accent_color or C_ACCENT
+    accent = accent_color or role_color("accent", C_ACCENT)
     # base 会被校验错误临时改成红色（见 FormField.error），失焦时回到这里记录的值
     state = {"color": base, "focus": False, "filled": False, "base": base}
 

@@ -21,6 +21,7 @@ from .. import config
 from ..animation import (FPS_COLOR, attach_hover_glow, cancel_tween,
                          ease_in_out_cubic, ease_linear, ease_out_cubic,
                          ease_out_soft_spring, lerp_color, tween)
+from ..core.platform import role_color
 from ..config import (BORDER_W, C_ACCENT, C_ACCENT_HOVER,
                       C_ACCENT_PRESSED, C_ACCENT_SOFT, C_BORDER,
                       C_BORDER_SOFT, C_CARD_BG, C_DIVIDER, C_ERROR,
@@ -332,7 +333,9 @@ class PresetCard(ctk.CTkFrame):
                      padx=(6, 10), pady=(10, 0))
 
         self.action_btn = AnimatedButton(
-            actions, C_ACCENT, C_ACCENT_HOVER, press_color=C_ACCENT_PRESSED,
+            actions, role_color("accent", C_ACCENT),
+            role_color("accent_hover", C_ACCENT_HOVER),
+            press_color=role_color("accent_pressed", C_ACCENT_PRESSED),
             text="更新", width=60, height=26, corner_radius=R_CONTROL,
             border_width=0, text_color=C_TEXT_INVERSE,
             font=(config.FONT_FAMILY, FS_TINY, "bold"), command=self._fire_action)
@@ -340,16 +343,17 @@ class PresetCard(ctk.CTkFrame):
         self.action_btn.pack_forget()
 
         self.menu_btn = AnimatedButton(
-            actions, C_PANEL_ALT_BG, C_ACCENT_SOFT,
-            press_color=lerp_color(C_ACCENT_SOFT, C_ACCENT, 0.45),
+            actions, C_PANEL_ALT_BG, role_color("accent_soft", C_ACCENT_SOFT),
+            press_color=lerp_color(role_color("accent_soft", C_ACCENT_SOFT),
+                                   role_color("accent", C_ACCENT), 0.45),
             text="⋯", width=26, height=26, corner_radius=R_CONTROL,
             border_width=0, text_color=C_TEXT_MUTED,
             font=(config.FONT_FAMILY, FS_SMALL, "bold"), command=self._fire_menu)
         self.menu_btn.pack(side="left", padx=(4, 0))
 
         self.badge = ctk.CTkLabel(
-            actions, text="", text_color=C_ACCENT,
-            fg_color=C_ACCENT_SOFT, corner_radius=8,
+            actions, text="", text_color=role_color("accent", C_ACCENT),
+            fg_color=role_color("accent_soft", C_ACCENT_SOFT), corner_radius=8,
             font=(config.FONT_FAMILY, FS_TINY), height=18, width=46)
         self.badge.pack(side="left", padx=(0, 4))
         self.badge.pack_forget()
@@ -534,7 +538,8 @@ class PresetCard(ctk.CTkFrame):
             except Exception:
                 pass
             self._hover_job = None
-        target_bg = C_ACCENT_SOFT if selected else C_CARD_BG
+        target_bg = (role_color("accent_soft", C_ACCENT_SOFT)
+                     if selected else C_CARD_BG)
         start_bg = self.cget("fg_color")
         if not animate or not config.ANIMATIONS_ENABLED:
             self.configure(fg_color=target_bg)
@@ -565,7 +570,8 @@ class PresetCard(ctk.CTkFrame):
             wave = 1.0 - abs(raw - 0.5) * 2
             try:
                 self.configure(
-                    border_color=lerp_color(base, C_ACCENT_SOFT, wave))
+                    border_color=lerp_color(
+                        base, role_color("accent_soft", C_ACCENT_SOFT), wave))
             except Exception:
                 pass
 
@@ -582,8 +588,9 @@ class PresetCard(ctk.CTkFrame):
             def frame(e, _raw):
                 try:
                     self.configure(
-                        border_color=lerp_color(C_ACCENT_SOFT,
-                                                C_CARD_BG, e))
+                        border_color=lerp_color(
+                            role_color("accent_soft", C_ACCENT_SOFT),
+                            C_CARD_BG, e))
                 except Exception:
                     pass
 

@@ -53,7 +53,7 @@ from ..animation import *
 from ..widget import *
 from ..dialogs import *
 from ..dialogs import _OVERLAY_STACK
-from ..core.platform import ROLE_THEME
+from ..core.platform import ROLE_THEME, role_color
 from ..managers import *
 from ..pages import *
 from .window_motion import WindowRect, lerp_rect, parse_geometry, pop_rect
@@ -503,10 +503,10 @@ class WindowMixin:
                                          bold=True)
         self.sb_pack_label.pack(anchor=W, padx=PAD_GAP)
         self.sb_status_label = make_label(session_card, text="未加载",
-                                           fg=C_ERROR, font_size=FS_TINY)
+                                           fg=role_color("error", C_ERROR), font_size=FS_TINY)
         self.sb_status_label.pack(anchor=W, padx=PAD_GAP, pady=(PAD_MICRO, 0))
         self.sb_preset_label = make_label(session_card, text="预设 · 无",
-                                           fg=C_ACCENT, font_size=FS_TINY)
+                                           fg=role_color("accent", C_ACCENT), font_size=FS_TINY)
         self.sb_preset_label.pack(anchor=W, padx=PAD_GAP,
                                    pady=(PAD_MICRO, PAD_TIGHT))
         self._sidebar_sections.append((session_card, dict(
@@ -1344,9 +1344,12 @@ class WindowMixin:
         self._status_job = None
         if seq != getattr(self, "_status_seq", 0):
             return
-        colors = {"info": C_INFO, "success": C_SUCCESS,
-                  "warning": C_WARNING, "error": C_ERROR,
-                  "busy": C_ACCENT, "muted": C_TEXT_MUTED}
+        colors = {"info": role_color("info", C_INFO),
+                  "success": role_color("success", C_SUCCESS),
+                  "warning": role_color("warning", C_WARNING),
+                  "error": role_color("error", C_ERROR),
+                  "busy": role_color("accent", C_ACCENT),
+                  "muted": C_TEXT_MUTED}
         try:
             self.progress_label.configure(
                 text=text, text_color=(C_TEXT_SECONDARY if kind == "muted"

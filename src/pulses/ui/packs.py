@@ -45,6 +45,7 @@ except ImportError:
     FileSystemEventHandler = object
 
 from .. import config
+from ..core.platform import role_color
 from ..config import *
 from ..utils import *
 from .. import config
@@ -112,11 +113,11 @@ class PacksMixin:
         pack_db_path = self.settings.get_db_path(pack_path)
         pack_db_path.mkdir(parents=True, exist_ok=True)
 
-        self.pack_path_label.configure(text=str(pack_path), text_color=C_SUCCESS)
+        self.pack_path_label.configure(text=str(pack_path), text_color=role_color("success", C_SUCCESS))
         # 预设列表还在工作线程里加载，这里不能先写「已加载」。
-        self.pack_status_label.configure(text="加载中…", text_color=C_ACCENT)
+        self.pack_status_label.configure(text="加载中…", text_color=role_color("accent", C_ACCENT))
         self._update_sidebar_status()
-        self.pack_name_label.configure(text="当前预设：无", text_color=C_ACCENT)
+        self.pack_name_label.configure(text="当前预设：无", text_color=role_color("accent", C_ACCENT))
         self._sync_tacz_shortcut()
 
         self.preset_manager = PresetManager(pack_db_path, self.log_manager,
@@ -163,7 +164,7 @@ class PacksMixin:
         except Exception as exc:
             safe_print("预设加载完成回调出错:", traceback.format_exc())
             try:
-                self.pack_status_label.configure(text="加载失败", text_color=C_ERROR)
+                self.pack_status_label.configure(text="加载失败", text_color=role_color("error", C_ERROR))
                 self._update_sidebar_status()
             except Exception:
                 pass
@@ -171,7 +172,7 @@ class PacksMixin:
 
     def _on_presets_loaded_body(self):
         self._update_preset_list()
-        self.pack_status_label.configure(text="已加载", text_color=C_SUCCESS)
+        self.pack_status_label.configure(text="已加载", text_color=role_color("success", C_SUCCESS))
         self._update_sidebar_status()
         # 单行日志模式下这条就是「加载完成」的主信息（细节条目见完整日志）
         pack_name = (self.current_pack_path.name
@@ -300,8 +301,8 @@ class PacksMixin:
         self.preset_manager = None
         self.current_selected_preset = None
         self.pack_path_label.configure(text="未选择", text_color=C_TEXT_SECONDARY)
-        self.pack_status_label.configure(text="未加载", text_color=C_ERROR)
-        self.pack_name_label.configure(text="当前预设：无", text_color=C_ACCENT)
+        self.pack_status_label.configure(text="未加载", text_color=role_color("error", C_ERROR))
+        self.pack_name_label.configure(text="当前预设：无", text_color=role_color("accent", C_ACCENT))
         self.preset_cards.set_items([])
         self.gunpack_listbox.delete(0, END)
         self.preset_name_label.configure(text="未选择")
@@ -459,7 +460,7 @@ class PacksMixin:
             text = ellipsize(f"预设 · {text}",
                              tk_font(config.FONT_FAMILY, FS_TINY), px(250))
             self.sb_preset_label.configure(text=text,
-                                            text_color=C_ACCENT)
+                                            text_color=role_color("accent", C_ACCENT))
         except Exception:
             pass
 
@@ -564,7 +565,7 @@ class PacksMixin:
         self._update_preset_online_label(name)
         self._animate_label_color(
             self.preset_status_label, C_TEXT_MUTED,
-            C_SUCCESS if info.get('applied') else C_WARNING)
+            role_color("success", C_SUCCESS) if info.get('applied') else role_color("warning", C_WARNING))
         self.version_entry.delete(0, END)
         self.version_entry.insert(0, version)
         if info.get('applied', False):

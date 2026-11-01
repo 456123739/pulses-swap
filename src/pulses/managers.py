@@ -47,6 +47,7 @@ except ImportError:
     FileSystemEventHandler = object
 
 from . import config
+from .core.platform import role_color
 from .config import *
 from .utils import *
 from .animation import apply_animations_setting
@@ -163,15 +164,25 @@ class LogManager:
         try:
             inner = widget._textbox
             inner.tag_configure('INFO', foreground=C_TEXT_MAIN)
-            inner.tag_configure('WARNING', foreground=C_WARNING)
-            inner.tag_configure('ERROR', foreground=C_ERROR)
-            inner.tag_configure('SUCCESS', foreground=C_SUCCESS)
-            inner.tag_configure('DEBUG', foreground=C_INFO)
-            inner.tag_configure('PROCESS', foreground='#8E7BB8')
-            inner.tag_configure('GUIDE', foreground=C_GUIDE_GLOW)
+            inner.tag_configure('WARNING', foreground=role_color('warning', C_WARNING))
+            inner.tag_configure('ERROR', foreground=role_color('error', C_ERROR))
+            inner.tag_configure('SUCCESS', foreground=role_color('success', C_SUCCESS))
+            inner.tag_configure('DEBUG', foreground=role_color('info', C_INFO))
+            inner.tag_configure('PROCESS', foreground=role_color('status_modified', '#8E7BB8'))
+            inner.tag_configure('GUIDE', foreground=role_color('guide_glow', C_GUIDE_GLOW))
             inner.tag_configure('timestamp', foreground=C_TEXT_MUTED)
         except Exception:
             pass
+
+    def refresh_colors(self) -> None:
+        """身份切换后重新给所有日志文本框上色。"""
+        for widget in list(self.widgets):
+            self._configure_tags(widget)
+        for widget in list(self.widgets):
+            try:
+                self._render(widget)
+            except Exception:
+                pass
 
     def attach(self, widget):
         """把同一份日志同时投到另一个文本框（主界面右下角的日志栏）。"""

@@ -400,6 +400,18 @@ ROLE_THEME = {
         "accent": "#5BA89A", "accent_hover": "#4A9285",
         "accent_pressed": "#3D7A6E", "accent_soft": "#D6E8E4",
         "window": "#F2F3F5", "input": "#F4F6F7",
+        # 语义色也属于身份主题：玩家是青绿，开发者是石板蓝。
+        "success": "#5BA89A", "warning": "#C9A961",
+        "error": "#C97B7B", "info": "#7B9DC9",
+        "status_normal": "#5BA89A", "status_added": "#7B9DC9",
+        "status_removed": "#C97B7B", "status_modified": "#B58EC9",
+        "status_extra": "#C9A961", "status_missing": "#C97B7B",
+        "status_normal_bg": "#E7F1EE", "status_missing_bg": "#F7E8E8",
+        "status_extra_bg": "#F7F2E5", "status_modified_bg": "#F2EAF7",
+        "status_added_bg": "#E8EFF7",
+        "guide_glow": "#3D7A6E", "cover_bg": "#233839",
+        "cover_text": "#F4F8F7", "cover_accent": "#86C8BB",
+        "cover_muted": "#9DBDB8",
     },
     "developer": {
         # 比 #5C6E96 再压深一档：软底上的小字才够 4.5:1，
@@ -407,6 +419,19 @@ ROLE_THEME = {
         "accent": "#4E5F84", "accent_hover": "#42506F",
         "accent_pressed": "#35415A", "accent_soft": "#E6EBF4",
         "window": "#F2F3F7", "input": "#F4F5F9",
+        # 开发者端不再借用玩家的青绿成功色：状态、提示、选中态
+        # 全部落回石板蓝；错误仍保留低饱和红以便辨认。
+        "success": "#4E5F84", "warning": "#5F6E8C",
+        "error": "#A15F5F", "info": "#5E7395",
+        "status_normal": "#4E5F84", "status_added": "#5E7395",
+        "status_removed": "#A15F5F", "status_modified": "#6D6A92",
+        "status_extra": "#5F6E8C", "status_missing": "#A15F5F",
+        "status_normal_bg": "#E4EAF3", "status_missing_bg": "#F1E7E9",
+        "status_extra_bg": "#EBEFF6", "status_modified_bg": "#EDECF4",
+        "status_added_bg": "#E8EDF6",
+        "guide_glow": "#35415A", "cover_bg": "#2F3A50",
+        "cover_text": "#F4F6FA", "cover_accent": "#A7B7D0",
+        "cover_muted": "#B3BFD0",
     },
 }
 
@@ -423,14 +448,26 @@ def _channel_map(mapping):
 def role_color_map(previous: str, target: str) -> dict:
     a = ROLE_THEME.get(previous) or ROLE_THEME["player"]
     b = ROLE_THEME.get(target) or ROLE_THEME["player"]
-    return _channel_map({
-        a["accent"]: b["accent"],
-        a["accent_hover"]: b["accent_hover"],
-        a["accent_pressed"]: b["accent_pressed"],
-        a["accent_soft"]: b["accent_soft"],
-        a["window"]: b["window"],
-        a["input"]: b["input"],
-    })
+    keys = (
+        "accent", "accent_hover", "accent_pressed", "accent_soft",
+        "window", "input",
+        "success", "warning", "error", "info",
+        "status_normal", "status_added", "status_removed",
+        "status_modified", "status_extra", "status_missing",
+        "status_normal_bg", "status_missing_bg", "status_extra_bg",
+        "status_modified_bg", "status_added_bg",
+        "guide_glow", "cover_bg", "cover_text", "cover_accent", "cover_muted",
+    )
+    return _channel_map({a[k]: b[k] for k in keys if a[k] != b[k]})
+
+
+def role_color(key: str, fallback: str | None = None) -> str:
+    """当前身份的主题色；动态创建的控件用它，避免烘死玩家色。"""
+    theme = ROLE_THEME.get(getattr(config, "UI_ROLE", "player")) \
+        or ROLE_THEME["player"]
+    if key in theme:
+        return theme[key]
+    return fallback if fallback is not None else theme["accent"]
 
 
 def theme_widgets(widget, previous: str, target: str) -> int:

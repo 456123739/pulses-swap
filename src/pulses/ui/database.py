@@ -147,6 +147,10 @@ class DatabaseMixin:
             except Exception:
                 pass
             try:
+                self.log_manager.refresh_colors()
+            except Exception:
+                pass
+            try:
                 self._update_identity_ui()
             except Exception:
                 pass
