@@ -79,15 +79,33 @@ def main():
         time.sleep(0.8)
         item = None
         for _ in range(10):
-            try:
-                item = dlg.child_window(title=source.name, control_type="ListItem")
-                if item.exists(timeout=1):
-                    break
-            except Exception:
-                item = None
+            for kwargs in ({"title": source.name},
+                           {"title": source.name, "control_type": "DataItem"},
+                           {"title": source.name, "control_type": "ListItem"},
+                           {"title": source.name, "control_type": "TreeItem"}):
+                try:
+                    candidate = dlg.child_window(**kwargs)
+                    if candidate.exists(timeout=1):
+                        item = candidate
+                        break
+                except Exception:
+                    item = None
+            if item is not None:
+                break
             time.sleep(0.4)
         if item is None:
-            raise RuntimeError(f"Explorer 里找不到文件项 {source.name}")
+            names = []
+            try:
+                for child in dlg.descendants()[:80]:
+                    try:
+                        names.append((child.element_info.control_type,
+                                      child.window_text(),
+                                      child.rectangle()))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            raise RuntimeError(f"Explorer 里找不到文件项 {source.name}: {names}")
         rect = item.rectangle()
         print('DRAG: item rect', rect, flush=True)
         start = ((rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2)
