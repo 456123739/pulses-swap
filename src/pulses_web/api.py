@@ -73,6 +73,8 @@ class Api:
             "preset.delete": lambda p: self._controller.delete_preset(p["name"]),
             "preset.version": lambda p: self._controller.save_version(
                 p["name"], p["version"]),
+            "preset.details": lambda p: self._controller.preset_details(
+                p["name"]),
             "preset.apply": self._job("preset.apply"),
             "preset.gunpacks": lambda p: {"gunpacks": self._controller.gunpacks()},
             "online.bind": lambda p: self._controller.bind_source(
@@ -99,6 +101,7 @@ class Api:
             "online.publish.auto": self._job("online.publish.auto"),
             "online.sync.all": self._job("online.sync.all"),
             "online.publish.all": self._job("online.publish.all"),
+            "online.publish.new": self._job("online.publish.new"),
             "online.publish.plan": self._job("online.publish.plan"),
             "online.publish.run": self._job("online.publish.run"),
             "job.cancel": lambda p: {"cancelled": self._jobs.cancel(p["jobId"])},
@@ -306,6 +309,11 @@ class Api:
             elif method == "online.publish.all":
                 job = self._jobs.submit("一键发布全部",
                                        lambda ctx: self._controller.publish_all_auto(ctx))
+            elif method == "online.publish.new":
+                name = params.get("name", "")
+                job = self._jobs.submit("上传到云端",
+                                       lambda ctx: self._controller.publish_new(
+                                           name, ctx))
             elif method == "online.publish.plan":
                 name = params.get("name", "")
                 job = self._jobs.submit("生成发布计划",

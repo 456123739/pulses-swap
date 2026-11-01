@@ -96,6 +96,8 @@ function Sidebar({ page, onNavigate, role, loggedIn, expanded, setExpanded, vers
 function Modal({ modal, onClose }) {
   const [value, setValue] = useState(modal?.value || '')
   const [password, setPassword] = useState('')
+  const [presetName, setPresetName] = useState('')
+  const [presetVersion, setPresetVersion] = useState('')
   const submitted = useRef(false)
   const cardRef = useRef(null)
   const previousFocus = useRef(null)
@@ -106,6 +108,12 @@ function Modal({ modal, onClose }) {
     const timer = setTimeout(() => cardRef.current?.focus(), 0)
     return () => { clearTimeout(timer); previousFocus.current?.focus?.() }
   }, [modal])
+  useEffect(() => {
+    if (modal?.kind === 'preset') {
+      setPresetName(modal.preset?.name || '')
+      setPresetVersion(modal.preset?.version || '')
+    }
+  }, [modal?.kind, modal?.preset?.name])
   if (!modal) return null
   const submit = () => {
     if (submitted.current) return
@@ -113,7 +121,9 @@ function Modal({ modal, onClose }) {
     const callback = modal.onConfirm
     const payload = modal.kind === 'login'
       ? { username: value, password }
-      : modal.kind === 'cloudadd' ? { url: value, password } : value
+      : modal.kind === 'cloudadd' ? { url: value, password }
+      : modal.kind === 'preset' ? { name: presetName.trim(), version: presetVersion.trim() }
+      : value
     onClose()
     Promise.resolve(callback(payload)).catch(() => {})
   }
@@ -158,6 +168,30 @@ function Modal({ modal, onClose }) {
                 onKeyDown={(e) => { if (e.key === 'Enter') submit() }} /></label>
           </>
         )}
+        {modal.kind === 'preset' && (
+          <>
+            <div className="preset-detail-meta">
+              <span className={`pill ${modal.preset?.applied ? 'success' : ''}`}>{modal.preset?.applied ? '已应用' : '未应用'}</span>
+              <span>{modal.preset?.count ?? 0} 个枪包</span>
+              {modal.details?.cloud?.url ? <span className="pill success">云端已绑定</span> : <span className="pill">未绑定云端</span>}
+            </div>
+            <div className="preset-detail-fields">
+              <label className="field"><span>预设名称</span>
+                <input autoFocus value={presetName} onChange={(e) => setPresetName(e.target.value)} /></label>
+              <label className="field"><span>版本</span>
+                <input value={presetVersion} onChange={(e) => setPresetVersion(e.target.value)} placeholder="v1.0.0" /></label>
+            </div>
+            {modal.details ? <>
+              <div className="preset-cloud-info">
+                <div><span>云端路径</span><strong>{modal.details.cloud?.cloud_path || '—'}</strong></div>
+                <div><span>上次同步版本</span><strong>{modal.details.cloud?.last_version || '—'}</strong></div>
+                <div><span>分享链接</span><strong className="path">{modal.details.cloud?.url || '未绑定'}</strong></div>
+              </div>
+              <div className="preset-gunpack-stats"><span>枪包</span><div>{modal.details.gunpacks?.length ? modal.details.gunpacks.map((g) => <span key={g}>{g}</span>) : <em>还没有枪包</em>}</div></div>
+            </> : <p className="muted pad">正在读取云端与枪包信息…</p>}
+            <p className="modal-hint">点击“保存修改”后生效；关闭窗口不会保存。</p>
+          </>
+        )}
         <div className="modal-actions">
           <button className="btn ghost" onClick={onClose}>取消</button>
           <button className="btn primary" onClick={submit}>{modal.confirm || '确定'}</button>
@@ -185,9 +219,10 @@ function Empty({ title, hint, children }) {
   return <div className="empty"><div className="empty-orbit" /><h3>{title}</h3>{hint && <p>{hint}</p>}{children}</div>
 }
 
-function PresetRow({ item, selected, onSelect, onRename, onDelete }) {
+function PresetRow({ item, selected, onSelect, onRename, onDelete, onDetails }) {
   return (
-    <div className={`preset-row ${selected ? 'selected' : ''}`} onClick={() => onSelect(item.name)}>
+    <div className={`preset-row ${selected ? 'selected' : ''}`} onClick={() => onSelect(item.name)}
+      onContextMenu={(e) => { e.preventDefault(); onDetails(item) }}>
       <div className="preset-main">
         <strong>{item.name}</strong>
         <span>{item.version || 'v1.0.0'} · {item.count || 0} 个枪包</span>
@@ -353,12 +388,17 @@ function Home({ snap, actions, busy }) {
                     onClick={() => selected && actions.apply(selected)}>
                     <Icon name="check" size={21} />一键替换
                   </button>}
-              {(snap.online.bound_count || 0) > 0
+              {snap.role === 'player' ? <>
+                <button className="btn hero-secondary cloud-action" disabled={busy}
+                  onClick={actions.addFromCloud}><Icon name="cloud" size={17} />从云端拉取预设</button>
+                {(snap.online.bound_count || 0) > 0 && <button className="btn hero-secondary" disabled={busy}
+                  onClick={actions.syncAllAuto}><Icon name="refresh" size={17} />一键更新全部</button>}
+              </> : selected && !snap.online.binding?.url
+                ? <button className="btn hero-secondary cloud-action" disabled={busy}
+                    onClick={() => actions.publishNew(selected.name)}><Icon name="upload" size={17} />上传到云端</button>
+                : (snap.online.bound_count || 0) > 0
                 ? <button className="btn hero-secondary" disabled={busy}
-                    onClick={() => snap.role === 'player' ? actions.syncAllAuto() : actions.publishAllAuto()}>
-                    <Icon name={snap.role === 'player' ? 'cloud' : 'upload'} size={17} />
-                    {snap.role === 'player' ? '一键更新全部' : '一键上传全部'}
-                  </button>
+                    onClick={actions.publishAllAuto}><Icon name="upload" size={17} />一键上传全部</button>
                 : <button className="btn hero-secondary" onClick={openPack}>
                     <Icon name="folder" size={17} />选择整合包
                   </button>}
@@ -370,14 +410,13 @@ function Home({ snap, actions, busy }) {
             <section className="card presets-card">
               <div className="card-head">
                 <div><span className="eyebrow">PRESETS</span><h2>预设 <span className="count-badge">{snap.presets.length}</span></h2></div>
-                <div className="button-row"><button className="btn small ghost" onClick={actions.addFromCloud}><Icon name="cloud" />从云端</button>
-                  <button className="btn small ghost" onClick={() => actions.select(snap.selected)} disabled={!snap.selected}><Icon name="refresh" />刷新</button>
+                <div className="button-row"><button className="btn small ghost" onClick={() => actions.select(snap.selected)} disabled={!snap.selected}><Icon name="refresh" />刷新</button>
                   <button className="btn small" onClick={() => actions.prompt('新建预设', '名称', '', (v) => actions.createPreset(v))}><Icon name="plus" />新建</button></div>
               </div>
               <div className="preset-list">
                 {snap.presets.length === 0 ? <p className="muted pad">还没有预设</p> : snap.presets.map((p) => (
                   <PresetRow key={p.name} item={p} selected={p.name === snap.selected}
-                    onSelect={actions.select} onRename={actions.rename} onDelete={actions.delete} />
+                    onSelect={actions.select} onRename={actions.rename} onDelete={actions.delete} onDetails={actions.presetDetails} />
                 ))}
               </div>
             </section>
@@ -443,6 +482,7 @@ function Manage({ snap, actions, busy }) {
   }
   const isDeveloper = snap.role === 'developer'
   const boundCount = snap.online.bound_count || 0
+  const selectedBound = Boolean(snap.online.binding?.url)
   const autoLabel = isDeveloper ? '一键上传全部' : '一键更新全部'
   const autoHint = isDeveloper
     ? '自动遍历所有已绑定预设，扫描、递增版本并上传变更；不会删除云端多余文件。'
@@ -471,6 +511,9 @@ function Manage({ snap, actions, busy }) {
         <div className="action-buttons">
           <button className="btn xl primary action-primary" disabled={!boundCount || busy}
             onClick={runAuto}><Icon name={isDeveloper ? 'upload' : 'cloud'} size={20} />{autoLabel}</button>
+          {isDeveloper && selected && !selectedBound && <button className="btn action-secondary create-cloud-action"
+            disabled={busy} onClick={() => actions.publishNew(selected.name)}>
+            <Icon name="upload" size={17} />上传到云端</button>}
           {advanced && <button className="btn action-secondary" disabled={!selected || !url || busy}
             onClick={() => actions.check(selected.name)}><Icon name="refresh" size={17} />检查差异</button>}
           {advanced && isDeveloper && <button className="btn action-secondary" disabled={!selected || busy}
@@ -483,7 +526,7 @@ function Manage({ snap, actions, busy }) {
         <div className="stat"><span>账号</span><strong>{snap.online.account?.label ? '已认证' : '未登录'}</strong><small>{snap.online.account?.label || '本地模式'}</small></div>
         <div className="stat"><span>发布历史</span><strong>{(snap.online.binding?.history || []).length}</strong><small>最近记录</small></div>
       </div>
-      <section className="card plan-card">
+      <section className={`card plan-card ${!plan ? 'plan-empty' : ''}`}>
         <div className="card-head"><div><span className="eyebrow">DIFF</span><h2>{isDeveloper ? '待上传差异' : '云端差异'}</h2></div>
           {plan && <span className="pill">{plan.summary}</span>}</div>
         {planMismatch ? <p className="auto-note warning-note">当前差异计划属于另一个身份，已隐藏；点上方“{autoLabel}”会按当前身份重新计算。</p>
@@ -530,6 +573,12 @@ function Manage({ snap, actions, busy }) {
         <section className="card">
           <div className="card-head"><div><span className="eyebrow">CLOUD</span><h2>云端来源</h2></div></div>
           {selected ? <>
+            {isDeveloper && !selectedBound && <div className="create-cloud-panel">
+              <div><strong>这个预设还没有云端副本</strong><span>自动创建 /PulsesSwap/{selected.name}，上传后生成分享链接。</span></div>
+              <button className="btn primary" disabled={busy} onClick={() => actions.publishNew(selected.name)}>
+                <Icon name="upload" size={16} />上传到云端
+              </button>
+            </div>}
             <label className="field"><span>分享链接</span><input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://..." /></label>
             <label className="field"><span>提取密码</span><input value={password} onChange={(e) => setPassword(e.target.value)} placeholder="可留空" /></label>
             <div className="button-row"><button className="btn primary" disabled={!url} onClick={() => actions.bind(selected.name, url, password)}>保存绑定</button>
@@ -872,6 +921,7 @@ export default function App() {
   const publishAuto = useCallback((name) => startJob('online.publish.auto', { name }, '一键发布'), [startJob])
   const syncAllAuto = useCallback(() => startJob('online.sync.all', {}, '一键更新全部'), [startJob])
   const publishAllAuto = useCallback(() => startJob('online.publish.all', {}, '一键发布全部'), [startJob])
+  const publishNew = useCallback((name) => startJob('online.publish.new', { name }, '上传到云端'), [startJob])
   const publishPlan = useCallback((name) => startJob('online.publish.plan', { name }, '生成发布计划'), [startJob])
   const publish = useCallback((name, version, notes, selection) => {
     if (!version?.trim()) { showToast('请填写版本号', 'warning'); return }
@@ -948,7 +998,37 @@ export default function App() {
     }
   }, [snap.role, snap.online.account?.label, snap.settings?.animations, login, showToast])
 
-  const actions = { openPack, openTacz, clearCache, clearLogs, addFromCloud, openDatabase, select, createPreset, rename, delete: remove, saveVersion, apply, bind, check, sync, syncAuto, publishAuto, syncAllAuto, publishAllAuto, publishPlan, publish, login, logout, updateSettings, switchRole, prompt, toast: showToast, navigate, cancelJob }
+  const openPresetDetail = useCallback(async (preset) => {
+    setModal({
+      kind: 'preset', title: '预设详情', preset, details: null,
+      confirm: '保存修改',
+      onConfirm: async (payload) => {
+        if (!payload.name) { showToast('预设名不能为空', 'error'); return }
+        try {
+          let state = null
+          if (payload.name !== preset.name) {
+            state = await invoke('preset.rename', { old: preset.name, new: payload.name })
+          }
+          if (payload.version && payload.version !== preset.version) {
+            state = await invoke('preset.version', {
+              name: payload.name || preset.name, version: payload.version,
+            })
+          }
+          if (state) setSnap(state)
+          else await refresh()
+          showToast('预设已保存', 'success')
+        } catch (err) { showToast(err.message, 'error') }
+      },
+    })
+    try {
+      const details = await invoke('preset.details', { name: preset.name })
+      setModal((m) => m?.kind === 'preset' && m.preset?.name === preset.name
+        ? { ...m, details } : m)
+    } catch (err) {
+      showToast(err.message, 'error')
+    }
+  }, [refresh, showToast])
+  const actions = { openPack, openTacz, clearCache, clearLogs, addFromCloud, openDatabase, select, createPreset, rename, delete: remove, saveVersion, apply, bind, check, sync, syncAuto, publishAuto, syncAllAuto, publishAllAuto, publishNew, publishPlan, publish, login, logout, updateSettings, switchRole, prompt, toast: showToast, navigate, cancelJob, presetDetails: openPresetDetail }
   const animations = snap.settings?.animations !== false
   const pageEl = page === 'home' ? <Home snap={snap} actions={actions} busy={busy} />
     : page === 'manage' ? <Manage snap={snap} actions={actions} busy={busy} />

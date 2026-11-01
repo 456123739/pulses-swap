@@ -21,17 +21,27 @@ class FakePM:
 
 
 class FakeOnline:
-    def __init__(self, plan):
+    def __init__(self, plan, bound=True):
         self.plan = plan
         self.synced = None
         self.published = None
+        self.bound = bound
+        self.bind_args = None
 
     def check(self, ref, role="player", on_phase=None):
         assert role == self.plan.role
         return self.plan
 
     def is_bound(self, name):
-        return True
+        return self.bound
+
+    def source_of(self, name):
+        return {}
+
+    def bind(self, name, url, password="", *, cloud_path="", **_kwargs):
+        self.bind_args = (name, url, password, cloud_path)
+        self.bound = True
+        return {"lanzou": {"url": url}, "cloud_path": cloud_path}
 
     def sync(self, ref, plan, selection, on_item=None, on_progress=None,
              cancel=None):
@@ -181,6 +191,24 @@ class AutoActionTests(unittest.TestCase):
         self.assertEqual(out["result"]["updated"], ["P"])
         self.assertEqual(out["result"]["failed"][0][0], "Q")
         self.assertFalse(out["result"]["ok"])
+
+    def test_publish_new_creates_cloud_path_for_unbound_preset(self):
+        self.ctrl.settings.role = "developer"
+        self.ctrl.online = FakeOnline(self.plan("developer", diff.UPLOAD),
+                                      bound=False)
+        captured = {}
+
+        def fake_publish(name, version, notes="", min_app="", selection=None,
+                         ctx=None):
+            captured.update(name=name, version=version, selection=list(selection or []))
+            return {"result": {"ok": True}, "state": {"ok": True}}
+
+        self.ctrl.publish = fake_publish
+        out = self.ctrl.publish_new("P")
+        self.assertEqual(self.ctrl.online.bind_args[0], "P")
+        self.assertEqual(self.ctrl.online.bind_args[3], "/PulsesSwap/P")
+        self.assertEqual(captured["selection"], ["f0.zip"])
+        self.assertIn("云端 /PulsesSwap/P", out["message"])
 
     def test_publish_all_auto_publishes_every_bound_preset(self):
         self.ctrl.settings.role = "developer"

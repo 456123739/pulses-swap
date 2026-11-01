@@ -69,14 +69,23 @@
     await sleep(350);
     check('home.apply-button', !!document.querySelector('button.hero-primary'), document.body.innerText.slice(0, 80));
 
-    // 云端添加弹窗字段
-    const cloudBtn = [...document.querySelectorAll('button')].find((b) => b.innerText.includes('从云端'));
-    check('cloud-add-button', !!cloudBtn);
-    cloudBtn?.click();
-    await sleep(160);
-    check('cloud-add-dialog', document.querySelectorAll('.modal-card input').length >= 2);
+    // 右键预设详情，关闭不保存
+    const presetRow = document.querySelector('.preset-row');
+    presetRow?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    await sleep(450);
+    check('preset.detail-open', (document.querySelector('#modal-title')?.innerText || '') === '预设详情');
+    check('preset.detail-fields', document.querySelectorAll('.preset-detail-fields input').length === 2);
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    await sleep(120);
+    await sleep(150);
+
+    // 玩家从云端拉取预设弹窗
+    const pullBtn = [...document.querySelectorAll('button')].find((b) => b.innerText.includes('从云端拉取预设'));
+    check('player.pull-button', !!pullBtn);
+    pullBtn?.click();
+    await sleep(180);
+    check('player.pull-dialog', (document.querySelector('#modal-title')?.innerText || '').includes('从云端添加预设'));
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await sleep(150);
 
     // 设置：高级操作开关
     document.querySelectorAll('.nav-item')[2]?.click();
