@@ -209,8 +209,35 @@ class Api:
         job = self._jobs.submit("pack.open",
                                lambda ctx: self._open_pack_job(str(pack), ctx),
                                cancelable=False)
+        report = os.environ.get("PULSES_WEB_DROP_REPORT", "").strip()
+        if report:
+            threading.Thread(target=self._report_drop, args=(report,),
+                             daemon=True).start()
         self._bus.emit("dnd.consumed", {"jobId": job, "path": str(pack)})
         return {"ok": True, "data": {"jobId": job, "path": str(pack)}}
+
+    def _report_drop(self, path: str) -> None:
+        """CI 拖入实测：等整合包真正加载后写结果；失败也写，便于 CI 定位。"""
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            try:
+                state = self._controller.state()
+                if state.get("pack", {}).get("loaded"):
+                    Path(path).write_text(json.dumps({
+                        "ok": True,
+                        "pack": state.get("pack"),
+                        "presets": [p.get("name") for p in state.get("presets", [])],
+                    }, ensure_ascii=False, indent=2), encoding="utf-8")
+                    return
+            except Exception:
+                pass
+            time.sleep(0.25)
+        try:
+            Path(path).write_text(json.dumps({
+                "ok": False, "error": "拖入后 20 秒内没有加载整合包",
+            }, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
 
     def _clear_logs(self):
         with self._controller.lock:
