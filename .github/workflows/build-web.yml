@@ -88,6 +88,17 @@ jobs:
           Remove-Item Env:PULSES_WEB_SELFTEST, Env:PULSES_WEB_SELFTEST_JS, Env:PULSES_SELFTEST_PACK -ErrorAction SilentlyContinue
           Write-Host "OK: Windows WebView 实操自测通过"
 
+      - name: Explorer 实机拖拽到 WebView2
+        shell: pwsh
+        run: |
+          $root = Join-Path $PWD "drag-source"
+          $pack = Join-Path $root "drag-pack"
+          New-Item -ItemType Directory -Force -Path (Join-Path $pack "tacz") | Out-Null
+          Set-Content -Path (Join-Path $pack "tacz\drag-gun.zip") -Value "drag-test" -NoNewline
+          python packaging/windows_drag_test.py --app "dist/PulsesSwap/PulsesSwap.exe" --source $pack --report (Join-Path $PWD "drag-result.json")
+          if (-not (Test-Path "drag-result.json")) { throw "拖拽测试没有结果文件" }
+          Get-Content "drag-result.json"
+
       - name: 启动、等待 UI 并截取 Windows 桌面
         shell: pwsh
         run: |
@@ -136,6 +147,12 @@ jobs:
         with:
           name: PulsesSwap-Windows-Selftest
           path: selftest-result.json
+          if-no-files-found: error
+      - name: 上传 Windows 拖拽结果
+        uses: actions/upload-artifact@v4
+        with:
+          name: PulsesSwap-Windows-Drag
+          path: drag-result.json
           if-no-files-found: error
 
       - name: 解析版本号
