@@ -69,6 +69,7 @@ jobs:
           $env:PULSES_WEB_SELFTEST = $result
           $env:PULSES_WEB_SELFTEST_JS = Join-Path $PWD "packaging\web_selftest.js"
           $env:PULSES_SELFTEST_PACK = $pack
+          $env:PULSES_WEB_CI = "1"
           $p = Start-Process "dist/PulsesSwap/PulsesSwap.exe" -PassThru
           $ok = $false
           for ($i = 0; $i -lt 90; $i++) {
@@ -90,6 +91,7 @@ jobs:
       - name: 启动、等待 UI 并截取 Windows 桌面
         shell: pwsh
         run: |
+          $env:PULSES_WEB_CI = "1"
           $p = Start-Process "dist/PulsesSwap/PulsesSwap.exe" -PassThru
           Start-Sleep -Seconds 12
           $p.Refresh()
