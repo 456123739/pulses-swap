@@ -8,6 +8,7 @@ import argparse
 import ctypes
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -61,7 +62,7 @@ def main():
         desktop = Desktop(backend="uia")
         dlg = None
         for _ in range(20):
-            for w in desktop.windows(title_re=".*drag-source.*"):
+            for w in desktop.windows(title_re=f".*{re.escape(source.parent.name)}.*"):
                 try:
                     if w.is_visible():
                         dlg = w

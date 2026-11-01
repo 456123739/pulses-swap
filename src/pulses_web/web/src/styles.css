@@ -769,3 +769,26 @@ h3 { font-size: 15px; font-weight: 600; }
   .home-page .home-grid { flex: none; height: auto; min-height: 0; grid-template-rows: 320px 360px; }
   .home-page .empty-home-grid { flex: none; height: auto; min-height: 0; grid-template-rows: 300px 340px; }
 }
+
+/* 选择整合包：点击展开最近打开，整块拖入区可点击选择 */
+.empty-hero { cursor: pointer; overflow: visible; }
+.empty-hero .btn, .empty-hero .recent-popover { cursor: default; }
+.recent-switch { position: relative; width: 100%; }
+.btn.hero-primary.recent-open { background: var(--accent-hover); }
+.recent-chevron { margin-left: 2px; transition: transform 180ms var(--ease-out); }
+.btn.hero-primary.recent-open .recent-chevron { transform: rotate(180deg); }
+.recent-popover {
+  position: absolute; top: calc(100% + 8px); right: 0; width: 330px; z-index: 30;
+  background: rgba(255,255,255,.96); border: 1px solid var(--divider);
+  border-radius: 14px; box-shadow: 0 18px 46px rgba(30,45,45,.16);
+  padding: 10px; backdrop-filter: blur(18px);
+}
+.recent-popover-head { display: flex; align-items: baseline; justify-content: space-between; padding: 2px 8px 8px; }
+.recent-popover-head .eyebrow { margin: 0; }
+.recent-popover-head > span:last-child { font-size: 11px; color: var(--text-2); }
+.recent-popover-scroll { max-height: 250px; overflow: auto; display: flex; flex-direction: column; gap: 3px; }
+.recent-popover-scroll .recent-open-row { padding: 8px; }
+.recent-popover-scroll .recent-open-icon { width: 26px; height: 26px; }
+@media (max-width: 1050px) {
+  .recent-popover { left: 0; right: auto; width: min(330px, 100%); }
+}

@@ -207,6 +207,21 @@ function Home({ snap, actions, busy }) {
   const [celebrate, setCelebrate] = useState(false)
   const wasApplied = useRef(Boolean(selected?.applied))
   const lastName = useRef(selected?.name)
+  const [recentOpen, setRecentOpen] = useState(false)
+  const recentWrapRef = useRef(null)
+  useEffect(() => {
+    if (!recentOpen) return undefined
+    const onDown = (e) => {
+      if (!recentWrapRef.current?.contains(e.target)) setRecentOpen(false)
+    }
+    const onKey = (e) => { if (e.key === 'Escape') setRecentOpen(false) }
+    document.addEventListener('pointerdown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('pointerdown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [recentOpen])
   useEffect(() => {
     const now = Boolean(selected?.applied)
     if (lastName.current !== selected?.name) {
@@ -223,10 +238,15 @@ function Home({ snap, actions, busy }) {
     wasApplied.current = now
   }, [selected?.applied, selected?.name])
   const openPack = async () => {
+    setRecentOpen(false)
     try {
       const path = await pickFolder()
       if (path) actions.openPack(path)
     } catch (err) { actions.toast(err.message, 'error') }
+  }
+  const toggleRecent = () => {
+    if (!snap.recent?.length) { openPack(); return }
+    setRecentOpen((open) => !open)
   }
   return (
     <div className="page home-page">
@@ -244,6 +264,7 @@ function Home({ snap, actions, busy }) {
       {!snap.pack.loaded ? (
         <>
           <motion.section className="home-hero empty-hero" aria-label="导入整合包"
+            onClick={(e) => { if (!e.target.closest('button, .recent-popover')) openPack() }}
             initial={animations ? { opacity: 0, y: 8 } : false} animate={{ opacity: 1, y: 0 }}
             transition={{ duration: animations ? 0.34 : 0, ease: [0.22, 1, 0.36, 1] }}>
             <div className="hero-copy">
@@ -256,9 +277,27 @@ function Home({ snap, actions, busy }) {
                 <span><b>拖入</b> 或选择</span>
               </div>
             </div>
-            <div className="hero-actions">
-              <button className="btn hero-primary" onClick={openPack}><Icon name="folder" size={21} />选择整合包</button>
-              <span className="drop-caption">或把文件夹直接拖进来</span>
+            <div className="hero-actions" onClick={(e) => e.stopPropagation()}>
+              <div className="recent-switch" ref={recentWrapRef}>
+                <button className={`btn hero-primary ${recentOpen ? 'recent-open' : ''}`}
+                  onClick={toggleRecent} aria-haspopup="listbox" aria-expanded={recentOpen}>
+                  <Icon name="folder" size={21} />选择整合包
+                  {(snap.recent || []).length > 0 && <Icon name="chevron" size={15} className="recent-chevron" />}
+                </button>
+                {recentOpen && <div className="recent-popover" role="listbox" aria-label="最近打开">
+                  <div className="recent-popover-head"><span className="eyebrow">RECENT</span><span>最近打开</span></div>
+                  <div className="recent-popover-scroll">
+                    {(snap.recent || []).map((r) => (
+                      <button key={r.path} className="recent-open-row" role="option" onClick={() => actions.openPack(r.path)} title={r.path}>
+                        <span className="recent-open-icon"><Icon name="folder" size={16} /></span>
+                        <span className="recent-open-copy"><strong>{r.name || r.path}</strong><small>{r.path}</small></span>
+                        <Icon name="chevron" size={14} />
+                      </button>
+                    ))}
+                  </div>
+                </div>}
+              </div>
+              <span className="drop-caption">点击选择，或拖入任意文件/文件夹</span>
             </div>
           </motion.section>
           <div className="home-grid empty-home-grid">
@@ -843,7 +882,7 @@ export default function App() {
       if (!url?.trim()) { showToast('请填写分享链接', 'warning'); return }
       startJob('online.add', { url: url.trim(), password }, '从云端添加')
     } }), [startJob, showToast])
-  const login = useCallback(() => setModal({ kind: 'login', title: '登录蓝奏云', body: '登录后即可切换身份。', onConfirm: async ({ username, password }) => {
+  const login = useCallback(() => setModal({ kind: 'login', title: '登录蓝奏云', body: '登录后即可切换身份。', confirm: '登录', onConfirm: async ({ username, password }) => {
     try { const data = await invoke('account.login', { username, password }); setSnap(data.state); showToast('登录成功', 'success') }
     catch (err) { showToast(err.message, 'error') }
   } }), [showToast])
