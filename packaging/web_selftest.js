@@ -31,6 +31,7 @@
       document.querySelectorAll('.nav-item')[i]?.click();
       await sleep(1300);
       check(`nav.${h1}`, document.querySelector('h1')?.innerText === h1);
+      check(`nav.${h1}.no-cover`, !document.querySelector('.cover'));
     }
 
     // 侧栏悬停（管理页）
