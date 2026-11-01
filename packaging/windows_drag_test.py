@@ -49,12 +49,14 @@ def main():
     env = dict(os.environ)
     env["PULSES_WEB_CI"] = "1"
     env["PULSES_WEB_DROP_REPORT"] = str(report)
+    print('DRAG: launching app', flush=True)
     app = subprocess.Popen([args.app], env=env)
     try:
         time.sleep(3.0)
         # 打开父目录并选中 drag-pack
         subprocess.Popen(["explorer.exe", f"/select,{source}"], env=env)
         time.sleep(2.5)
+        print('DRAG: locating explorer', flush=True)
         from pywinauto import Desktop
         desktop = Desktop(backend="uia")
         dlg = None
@@ -87,8 +89,10 @@ def main():
         if item is None:
             raise RuntimeError(f"Explorer 里找不到文件项 {source.name}")
         rect = item.rectangle()
+        print('DRAG: item rect', rect, flush=True)
         start = ((rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2)
         # 目标在 Explorer 右侧、WebView2 窗口内
+        print('DRAG: dragging', start, '->', (700,340), flush=True)
         drag(start, (700, 340))
         deadline = time.time() + 30
         data = None
