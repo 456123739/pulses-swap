@@ -94,6 +94,21 @@ class AutoActionsTests(unittest.TestCase):
         self.assertEqual(self.pm.applied, ["P"])
         self.assertEqual(out["changed"], 3)
 
+    def test_sync_one_unchanged_does_not_detach(self):
+        service = FakeService(self.plan("player"))
+        out = self.runner(service).sync_one("P")
+        self.assertEqual(self.pm.detached, [])
+        self.assertEqual(self.pm.applied, [])
+        self.assertEqual(out["changed"], 0)
+        self.assertIn("已是最新", out["message"])
+
+    def test_publish_one_unchanged_does_not_detach(self):
+        service = FakeService(self.plan("developer"))
+        out = self.runner(service).publish_one("P")
+        self.assertEqual(self.pm.detached, [])
+        self.assertEqual(self.pm.applied, [])
+        self.assertEqual(out["changed"], 0)
+
     def test_sync_one_respects_keep_extras(self):
         self.settings.online_sync_clean = False
         service = FakeService(self.plan(

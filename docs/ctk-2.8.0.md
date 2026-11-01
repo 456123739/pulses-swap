@@ -36,5 +36,5 @@
 - `ui_audit`、`anim_invariants`、`scale_check`（100/125/150）、`scroll_check`、`startup_check`、`window_anim_check`、`online_ui_check` 全部通过。
 - `online_e2e`（真实界面 worker + 本地蓝奏模拟）：发布 → 同步 → 改版 → 玩家一键更新全部 → 开发者一键上传全部 → 重启状态一致，全部通过。
 - `online_smoke` 真实蓝奏分享：列表、下载、哈希通过。
-- 真实蓝奏上传 smoke：2MB 测试文件上传 → 云端列表核对 → 匿名分享下载 → SHA-256 比对 → 删除，全部通过。
-  整套“正式云端发布”未在测试账号上执行，发布/同步核心路径仍由 mock e2e 覆盖。
+- 真实上传闭环：测试账号当前被蓝奏提示“密码错误次数过多，请 5 分钟后重试”，
+  因此本次未能重跑真实上传；发布/同步核心路径由 mock e2e 和单元测试覆盖。

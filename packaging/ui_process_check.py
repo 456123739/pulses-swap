@@ -290,6 +290,14 @@ check("默认关闭高级操作", app.settings.advanced_actions is False,
       app.settings.advanced_actions)
 check("默认不显示手动检查按钮", not app.home_player_check_btn.winfo_manager(),
       app.home_player_check_btn.winfo_manager())
+check("默认不显示手动更新当前", not app.home_sync_btn.winfo_manager(),
+      app.home_sync_btn.winfo_manager())
+check("默认不显示刷新按钮", not app.home_player_refresh_btn.winfo_manager(),
+      app.home_player_refresh_btn.winfo_manager())
+check("默认不显示版本编辑", not app.version_box.winfo_manager(),
+      app.version_box.winfo_manager())
+check("默认不显示管理页手动更新", not app.manage_sync_btn.winfo_manager(),
+      app.manage_sync_btn.winfo_manager())
 check("默认显示一键更新全部", app.home_auto_btn.winfo_ismapped())
 captured = {}
 _orig_run_auto = app._run_auto
@@ -305,6 +313,12 @@ pump(300)
 check("开启高级操作后显示手动检查",
       bool(app.home_player_check_btn.winfo_manager()),
       app.home_player_check_btn.winfo_manager())
+check("开启高级操作后显示手动更新当前",
+      bool(app.home_sync_btn.winfo_manager()),
+      app.home_sync_btn.winfo_manager())
+check("开启高级操作后显示版本编辑",
+      bool(app.version_box.winfo_manager()),
+      app.version_box.winfo_manager())
 check("开启高级操作后显示同步方式",
       bool(app.settings_page.online_confirm_line.winfo_manager()),
       app.settings_page.online_confirm_line.winfo_manager())

@@ -75,16 +75,6 @@ class AutoActions:
         was_applied = bool(info.get("applied"))
         detached = False
         try:
-            if was_applied:
-                self.progress(None, f"收回已应用预设「{name}」…")
-                self.watch_stop()
-                try:
-                    if not self.manager.detach_preset(name):
-                        raise RuntimeError("无法收回当前已应用的预设，已停止更新")
-                finally:
-                    self.watch_start()
-                detached = True
-                info["applied"] = False
             ref = self.ref_for(name)
             if ref is None:
                 raise ValueError("预设路径不可用")
@@ -106,9 +96,21 @@ class AutoActions:
                 message = ("当前预设已是最新" if not plan.has_changes
                            else "没有可自动处理的安全项")
                 self.log(f"一键更新：{message}", "SUCCESS", verbose=False)
-                if detached:
-                    self._restore(name)
                 return {"name": name, "changed": 0, "message": message}
+
+            # 只有确实需要下载/修复时才收回已应用预设；检查阶段不碰 TACZ，
+            # 否则「已是最新」的一次点击也会无谓地切换一次预设。
+            if was_applied:
+                self.progress(None, f"收回已应用预设「{name}」…")
+                self.watch_stop()
+                try:
+                    if not self.manager.detach_preset(name):
+                        raise RuntimeError("无法收回当前已应用的预设，已停止更新")
+                finally:
+                    self.watch_start()
+                detached = True
+                info["applied"] = False
+                ref = self.ref_for(name)
 
             self.progress(None, f"{name} · 下载 {len(selection)} 项…")
 
@@ -148,16 +150,6 @@ class AutoActions:
         was_applied = bool(info.get("applied"))
         detached = False
         try:
-            if was_applied:
-                self.progress(None, f"收回已应用预设「{name}」…")
-                self.watch_stop()
-                try:
-                    if not self.manager.detach_preset(name):
-                        raise RuntimeError("无法收回当前已应用的预设，已停止发布")
-                finally:
-                    self.watch_start()
-                detached = True
-                info["applied"] = False
             ref = self.ref_for(name)
             if ref is None:
                 raise ValueError("预设路径不可用")
@@ -174,9 +166,20 @@ class AutoActions:
                 message = ("已是最新，无需发布" if not extras
                            else "云端多余文件已保留，没有需要上传的内容")
                 self.log(f"一键发布：{message}", "SUCCESS", verbose=False)
-                if detached:
-                    self._restore(name)
                 return {"name": name, "changed": 0, "message": message}
+
+            # 发布计划先看云端差异；没有上传项时不应先收回已应用预设。
+            if was_applied:
+                self.progress(None, f"收回已应用预设「{name}」…")
+                self.watch_stop()
+                try:
+                    if not self.manager.detach_preset(name):
+                        raise RuntimeError("无法收回当前已应用的预设，已停止发布")
+                finally:
+                    self.watch_start()
+                detached = True
+                info["applied"] = False
+                ref = self.ref_for(name)
 
             base = (getattr(plan, "cloud_version", "")
                     or (info.get("version") or ""))

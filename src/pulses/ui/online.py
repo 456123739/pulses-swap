@@ -2471,33 +2471,125 @@ class OnlineMixin:
     # 一键更新 / 一键发布（默认完整执行，不弹差异选择）
     # ==================================================================
     def _apply_advanced_controls(self):
-        """默认只留一键入口；手动检查/预览/部分同步收进设置。"""
+        """默认只留一键入口；手动检查/预览/部分同步收进设置。
+
+        `pack_forget` 只针对按钮本身，不重排父容器；恢复时按原有顺序
+        依次 pack，避免高级开关反复切换后按钮跑到“清理缓存”后面。
+        """
         adv = bool(getattr(self.settings, "advanced_actions", False))
-        specs = (
-            (getattr(self, "home_check_btn", None),
-             getattr(self, "home_refresh_btn", None), PAD_GAP),
-            (getattr(self, "home_player_check_btn", None),
-             getattr(self, "home_player_refresh_btn", None), PAD_GAP),
-            (getattr(self, "manage_check_btn", None),
-             getattr(self, "manage_player_refresh_btn", None), PAD_TIGHT),
-            (getattr(self, "home_upload_btn", None),
-             getattr(self, "home_cloud_btn", None), PAD_GAP),
-            (getattr(self, "manage_upload_menu", None),
-             getattr(self, "manage_tacz_btn", None), PAD_TIGHT),
-        )
-        for btn, before, gap in specs:
-            if btn is None:
-                continue
+
+        def show(widget, **opts):
+            if widget is None:
+                return
             try:
-                if not adv:
-                    btn.pack_forget()
-                elif not btn.winfo_manager():
-                    if before is not None and before.winfo_exists():
-                        btn.pack(side=LEFT, padx=(gap, 0), before=before)
-                    else:
-                        btn.pack(side=LEFT, padx=(gap, 0))
+                if widget.winfo_manager():
+                    return
+                anchor = opts.get("after")
+                if anchor is not None and not anchor.winfo_manager():
+                    opts.pop("after", None)
+                widget.pack(**opts)
             except Exception:
                 pass
+
+        def hide(*widgets):
+            for widget in widgets:
+                try:
+                    widget.pack_forget()
+                except Exception:
+                    pass
+
+        home_download = getattr(self, "home_download_btn", None)
+        home_sync = getattr(self, "home_sync_btn", None)
+        home_player_check = getattr(self, "home_player_check_btn", None)
+        home_player_refresh = getattr(self, "home_player_refresh_btn", None)
+        home_upload = getattr(self, "home_upload_btn", None)
+        home_cloud = getattr(self, "home_cloud_btn", None)
+        home_check = getattr(self, "home_check_btn", None)
+        home_refresh = getattr(self, "home_refresh_btn", None)
+        manage_add = getattr(self, "manage_add_btn", None)
+        manage_sync = getattr(self, "manage_sync_btn", None)
+        manage_check = getattr(self, "manage_check_btn", None)
+        manage_player_refresh = getattr(
+            self, "manage_player_refresh_btn", None)
+        manage_clean_player = getattr(
+            self, "manage_clean_player_btn", None)
+        manage_dev_refresh = getattr(
+            self, "manage_dev_refresh_btn", None)
+        manage_clean_dev = getattr(self, "manage_clean_dev_btn", None)
+        manage_upload = getattr(self, "manage_upload_menu", None)
+        manage_auto = getattr(self, "manage_auto_btn", None)
+        manage_primary = getattr(self, "manage_primary_btn", None)
+        version_box = getattr(self, "version_box", None)
+
+        primary_kind = getattr(self, "_manage_primary_kind", "")
+        primary_is_current = bool(
+            getattr(self, "current_selected_preset", None)
+            and primary_kind in ("sync", "publish"))
+
+        if adv:
+            # 玩家首页：下载 | 一键更新 | 检查更新 | 刷新
+            show(home_sync, side=LEFT, padx=(PAD_GAP, 0),
+                 after=home_download)
+            show(home_player_check, side=LEFT, padx=(PAD_GAP, 0),
+                 after=home_sync)
+            show(home_player_refresh, side=LEFT, padx=(PAD_GAP, 0),
+                 after=home_player_check)
+            # 开发者首页：上传 | 云端文件 | 检查云端 | 刷新
+            show(home_upload, side=LEFT)
+            show(home_cloud, side=LEFT, padx=(PAD_GAP, 0),
+                 after=home_upload)
+            show(home_check, side=LEFT, padx=(PAD_GAP, 0),
+                 after=home_cloud)
+            show(home_refresh, side=LEFT, padx=(PAD_GAP, 0),
+                 after=home_check)
+            # 玩家管理页：从云端添加 | 一键更新 | 检查更新 | 刷新 | 清理缓存
+            show(manage_sync, side=LEFT, padx=(PAD_TIGHT, 0),
+                 after=manage_add)
+            show(manage_check, side=LEFT, padx=(PAD_TIGHT, 0),
+                 after=manage_sync)
+            show(manage_player_refresh, side=LEFT, padx=(PAD_TIGHT, 0),
+                 after=manage_check)
+            show(manage_clean_player, side=LEFT, padx=(PAD_TIGHT, 0),
+                 after=manage_player_refresh)
+            # 开发者管理页：上传 | 刷新 | 打开 TACZ | 清理缓存
+            show(manage_upload, side=LEFT)
+            show(manage_dev_refresh, side=LEFT, padx=(PAD_TIGHT, 0),
+                 after=manage_upload)
+            show(manage_clean_dev, side=LEFT, padx=(PAD_TIGHT, 0),
+                 after=getattr(self, "manage_tacz_btn", None))
+            if primary_is_current:
+                show(manage_primary, fill=X, padx=PAD_CARD_X,
+                     pady=(0, PAD_TIGHT), after=manage_auto)
+            if version_box is not None:
+                show(version_box, side=LEFT, fill=X, expand=True)
+        else:
+            hide(home_sync, home_player_check, home_player_refresh,
+                 home_upload, home_cloud, home_check, home_refresh,
+                 manage_sync, manage_check, manage_player_refresh,
+                 manage_clean_player, manage_upload, manage_dev_refresh,
+                 manage_clean_dev)
+            if primary_is_current:
+                hide(manage_primary)
+            if version_box is not None:
+                hide(version_box)
+
+        # 开发者：默认不露出“发布当前 / 一键替换”，只保留一键上传全部。
+        if getattr(self, "is_developer", False):
+            try:
+                loaded = bool(getattr(self, "preset_manager", None)
+                              or getattr(self, "current_pack_path", None))
+                if adv and loaded:
+                    self.publish_btn.place(relx=0.0, rely=0.0, relwidth=1.0)
+                    self.apply_alt_btn.pack(side=LEFT, fill=X, expand=True,
+                                            padx=(PAD_TIGHT, 0))
+                    self.aux_row.grid()
+                else:
+                    self.publish_btn.place_forget()
+                    self.apply_alt_btn.pack_forget()
+                    self.aux_row.grid_remove()
+            except Exception:
+                pass
+
         try:
             state = "normal" if self._auto_names() else "disabled"
             for name in ("home_auto_btn", "manage_auto_btn"):

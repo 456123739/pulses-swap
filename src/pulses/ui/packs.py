@@ -588,6 +588,12 @@ class PacksMixin:
                 self._manage_overview_sig = None
         except Exception:
             pass
+        # 预设加载/切换后 source 已就绪：一键按钮的可用状态要跟着刷新，
+        # 否则首屏加载完成时按钮仍是上一帧的 disabled。
+        try:
+            self._apply_advanced_controls()
+        except Exception:
+            pass
 
     def on_preset_action(self, name, kind):
         """卡片右侧按钮：更新 / 发布 / 绑定 / 检查。"""

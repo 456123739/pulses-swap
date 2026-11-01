@@ -383,6 +383,7 @@ class HomePageMixin:
 
         ver_box = ctk.CTkFrame(meta_row, fg_color="transparent")
         ver_box.pack(side=LEFT, fill=X, expand=True)
+        self.version_box = ver_box
         make_label(ver_box, text="版本", fg=C_TEXT_MUTED,
                    font_size=FS_TINY).pack(side=LEFT)
         self.version_entry = make_entry(ver_box, width=158)
@@ -712,7 +713,9 @@ class HomePageMixin:
             if dev:
                 self.apply_btn.place_forget()
                 self.sync_btn.pack_forget()
-                if loaded:
+                advanced = bool(getattr(self.settings,
+                                        "advanced_actions", False))
+                if loaded and advanced:
                     self.publish_btn.place(relx=0.0, rely=0.0, relwidth=1.0)
                     self.apply_alt_btn.pack(side=LEFT, fill=X, expand=True,
                                             padx=(PAD_TIGHT, 0))

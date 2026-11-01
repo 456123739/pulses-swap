@@ -595,16 +595,16 @@ class ManagerPageMixin:
                 ("新建云端文件夹…", self._manage_new_folder),
             ])
         self.manage_upload_menu.pack(side=LEFT)
-        make_text_button(dev_btns, "刷新",
-                         command=self._manage_refresh).pack(
-            side=LEFT, padx=(PAD_TIGHT, 0))
+        self.manage_dev_refresh_btn = make_text_button(
+            dev_btns, "刷新", command=self._manage_refresh)
+        self.manage_dev_refresh_btn.pack(side=LEFT, padx=(PAD_TIGHT, 0))
         self.manage_tacz_btn = make_text_button(
             dev_btns, "打开 TACZ", command=self.open_tacz_folder,
             state="disabled")
         self.manage_tacz_btn.pack(side=LEFT, padx=(PAD_TIGHT, 0))
-        make_text_button(dev_btns, "清理缓存",
-                         command=self._manage_clean_cache).pack(
-            side=LEFT, padx=(PAD_TIGHT, 0))
+        self.manage_clean_dev_btn = make_text_button(
+            dev_btns, "清理缓存", command=self._manage_clean_cache)
+        self.manage_clean_dev_btn.pack(side=LEFT, padx=(PAD_TIGHT, 0))
 
         self.manage_player_actions = ctk.CTkFrame(quick,
                                                    fg_color="transparent")
@@ -612,11 +612,12 @@ class ManagerPageMixin:
         player_btns = ctk.CTkFrame(self.manage_player_actions,
                                     fg_color="transparent")
         player_btns.pack(fill=X)
-        make_text_button(player_btns, "从云端添加",
-                         command=self.open_add_from_cloud).pack(side=LEFT)
-        make_text_button(player_btns, "一键更新",
-                         command=self._manage_sync_current).pack(
-            side=LEFT, padx=(PAD_TIGHT, 0))
+        self.manage_add_btn = make_text_button(
+            player_btns, "从云端添加", command=self.open_add_from_cloud)
+        self.manage_add_btn.pack(side=LEFT)
+        self.manage_sync_btn = make_text_button(
+            player_btns, "一键更新", command=self._manage_sync_current)
+        self.manage_sync_btn.pack(side=LEFT, padx=(PAD_TIGHT, 0))
         self.manage_check_btn = make_text_button(
             player_btns, "检查更新", command=self._manage_check_current)
         self.manage_check_btn.pack(side=LEFT, padx=(PAD_TIGHT, 0))
@@ -624,9 +625,9 @@ class ManagerPageMixin:
             player_btns, "刷新", command=self._manage_refresh)
         self.manage_player_refresh_btn.pack(
             side=LEFT, padx=(PAD_TIGHT, 0))
-        make_text_button(player_btns, "清理缓存",
-                         command=self._manage_clean_cache).pack(
-            side=LEFT, padx=(PAD_TIGHT, 0))
+        self.manage_clean_player_btn = make_text_button(
+            player_btns, "清理缓存", command=self._manage_clean_cache)
+        self.manage_clean_player_btn.pack(side=LEFT, padx=(PAD_TIGHT, 0))
 
         self.manage_status = make_label(
             quick, text="", fg=C_TEXT_MUTED, font_size=FS_TINY)
