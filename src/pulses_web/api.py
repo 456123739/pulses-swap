@@ -96,6 +96,7 @@ class Api:
             "online.account.state": lambda p: self._controller.account_state(),
             "online.unbind": lambda p: self._controller.unbind_source(p["name"]),
             "online.check": self._job("online.check"),
+            "online.auto.check": self._job("online.auto.check"),
             "online.sync": self._job("online.sync"),
             "online.sync.auto": self._job("online.sync.auto"),
             "online.publish.auto": self._job("online.publish.auto"),
@@ -287,6 +288,9 @@ class Api:
                 name = params.get("name", "")
                 job = self._jobs.submit("检查更新",
                                        lambda ctx: self._controller.check(name, ctx))
+            elif method == "online.auto.check":
+                job = self._jobs.submit("启动检查",
+                                       lambda ctx: self._controller.auto_check(ctx))
             elif method == "online.sync":
                 name = params.get("name", "")
                 selection = params.get("selection") or []

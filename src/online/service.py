@@ -549,7 +549,8 @@ class OnlineService:
     # 检查更新
     # ------------------------------------------------------------------
     def check(self, ref: PresetRef, *, role: str = "player",
-              allow_cache: bool = True,
+              allow_cache: bool = True, prefer_cache: bool = False,
+              cache_ttl: int = 900,
               max_file_size: int = diff.DEFAULT_MAX_FILE,
               on_phase=None) -> diff.Plan:
         def phase(text: str) -> None:
@@ -564,6 +565,18 @@ class OnlineService:
         source_error = ""
         last_error: OnlineError | None = None
         phase("连接云端…")
+        if prefer_cache:
+            record = self.sources.get(ref.name)
+            last_check = int(record.get("last_check") or 0)
+            cached = self.load_cloud_manifest(ref.name)
+            if cached is not None and time.time() - last_check < cache_ttl:
+                phase("使用最近缓存…")
+                local = self.scan(ref)
+                plan = diff.compare(local, self._sanitize_cloud(cached),
+                                    role=role, app_version=self.app_version,
+                                    max_file_size=max_file_size)
+                plan.source_error = ""
+                return plan
         # 主链接 + 备用链接一共只给 45 秒：别在一个源上吊死
         deadline = time.monotonic() + 45.0
         for share in self._share_candidates(ref.name):

@@ -636,7 +636,7 @@ function Settings({ snap, actions }) {
                 <button className={`switch ${s.online_confirm_full ? 'on' : ''}`} role="switch" aria-checked={!!s.online_confirm_full} aria-label="完整更新前确认" onClick={() => update({ online_confirm_full: !s.online_confirm_full })}><span /></button></div>}
             </section>
             <section className="card"><div className="section-title"><span className="eyebrow">SYNC</span><h2>同步偏好</h2></div>
-              <div className="setting-row"><div><strong>启动时检查更新</strong><span>只检查，不自动下载</span></div>
+              <div className="setting-row"><div><strong>启动时检查更新</strong><span>只检查，不下载；15 分钟内不重复</span></div>
                 <button className={`switch ${s.online_auto_check ? 'on' : ''}`} role="switch" aria-checked={!!s.online_auto_check} aria-label="启动时检查更新" onClick={() => update({ online_auto_check: !s.online_auto_check })}><span /></button></div>
               <div className="setting-row"><div><strong>完全同步</strong><span>本地多余项进入回收站；一键更新会按此设置处理</span></div>
                 <button className={`switch ${s.online_sync_clean ? 'on' : ''}`} role="switch" aria-checked={!!s.online_sync_clean} aria-label="完全同步" onClick={() => update({ online_sync_clean: !s.online_sync_clean })}><span /></button></div>
@@ -724,6 +724,7 @@ export default function App() {
   const [bridgeError, setBridgeError] = useState('')
   const jobIdRef = useRef('')
   const roleSwitchRef = useRef(false)
+  const autoCheckRef = useRef('')
   const toastTimer = useRef(null)
 
   const showToast = useCallback((message, kind = 'info') => {
@@ -866,6 +867,14 @@ export default function App() {
       await invoke('job.cancel', { jobId: busy.jobId })
     } catch (err) { showToast(err.message, 'error') }
   }, [busy?.jobId, showToast])
+
+  useEffect(() => {
+    if (!snap.pack.loaded || !snap.settings?.online_auto_check
+        || !(snap.online.bound_count > 0) || autoCheckRef.current === snap.pack.path) return
+    autoCheckRef.current = snap.pack.path
+    startJob('online.auto.check', {}, '检查更新')
+  }, [snap.pack.loaded, snap.settings?.online_auto_check,
+      snap.online.bound_count, snap.pack.path, startJob])
 
   const openPack = useCallback((path) => startJob('pack.open', { path }, '打开整合包'), [startJob])
   const openTacz = useCallback(async () => {

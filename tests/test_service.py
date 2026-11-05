@@ -124,6 +124,16 @@ class ServiceTest(unittest.TestCase):
         self.assertEqual(plan.cloud_generation, 4)
         self.assertFalse(plan.offline)
 
+    def test_prefer_cache_reuses_fresh_manifest_without_network(self):
+        self.service.bind("测试预设", self.cloud.url, "28pm")
+        first = self.service.check(self.ref)
+        before = self.cloud.request_count()
+        cached = self.service.check(self.ref, prefer_cache=True)
+        self.assertEqual(self.cloud.request_count(), before)
+        self.assertEqual(cached.cloud_generation, first.cloud_generation)
+        self.assertEqual(cached.count_of(diff.DOWNLOAD),
+                         first.count_of(diff.DOWNLOAD))
+
     def test_sync_end_to_end(self):
         self.service.bind("测试预设", self.cloud.url, "28pm")
         plan = self.service.check(self.ref)
