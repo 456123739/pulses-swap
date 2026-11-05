@@ -589,6 +589,38 @@ class AppController:
                          root=info["path"], applied=bool(info.get("applied")))
 
     @_locked
+    def auto_check(self, ctx=None):
+        """启动时检查：只查超过 15 分钟未检查的已绑定预设，复用缓存。"""
+        if not getattr(self.settings, "online_auto_check", True):
+            return {"checked": [], "state": self.state()}
+        if not self.online or not self.preset_manager:
+            return {"checked": [], "state": self.state()}
+        names = self._bound_names()
+        due = []
+        now = time.time()
+        for name in names:
+            info = self.preset_manager.presets.get(name) or {}
+            if info.get("applied"):
+                # 已应用预设的文件在 tacz 里，普通 scan 看不到；启动时跳过，
+                # 避免把“本地没有”误报成待下载。用户点一键更新会先收回再查。
+                continue
+            record = self.online.source_of(name) or {}
+            if now - int(record.get("last_check") or 0) >= 900:
+                due.append(name)
+        for index, name in enumerate(due, 1):
+            if ctx is not None and ctx.cancelled:
+                break
+            if ctx is not None:
+                ctx.progress(index / max(1, len(due)) * 100, phase="check",
+                             message=f"启动检查 {index}/{len(due)} · {name}",
+                             current=index, total=len(due))
+            try:
+                self.check(name, ctx=ctx)
+            except Exception as exc:
+                self.add_log(f"启动检查跳过 {name}：{exc}", "WARNING")
+        return {"checked": due, "state": self.state()}
+
+    @_locked
     def check(self, name: str, ctx=None):
         online = self._require_online()
         if not self.preset_manager or name not in self.preset_manager.presets:
