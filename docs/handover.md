@@ -604,3 +604,17 @@ export DISPLAY=:99          # weston headless + Xwayland
 3. **启动异常要能看见**：窗口版无控制台；`pulses_web.main` 写 `PulsesSwap_database/webview-startup.log`，创建窗口/启动失败时弹原生 MessageBox（WebView2 缺失也要有提示）。
 4. **构建冒烟必须检查主窗口句柄**：只检查进程不退出会被 hidden 启动骗过；`build-web.yml` 现在用 `MainWindowHandle -eq 0` 直接判失败。
 5. **前端调用的一键 API 必须在 `Api._methods` 注册**：`_job()` 支持不等于前端可调用；`online.sync.auto`、`online.publish.auto`、`online.sync.all`、`online.publish.all` 都要在映射表里。
+
+## v3.2 开发线：差异状态与入口（务必保留）
+
+1. **差异状态只有一套词**：`controller._diff_status()` 把 `DiffItem` 归成
+   `cloud_only / local_only / changed / same / blocked`，预设条目、枪包列表、差异列表
+   共用。**不要在前端自己按 action 猜颜色**，否则角色切换后“多余/缺失”会反。
+   玩家端叫「缺失 / 多余 / 变更」，开发者端叫「云端多余 / 待上传 / 待上传」，只是文案不同。
+2. **检查结果按预设缓存**：`AppController._checks[预设名]` 存最近一次 `check()` 的
+   `status_counts` / `by_name` / `checked_at`，`state()` 里给预设补 `pending/extra/needs_update`，
+   给枪包补 `status`。切换预设时**不能**清空（`_clear_current_plans()` 只清当前计划）；
+   绑定、改名、删除、换角色、换整合包、清理缓存、同步/发布完成时才作废。
+3. **入口不要藏**：玩家「一键更新」、开发者「一键上传」在主操作区，预设条目上的
+   「更新/上传 N」只在 `needs_update && bound` 时出现；详情卡常驻「检查差异」。
+   新增主功能时同步更新 `docs/入口检查.md`，并给 `web/test-ui.mjs` 加一条断言。

@@ -219,15 +219,58 @@ function Empty({ title, hint, children }) {
   return <div className="empty"><div className="empty-orbit" /><h3>{title}</h3>{hint && <p>{hint}</p>}{children}</div>
 }
 
-function PresetRow({ item, selected, onSelect, onRename, onDelete, onDetails }) {
+// 差异状态 → 给人看的词。玩家和开发者看同一份差异，叫法不同。
+const STATUS_LABELS = {
+  player: { cloud_only: '缺失', changed: '变更', local_only: '多余', blocked: '无法处理', same: '一致' },
+  developer: { cloud_only: '云端多余', changed: '待上传', local_only: '待上传', blocked: '无法处理', same: '一致' },
+}
+const STATUS_ORDER = ['cloud_only', 'changed', 'local_only', 'blocked']
+
+function statusLabel(status, role) {
+  return (STATUS_LABELS[role] || STATUS_LABELS.player)[status] || ''
+}
+
+function GunpackLegend({ summary, role, bound }) {
+  const counts = summary || {}
+  const shown = STATUS_ORDER.filter((k) => counts[k] > 0)
+  if (!shown.length) {
+    return bound
+      ? <div className="gunpack-legend"><span className="muted">还没检查差异：点下方「检查差异」，这里会按云端标色</span></div>
+      : null
+  }
+  return (
+    <div className="gunpack-legend">
+      {shown.map((k) => (
+        <span className="legend-chip" data-kind={k} key={k}>
+          <i className="gp-dot" />{statusLabel(k, role)} {counts[k]}
+        </span>
+      ))}
+      {counts.same > 0 && <span className="legend-chip" data-kind="same"><i className="gp-dot" />一致 {counts.same}</span>}
+    </div>
+  )
+}
+
+function PresetRow({ item, selected, role, onSelect, onRename, onDelete, onDetails, onUpdate }) {
+  const pending = (item.pending || 0) + (item.extra || 0)
+  const updateWord = role === 'developer' ? '上传' : '更新'
   return (
     <div className={`preset-row ${selected ? 'selected' : ''}`} onClick={() => onSelect(item.name)}
       onContextMenu={(e) => { e.preventDefault(); onDetails(item) }}>
       <div className="preset-main">
         <strong>{item.name}</strong>
-        <span>{item.version || 'v1.0.0'} · {item.count || 0} 个枪包</span>
+        <span title={item.check_summary || ''}>
+          {item.version || 'v1.0.0'} · {item.count || 0} 个枪包
+          {item.needs_update && item.check_summary ? ` · ${item.check_summary}` : ''}
+        </span>
       </div>
       {item.applied && <span className="pill success">已应用</span>}
+      {item.needs_update && item.bound && (
+        <button className="mini-btn" data-testid={`preset-update-${item.name}`}
+          title={item.check_summary || ''}
+          onClick={(e) => { e.stopPropagation(); onUpdate(item) }}>
+          <Icon name="refresh" size={12} />{updateWord}{pending > 0 ? ` ${pending}` : ''}
+        </button>
+      )}
       <div className="row-actions" onClick={(e) => e.stopPropagation()}>
         <button className="text-btn" onClick={() => onRename(item)}>重命名</button>
         <button className="text-btn danger" onClick={() => onDelete(item)}>删除</button>
@@ -391,17 +434,34 @@ function Home({ snap, actions, busy }) {
               {snap.role === 'player' ? <>
                 <button className="btn hero-secondary cloud-action" disabled={busy}
                   onClick={actions.addFromCloud}><Icon name="cloud" size={17} />从云端拉取预设</button>
+                {selected && snap.online.binding?.url && (
+                  <button className="btn hero-secondary" disabled={busy}
+                    data-testid="one-click-update"
+                    onClick={() => actions.syncAuto(selected.name)}>
+                    <Icon name="refresh" size={17} />一键更新
+                    {(selected.pending + selected.extra) > 0 && <span className="btn-count">{selected.pending + selected.extra}</span>}
+                  </button>
+                )}
                 {(snap.online.bound_count || 0) > 0 && <button className="btn hero-secondary" disabled={busy}
                   onClick={actions.syncAllAuto}><Icon name="refresh" size={17} />一键更新全部</button>}
               </> : selected && !snap.online.binding?.url
                 ? <button className="btn hero-secondary cloud-action" disabled={busy}
                     onClick={() => actions.publishNew(selected.name)}><Icon name="upload" size={17} />上传到云端</button>
-                : (snap.online.bound_count || 0) > 0
-                ? <button className="btn hero-secondary" disabled={busy}
-                    onClick={actions.publishAllAuto}><Icon name="upload" size={17} />一键上传全部</button>
-                : <button className="btn hero-secondary" onClick={openPack}>
+                : <>
+                  {selected && snap.online.binding?.url && (
+                    <button className="btn hero-secondary" disabled={busy}
+                      data-testid="one-click-upload"
+                      onClick={() => actions.publishAuto(selected.name)}>
+                      <Icon name="upload" size={17} />一键上传
+                      {(selected.pending + selected.extra) > 0 && <span className="btn-count">{selected.pending + selected.extra}</span>}
+                    </button>
+                  )}
+                  {(snap.online.bound_count || 0) > 0 && <button className="btn hero-secondary" disabled={busy}
+                    onClick={actions.publishAllAuto}><Icon name="upload" size={17} />一键上传全部</button>}
+                  {!(snap.online.bound_count || 0) && <button className="btn hero-secondary" onClick={openPack}>
                     <Icon name="folder" size={17} />选择整合包
                   </button>}
+                </>}
             </div>
             {busy && <div className="hero-progress"><Progress value={busy.progress} text={busy.text || busy.title} /></div>}
           </motion.section>
@@ -415,8 +475,10 @@ function Home({ snap, actions, busy }) {
               </div>
               <div className="preset-list">
                 {snap.presets.length === 0 ? <p className="muted pad">还没有预设</p> : snap.presets.map((p) => (
-                  <PresetRow key={p.name} item={p} selected={p.name === snap.selected}
-                    onSelect={actions.select} onRename={actions.rename} onDelete={actions.delete} onDetails={actions.presetDetails} />
+                  <PresetRow key={p.name} item={p} selected={p.name === snap.selected} role={snap.role}
+                    onSelect={actions.select} onRename={actions.rename} onDelete={actions.delete}
+                    onDetails={actions.presetDetails}
+                    onUpdate={(item) => (snap.role === 'developer' ? actions.publishAuto(item.name) : actions.syncAuto(item.name))} />
                 ))}
               </div>
             </section>
@@ -431,17 +493,22 @@ function Home({ snap, actions, busy }) {
                   <button className="text-btn" onClick={() => actions.prompt('修改版本号', '版本号', selected.version, (v) => actions.saveVersion(selected.name, v))}>修改</button></div>
                 <div className="detail-row"><span>云端</span><strong>{snap.online.binding?.url ? '已绑定' : '未绑定'}</strong></div>
                 <div className="gunpack-head"><span>枪包列表</span><span className="muted">共 {snap.gunpacks.length} 个</span></div>
+                <GunpackLegend summary={snap.gunpack_summary} role={snap.role} bound={Boolean(snap.online.binding?.url)} />
                 <div className="gunpack-list">
                   {snap.gunpacks.length === 0 ? <p className="muted pad">这个预设还没有枪包</p> : (
                     <AnimatePresence mode="popLayout" initial={false}>
                       {snap.gunpacks.map((g, i) => (
-                        <motion.div className="gunpack-row" key={`${snap.selected}:${g.name}`}
+                        <motion.div className={`gunpack-row status-${g.status || 'unknown'}`} key={`${snap.selected}:${g.name}`}
                           initial={animations ? { opacity: 0, y: 10 } : false}
                           animate={{ opacity: 1, y: 0 }}
                           exit={animations ? { opacity: 0, y: -4 } : { opacity: 1 }}
-                          transition={{ duration: animations ? 0.4 : 0, delay: animations ? i * 0.045 : 0, ease: [0.34, 1.3, 0.44, 1] }}>
-                          <Icon name="folder" size={15} /><span>{g.name}</span>
+                          transition={{ duration: animations ? 0.4 : 0, delay: animations ? i * 0.045 : 0, ease: [0.34, 1.3, 0.44, 1] }}
+                          title={g.status ? `${statusLabel(g.status, snap.role)}：${g.name}` : g.name}>
+                          <i className="gp-dot" />
+                          <Icon name="folder" size={15} />
+                          <span className="gp-name">{g.name}</span>
                           <span className="muted">{g.type || 'zip'}</span>
+                          {g.status && <span className="gp-badge" data-kind={g.status}>{statusLabel(g.status, snap.role)}</span>}
                         </motion.div>
                       ))}
                     </AnimatePresence>
@@ -449,7 +516,10 @@ function Home({ snap, actions, busy }) {
                 </div>
                 <div className="detail-footer">
                   <span className="muted">{snap.online.binding?.url ? '云端已绑定，可增量同步' : '尚未绑定云端来源'}</span>
-                  <div className="button-row"><button className="btn ghost small" onClick={actions.openTacz}><Icon name="folder" />打开 TACZ</button>
+                  <div className="button-row">
+                    {snap.online.binding?.url && <button className="btn ghost small" data-testid="check-diff"
+                      disabled={busy} onClick={() => actions.check(selected.name)}><Icon name="refresh" />检查差异</button>}
+                    <button className="btn ghost small" onClick={actions.openTacz}><Icon name="folder" />打开 TACZ</button>
                     <button className="btn ghost small" onClick={() => actions.navigate('manage')}>管理云端</button></div>
                 </div>
               </> : <div className="detail-empty"><p>从左侧选择一个预设</p><span>选中后可在这里查看版本、云端绑定和枪包列表。</span></div>}

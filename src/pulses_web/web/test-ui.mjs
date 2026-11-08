@@ -6,18 +6,19 @@ const state = {
   revision: 7, version: '3.1.9', role: 'developer',
   pack: { path: 'D:\\Games\\Minecraft\\PCL\\.minecraft\\versions\\1.20.1-Fabric', name: '1.20.1-Fabric', tacz: 'D:\\Games\\Minecraft\\PCL\\.minecraft\\versions\\1.20.1-Fabric\\tacz', loaded: true },
   presets: [
-    { name: '默认枪包', version: 'v1.2.0', applied: true, count: 18, path: '' },
-    { name: '轻量生存', version: 'v1.0.4', applied: false, count: 11, path: '' },
-    { name: '竞技场', version: 'v2.1.0', applied: false, count: 24, path: '' },
-    { name: '老版本备份', version: 'v0.9.2', applied: false, count: 8, path: '' },
+    { name: '默认枪包', version: 'v1.2.0', applied: true, count: 18, path: '', bound: true, pending: 0, extra: 0, needs_update: false, checked_at: 0, check_summary: '' },
+    { name: '轻量生存', version: 'v1.0.4', applied: false, count: 11, path: '', bound: true, pending: 3, extra: 1, needs_update: true, checked_at: 1794000000, check_summary: '待上传 2 · 云端多余 1' },
+    { name: '竞技场', version: 'v2.1.0', applied: false, count: 24, path: '', bound: false, pending: 0, extra: 0, needs_update: false, checked_at: 0, check_summary: '' },
+    { name: '老版本备份', version: 'v0.9.2', applied: false, count: 8, path: '', bound: true, pending: 0, extra: 0, needs_update: false, checked_at: 0, check_summary: '' },
   ],
   selected: '轻量生存',
   gunpacks: [
-    { name: 'tacz_default_gun', type: 'folder', size: 0, file_count: 4 },
-    { name: 'modern_warfare.zip', type: 'zip', size: 48213120, file_count: 132 },
-    { name: 'm4_pack.zip', type: 'zip', size: 18210000, file_count: 48 },
-    { name: 'pistols.zip', type: 'zip', size: 9210000, file_count: 31 },
+    { name: 'tacz_default_gun', type: 'folder', size: 0, file_count: 4, status: 'same' },
+    { name: 'modern_warfare.zip', type: 'zip', size: 48213120, file_count: 132, status: 'changed' },
+    { name: 'm4_pack.zip', type: 'zip', size: 18210000, file_count: 48, status: 'cloud_only' },
+    { name: 'pistols.zip', type: 'zip', size: 9210000, file_count: 31, status: 'local_only' },
   ],
+  gunpack_summary: { cloud_only: 1, changed: 1, local_only: 1, blocked: 0, same: 1 },
   plan: { role: 'developer', summary: '待上传 2 · 云端多余 1 · 一致 9', counts: { upload: 2, delete_cloud: 1, skip: 9 }, offline: false,
     items: [
       { path: 'modern_warfare.zip', name: 'modern_warfare.zip', action: 'upload', label: '上传', size: 48213120, checked: true },
@@ -102,7 +103,7 @@ assert.ok(primaryBox.height >= 52, `一键替换按钮高度 ${primaryBox.height
 assert.ok(primaryBox.width >= 190, `一键替换按钮宽度 ${primaryBox.width}`)
 assert.equal((await primary.innerText()).trim(), '一键替换')
 assert.ok(primaryBox.y + primaryBox.height <= 812, `主按钮不在首屏 ${primaryBox.y}`)
-const secondaryBox = await page.locator('.hero-secondary').boundingBox()
+const secondaryBox = await page.locator('.hero-secondary').first().boundingBox()
 assert.ok(secondaryBox.height >= 40, `次要按钮高度 ${secondaryBox.height}`)
 assert.ok(primaryBox.height > secondaryBox.height, '主按钮没有比次要按钮更突出')
 // 选预设后，枪包列表逐项滑入，且详情跟随切换
@@ -110,6 +111,13 @@ await page.locator('.preset-row').nth(2).click()
 await page.waitForTimeout(520)
 assert.equal((await page.locator('.detail-card h2').innerText()).trim(), '竞技场')
 assert.equal(await page.locator('.gunpack-row').count(), 4)
+// 枪包列表必须按云端差异上色，而不是清一色的白
+assert.equal(await page.locator('.gunpack-row.status-changed').count(), 1, '缺少“变更”着色')
+assert.equal(await page.locator('.gunpack-row.status-cloud_only').count(), 1, '缺少“缺失/云端多余”着色')
+assert.equal(await page.locator('.gunpack-row.status-local_only').count(), 1, '缺少“多余/待上传”着色')
+assert.equal(await page.locator('.gunpack-legend .legend-chip').count() >= 3, true, '缺少差异图例')
+const badgeText = await page.locator('.gunpack-row.status-changed .gp-badge').innerText()
+assert.equal(badgeText, '待上传', `变更行标签 ${badgeText}`)
 const firstGunOpacity = await page.locator('.gunpack-row').first().evaluate(el => Number(getComputedStyle(el).opacity))
 assert.ok(firstGunOpacity > 0.9, `枪包行未完成滑入 ${firstGunOpacity}`)
 await page.locator('.preset-row').nth(1).click()
@@ -123,6 +131,10 @@ assert.equal(await page.locator('.applied-state').count(), 1)
 await page.locator('.preset-row').nth(1).click()
 await page.waitForTimeout(300)
 assert.equal(await page.locator('button.hero-primary').count(), 1)
+// 入口检查：开发者端当前预设要有“一键上传”，预设条目要有上传小按钮
+assert.equal(await page.locator('[data-testid="one-click-upload"]').count(), 1, '开发者缺少一键上传')
+assert.equal((await page.locator('[data-testid="one-click-upload"]').innerText()).replace(/\s+/g, ' ').trim(), '一键上传 4')
+assert.ok(await page.locator('[data-testid="preset-update-轻量生存"]').count(), '预设条目缺少更新小按钮')
 const collapsed = await page.locator('.sidebar').evaluate(el => getComputedStyle(el).width)
 assert.equal(collapsed, '60px')
 assert.equal(await page.locator('.nav-item span').first().evaluate(el => getComputedStyle(el).display), 'none')
@@ -169,6 +181,9 @@ assert.equal(await page.locator('.role-switch').getAttribute('title'), '切换�
 await page.locator('.nav-item').nth(0).click()
 await page.waitForTimeout(600)
 assert.ok(await page.getByRole('button', { name: /从云端拉取预设/ }).count(), '玩家缺少拉取预设入口')
+assert.equal(await page.locator('[data-testid="one-click-update"]').count(), 1, '玩家缺少一键更新')
+const oneClick = (await page.locator('[data-testid="one-click-update"]').innerText()).replace(/\s+/g, ' ').trim()
+assert.equal(oneClick, '一键更新 4', `一键更新文案 ${oneClick}`)
 // 玩家管理页：默认一键更新，不需要勾选
 await page.locator('.nav-item').nth(1).click()
 await page.waitForTimeout(1200)

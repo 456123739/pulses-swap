@@ -133,10 +133,55 @@ h3 { font-size: 15px; font-weight: 600; }
 .detail-row strong { font-weight: 500; }
 .detail-row .text-btn { margin-left: auto; }
 .gunpack-head { display: flex; justify-content: space-between; padding: 14px 2px 6px; font-size: 12px; font-weight: 500; }
-.gunpack-list { overflow: auto; max-height: 145px; }
-.gunpack-row { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px 2px; border-bottom: 1px solid var(--divider); font-size: 12px; }
+.gunpack-list { overflow: auto; max-height: 168px; padding-right: 2px; }
+.gunpack-row { display: grid; grid-template-columns: 8px 16px minmax(0, 1fr) auto auto; gap: 8px; align-items: center;
+  padding: 8px 8px; border-bottom: 1px solid var(--divider); font-size: 12px; border-radius: 8px; transition: background 160ms; }
 .gunpack-row svg { color: var(--accent); }
 .gunpack-row .muted { font-size: 10px; }
+.gunpack-row .gp-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 枪包行按“和云端的差异”着色：缺失 / 变更 / 多余 / 无法处理 */
+.gp-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border); flex: none; }
+.gunpack-row.status-cloud_only { background: linear-gradient(90deg, rgba(123, 157, 201, .13), rgba(123, 157, 201, 0) 64%); box-shadow: inset 2px 0 0 #7B9DC9; }
+.gunpack-row.status-changed { background: linear-gradient(90deg, rgba(201, 169, 97, .15), rgba(201, 169, 97, 0) 64%); box-shadow: inset 2px 0 0 #C9A961; }
+.gunpack-row.status-local_only { background: linear-gradient(90deg, rgba(201, 123, 123, .13), rgba(201, 123, 123, 0) 64%); box-shadow: inset 2px 0 0 #C97B7B; }
+.gunpack-row.status-blocked { background: linear-gradient(90deg, rgba(178, 107, 107, .16), rgba(178, 107, 107, 0) 64%); box-shadow: inset 2px 0 0 #B26B6B; }
+.gunpack-row.status-cloud_only .gp-dot { background: #7B9DC9; }
+.gunpack-row.status-changed .gp-dot { background: #C9A961; }
+.gunpack-row.status-local_only .gp-dot { background: #C97B7B; }
+.gunpack-row.status-blocked .gp-dot { background: #B26B6B; }
+.gunpack-row.status-same .gp-dot { background: #9FC2B9; }
+
+.gunpack-legend { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 2px 8px; }
+.gunpack-legend .muted { font-size: 10.5px; }
+.legend-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 999px;
+  background: var(--input); color: var(--text-2); font-size: 10.5px; }
+.legend-chip[data-kind="cloud_only"] { background: rgba(123, 157, 201, .14); color: #54749F; }
+.legend-chip[data-kind="changed"] { background: rgba(201, 169, 97, .16); color: #8C7233; }
+.legend-chip[data-kind="local_only"] { background: rgba(201, 123, 123, .14); color: #9C5A5A; }
+.legend-chip[data-kind="blocked"] { background: rgba(178, 107, 107, .16); color: #8F4F4F; }
+.legend-chip[data-kind="cloud_only"] .gp-dot { background: #7B9DC9; }
+.legend-chip[data-kind="changed"] .gp-dot { background: #C9A961; }
+.legend-chip[data-kind="local_only"] .gp-dot { background: #C97B7B; }
+.legend-chip[data-kind="blocked"] .gp-dot { background: #B26B6B; }
+.legend-chip[data-kind="same"] .gp-dot { background: #9FC2B9; }
+
+.gp-badge { font-size: 10px; line-height: 1; padding: 4px 8px; border-radius: 999px; white-space: nowrap; }
+.gp-badge[data-kind="cloud_only"] { color: #54749F; background: rgba(123, 157, 201, .16); }
+.gp-badge[data-kind="changed"] { color: #8C7233; background: rgba(201, 169, 97, .18); }
+.gp-badge[data-kind="local_only"] { color: #9C5A5A; background: rgba(201, 123, 123, .16); }
+.gp-badge[data-kind="blocked"] { color: #8F4F4F; background: rgba(178, 107, 107, .18); }
+.gp-badge[data-kind="same"] { color: var(--muted); background: var(--input); }
+
+/* 预设条目上的“更新 / 上传”小按钮 */
+.mini-btn { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 9px; border-radius: 999px;
+  font-size: 10.5px; color: var(--accent); background: var(--accent-soft);
+  border: 1px solid rgba(91, 168, 154, .3); transition: background 140ms, transform 120ms; flex: none; }
+.mini-btn:hover { background: #cbe3dd; }
+.mini-btn:active { transform: scale(.96); }
+.role-developer .mini-btn { color: #5A75A5; background: #DFE6F2; border-color: rgba(107, 134, 181, .32); }
+.btn-count { margin-left: 6px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px;
+  display: inline-grid; place-items: center; font-size: 10px; background: rgba(44, 62, 63, .10); }
 .hero-empty { min-height: 420px; display: flex; flex-direction: column; justify-content: center; gap: 18px; }
 .empty { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; padding: 40px 20px; }
 .empty-orbit { width: 38px; height: 38px; border-radius: 50%; border: 1px dashed var(--border); position: relative; }

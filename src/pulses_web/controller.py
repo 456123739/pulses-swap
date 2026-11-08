@@ -35,6 +35,51 @@ except Exception:                       # 打包缺 online 时仍允许只读功
     diff = None
 
 
+# 差异条目的“用户可读状态”。预设条目 / 枪包列表 / 差异列表共用同一套词：
+#   cloud_only  只有云端有（玩家：缺失；开发者：云端多余）
+#   local_only  只有本地有（玩家：多余；开发者：待上传）
+#   changed     两边都有但内容不同
+#   same        一致
+#   blocked     无法自动处理
+STATUS_CLOUD_ONLY = "cloud_only"
+STATUS_LOCAL_ONLY = "local_only"
+STATUS_CHANGED = "changed"
+STATUS_SAME = "same"
+STATUS_BLOCKED = "blocked"
+
+STATUS_RANK = {
+    STATUS_CLOUD_ONLY: 0,
+    STATUS_CHANGED: 1,
+    STATUS_LOCAL_ONLY: 2,
+    STATUS_BLOCKED: 3,
+    STATUS_SAME: 4,
+}
+
+
+def _diff_status(item) -> str:
+    """把 DiffItem 归到上面那五类里。"""
+    if diff is None:
+        return STATUS_CHANGED
+    action = getattr(item, "action", "")
+    local = getattr(item, "local", None)
+    cloud = getattr(item, "cloud", None)
+    if action == diff.SKIP:
+        return STATUS_SAME
+    if action == diff.BLOCKED:
+        return STATUS_BLOCKED
+    if action in (diff.DELETE_LOCAL, diff.ASK_DELETE_LOCAL):
+        return STATUS_LOCAL_ONLY
+    if action == diff.DELETE_CLOUD:
+        return STATUS_CLOUD_ONLY
+    if action == diff.DOWNLOAD:
+        return STATUS_CLOUD_ONLY if local is None else STATUS_CHANGED
+    if action == diff.REPAIR:
+        return STATUS_CHANGED
+    if action == diff.UPLOAD:
+        return STATUS_LOCAL_ONLY if cloud is None else STATUS_CHANGED
+    return STATUS_CHANGED
+
+
 def _locked(fn):
     """串行化会改状态的 controller 入口（RLock 允许内部递归调用）。"""
     from functools import wraps
@@ -77,6 +122,9 @@ class AppController:
         self.last_publish_plan = None
         self._plan_owner = None
         self._publish_owner = None
+        # 每个预设最近一次检查的摘要（键 = 预设名）。用来给预设条目和枪包列表
+        # 标“待更新 / 缺失 / 多余 / 变更”，不用等用户再点一次检查。
+        self._checks: dict[str, dict] = {}
         self._rev = 0
         self._init_online()
         self.add_log(f"Pulses Swap Web {getattr(paths, 'VERSION', '')}",
@@ -122,6 +170,14 @@ class AppController:
         self.last_publish_plan = None
         self._plan_owner = None
         self._publish_owner = None
+        self._checks.clear()
+
+    def _clear_current_plans(self):
+        """只丢掉“当前选中预设”的计划，保留其它预设的检查结果。"""
+        self.last_plan = None
+        self.last_publish_plan = None
+        self._plan_owner = None
+        self._publish_owner = None
 
     def _plan_for(self, name):
         if self.last_plan is None or self._plan_owner != self._owner(name):
@@ -158,15 +214,24 @@ class AppController:
     def state(self):
         with self.lock:
             presets = []
+            bound_names = set(self._bound_names()) if self.online else set()
             if self.preset_manager:
                 for name, info in self.preset_manager.presets.items():
+                    view = self._check_view(name)
                     presets.append({
                         "name": name,
                         "version": info.get("version", ""),
                         "applied": bool(info.get("applied")),
                         "count": len(info.get("gunpacks") or {}),
                         "path": info.get("path", ""),
+                        "bound": name in bound_names,
+                        "pending": view["pending"],
+                        "extra": view["extra"],
+                        "needs_update": view["needs_update"],
+                        "checked_at": view["checked_at"],
+                        "check_summary": view["summary"],
                     })
+            gunpacks_view = self._gunpacks_with_status()
             account = self.online.account_info() if self.online else {}
             if account:
                 account.pop("uid", None)
@@ -186,7 +251,8 @@ class AppController:
                 },
                 "presets": presets,
                 "selected": self.selected,
-                "gunpacks": self.gunpacks(),
+                "gunpacks": gunpacks_view,
+                "gunpack_summary": self._gunpack_summary(gunpacks_view),
                 "online": {
                     "available": self.online is not None,
                     "account": account,
@@ -254,6 +320,44 @@ class AppController:
                             "file_count": 1, "target": ""})
         return out
 
+    def _check_view(self, name: str) -> dict:
+        """某个预设最近一次检查的“给人看”的结果（没查过就返回空）。"""
+        check = self._checks.get(name) or {}
+        if not check or check.get("role") != self.role:
+            return {"pending": 0, "extra": 0, "needs_update": False,
+                    "checked_at": 0, "summary": ""}
+        counts = check.get("status_counts") or {}
+        if self.role == "developer":
+            pending = (counts.get(STATUS_LOCAL_ONLY, 0)
+                       + counts.get(STATUS_CHANGED, 0))
+            extra = counts.get(STATUS_CLOUD_ONLY, 0)
+        else:
+            pending = (counts.get(STATUS_CLOUD_ONLY, 0)
+                       + counts.get(STATUS_CHANGED, 0))
+            extra = counts.get(STATUS_LOCAL_ONLY, 0)
+        return {"pending": pending, "extra": extra,
+                "needs_update": bool(pending or extra),
+                "checked_at": int(check.get("at") or 0),
+                "summary": str(check.get("summary") or "")}
+
+    def _gunpacks_with_status(self) -> list[dict]:
+        rows = self.gunpacks()
+        check = self._checks.get(self.selected) or {}
+        by_name = check.get("by_name") or {}
+        for row in rows:
+            row["status"] = by_name.get(row["name"], "")
+        return rows
+
+    def _gunpack_summary(self, rows=None) -> dict:
+        """当前预设枪包按状态的计数，给列表图例用。"""
+        out = {STATUS_CLOUD_ONLY: 0, STATUS_CHANGED: 0,
+               STATUS_LOCAL_ONLY: 0, STATUS_BLOCKED: 0, STATUS_SAME: 0}
+        for row in (rows if rows is not None else self._gunpacks_with_status()):
+            status = row.get("status") or ""
+            if status in out:
+                out[status] += 1
+        return out
+
     # ------------------------------------------------------------------
     # 整合包 / 预设
     # ------------------------------------------------------------------
@@ -319,7 +423,7 @@ class AppController:
         if not self.preset_manager or name not in self.preset_manager.presets:
             raise ValueError("预设不存在")
         if self.selected != name:
-            self._clear_plans()
+            self._clear_current_plans()
         self.selected = name
         self._rev += 1
         return self.state()
@@ -633,19 +737,40 @@ class AppController:
             if ctx else None)
         self.last_plan = plan
         self._plan_owner = self._owner(name)
+        summary = self._plan_summary(plan)
+        by_name = {}
+        for entry in summary["items"]:
+            by_name[entry["name"]] = entry["status"]
+            tail = os.path.basename(str(entry["name"]).replace("\\", "/"))
+            by_name.setdefault(tail, entry["status"])
+        self._checks[name] = {
+            "summary": summary["summary"],
+            "counts": summary["counts"],
+            "status_counts": summary["status_counts"],
+            "by_name": by_name,
+            "version": plan.cloud_version,
+            "clean": plan.is_clean,
+            "offline": plan.offline,
+            "at": int(time.time()),
+            "role": self.role,
+        }
         self._rev += 1
-        return {"plan": self._plan_summary(plan), "state": self.state()}
+        return {"plan": summary, "state": self.state()}
 
     def _plan_summary(self, plan):
         if plan is None:
             return None
         items = []
+        status_counts: dict[str, int] = {}
         for item in plan.items:
+            status = _diff_status(item)
+            status_counts[status] = status_counts.get(status, 0) + 1
             items.append({
                 "path": item.path,
                 "name": item.display_name,
                 "action": item.action,
                 "label": diff.ACTION_LABELS.get(item.action, item.action),
+                "status": status,
                 "size": item.size,
                 "reason": item.reason,
                 "checked": item.default_checked,
@@ -655,6 +780,7 @@ class AppController:
             "role": plan.role,
             "items": items,
             "counts": plan.counts(),
+            "status_counts": status_counts,
             "summary": plan.summary(),
             "version": plan.cloud_version,
             "generation": plan.cloud_generation,
@@ -692,6 +818,8 @@ class AppController:
         result = online.sync(self._ref(name), plan, selection,
                              on_item=on_item, on_progress=on_progress,
                              cancel=(lambda: ctx.cancelled) if ctx else None)
+        # 下载/删除已经改过本地文件，旧的检查结果不再成立
+        self._checks.pop(name, None)
         self._rev += 1
         return {"result": self._serialize(result), "state": self.state()}
 
@@ -970,6 +1098,8 @@ class AppController:
                 message=message, current=current, total=total))
             if ctx else None,
             role=self.role)
+        # 云端内容变了，旧的检查结果不再成立
+        self._checks.pop(name, None)
         self._rev += 1
         return {"result": self._serialize(result), "state": self.state()}
 
