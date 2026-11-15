@@ -123,11 +123,21 @@ assert.ok(firstGunOpacity > 0.9, `枪包行未完成滑入 ${firstGunOpacity}`)
 await page.locator('.preset-row').nth(1).click()
 await page.waitForTimeout(520)
 assert.equal((await page.locator('.detail-card h2').innerText()).trim(), '轻量生存')
-// 已应用且无变更的预设不显示“重新替换”按钮
+// 已应用的预设也必须能重新替换（以前是个不可点的 div）
 await page.locator('.preset-row').nth(0).click()
 await page.waitForTimeout(300)
-assert.equal(await page.locator('button.hero-primary').count(), 0, '已应用预设仍显示替换按钮')
+assert.equal(await page.locator('button.hero-primary').count(), 1, '已应用预设缺少重新替换按钮')
 assert.equal(await page.locator('.applied-state').count(), 1)
+assert.ok((await page.locator('button.hero-primary').innerText()).includes('重新替换'), '已应用按钮文案不对')
+// “?” 帮助：悬浮后出现一句话说明
+const hint = page.locator('.detail-card .hint').first()
+if (await hint.count()) {
+  await hint.hover()
+  await page.waitForTimeout(220)
+  assert.equal(await page.locator('.hint-bubble').count() >= 1, true, '悬浮 ? 没有出现说明')
+}
+// 新建的空预设要有“导入枪包”入口
+assert.ok(await page.locator('[data-testid="import-gunpacks"]').count(), '缺少导入枪包入口')
 await page.locator('.preset-row').nth(1).click()
 await page.waitForTimeout(300)
 assert.equal(await page.locator('button.hero-primary').count(), 1)

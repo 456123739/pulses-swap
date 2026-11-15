@@ -457,6 +457,47 @@ class AppController:
         }
 
     @_locked
+    def import_gunpacks(self, name: str, paths: list[str], ctx=None):
+        """把枪包文件/文件夹复制进预设（新建的预设本身是空的，需要这个入口）。"""
+        pm = self.preset_manager
+        if not pm or name not in pm.presets:
+            raise ValueError("预设不存在")
+        if pm.presets[name].get("applied"):
+            raise ValueError("这个预设已经应用到游戏了，先收回再导入枪包")
+        dest = Path(pm.presets[name]["path"])
+        sources = [Path(p).expanduser() for p in (paths or []) if str(p or "").strip()]
+        if not sources:
+            raise ValueError("没有选择枪包文件")
+        imported, skipped = [], []
+        for index, src in enumerate(sources, 1):
+            if ctx is not None:
+                ctx.progress(index / len(sources) * 100, phase="import",
+                             message=f"导入 {src.name}（{index}/{len(sources)}）",
+                             current=index, total=len(sources))
+            if not src.exists():
+                skipped.append(f"{src.name}（不存在）")
+                continue
+            target = dest / src.name
+            if target.exists():
+                skipped.append(f"{src.name}（同名已存在）")
+                continue
+            try:
+                if src.is_dir():
+                    shutil.copytree(src, target)
+                else:
+                    shutil.copy2(src, target)
+                imported.append(src.name)
+            except Exception as exc:                 # 单个失败不拖垮整批
+                self.add_log(f"导入 {src.name} 失败：{exc}", "WARNING")
+                skipped.append(f"{src.name}（{exc}）")
+        if imported:
+            pm.update_preset_index(name)
+            pm.save_cache()
+            self._checks.pop(name, None)
+            self._rev += 1
+        return {"imported": imported, "skipped": skipped, "state": self.state()}
+
+    @_locked
     def create_preset(self, name: str, version: str = "v1.0.0"):
         if not self.preset_manager:
             raise ValueError("请先加载整合包")
@@ -600,6 +641,27 @@ class AppController:
 
     def cloud_mkdir(self, parent: str, name: str):
         return self._require_online().cloud_mkdir(parent, name)
+
+    @_locked
+    def cloud_upload(self, path: str, paths: list[str], ctx=None):
+        """把本地文件/文件夹传到云端指定目录（开发者）。"""
+        online = self._require_online()
+        if self.role != "developer":
+            raise PermissionError("只有开发者可以上传云端文件")
+        if not paths:
+            raise ValueError("没有选择要上传的文件")
+
+        def on_progress(done, total, message=""):
+            if ctx is not None:
+                pct = (done / total * 100.0) if total else None
+                ctx.progress(pct, phase="upload", message=f"上传 {message}",
+                             current=done, total=total)
+
+        result = online.cloud_upload(str(path or "/"), paths,
+                                     on_progress=on_progress,
+                                     cancel=(lambda: ctx.cancelled) if ctx else None)
+        self._rev += 1
+        return {"result": result, "state": self.state()}
 
     def cloud_path(self, name: str):
         return {"path": self._require_online().cloud_path_of(name)

@@ -76,6 +76,7 @@ class Api:
             "preset.details": lambda p: self._controller.preset_details(
                 p["name"]),
             "preset.apply": self._job("preset.apply"),
+            "preset.import": self._job("preset.import"),
             "preset.gunpacks": lambda p: {"gunpacks": self._controller.gunpacks()},
             "online.bind": lambda p: self._controller.bind_source(
                 p["name"], p.get("url", ""), p.get("password", ""),
@@ -93,6 +94,7 @@ class Api:
             "online.cloud.mkdir": lambda p: self._controller.cloud_mkdir(
                 p.get("parent", ""), p.get("name", "")),
             "online.cloud.quota": lambda p: self._controller.cloud_quota(),
+            "online.cloud.upload": self._job("online.cloud.upload"),
             "online.account.state": lambda p: self._controller.account_state(),
             "online.unbind": lambda p: self._controller.unbind_source(p["name"]),
             "online.check": self._job("online.check"),
@@ -141,6 +143,21 @@ class Api:
                 "code": getattr(exc, "code", "INTERNAL"),
                 "message": str(exc) or "操作失败",
                 "detail": ""}}
+
+    def pick_files(self) -> dict:
+        """多选文件/文件夹（导入枪包用）。"""
+        if self._window is None:
+            return {"ok": False, "error": {"code": "NO_WINDOW",
+                                           "message": "窗口尚未就绪"}}
+        try:
+            import webview
+            result = self._window.create_file_dialog(
+                webview.FileDialog.OPEN, allow_multiple=True)
+            paths = [str(p) for p in (result or []) if str(p)]
+            return {"ok": True, "data": {"paths": paths}}
+        except Exception as exc:                     # noqa: BLE001
+            return {"ok": False, "error": {"code": "DIALOG_ERROR",
+                                           "message": f"无法打开选择器：{exc}"}}
 
     def pick_folder(self) -> dict:
         if self._window is None:
@@ -279,6 +296,18 @@ class Api:
                                            params.get("url", ""),
                                            params.get("password", ""),
                                            params.get("name", ""), ctx))
+            elif method == "preset.import":
+                name = params.get("name", "")
+                paths = params.get("paths") or []
+                job = self._jobs.submit("导入枪包",
+                                       lambda ctx: self._controller.import_gunpacks(
+                                           name, paths, ctx))
+            elif method == "online.cloud.upload":
+                path = params.get("path", "/")
+                paths = params.get("paths") or []
+                job = self._jobs.submit("上传云端文件",
+                                       lambda ctx: self._controller.cloud_upload(
+                                           path, paths, ctx))
             elif method == "preset.apply":
                 name = params.get("name", "")
                 job = self._jobs.submit("应用预设",

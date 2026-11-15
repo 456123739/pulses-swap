@@ -56,3 +56,10 @@ export function subscribe(handler) {
     if (window.PS?.push) window.PS.push = () => {}
   }
 }
+
+export async function pickFiles() {
+  if (!window.pywebview?.api?.pick_files) throw new Error('桌面桥接尚未就绪')
+  const result = await window.pywebview.api.pick_files()
+  if (!result?.ok) throw new Error(result?.error?.message || '无法打开文件选择器')
+  return result.data.paths || []
+}

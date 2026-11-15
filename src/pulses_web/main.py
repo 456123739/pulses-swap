@@ -158,7 +158,7 @@ def main():
     # 只暴露必要的桥接方法，避免 pywebview 递归 introspection 整个 Api 对象。
     # 这也是 WebView2 冷启动时 invoke 未挂载/窗口卡死的根因防护。
     try:
-        window.expose(api.invoke, api.pick_folder, api.handle_drop,
+        window.expose(api.invoke, api.pick_folder, api.pick_files, api.handle_drop,
                        api.handle_drop_pending, api.report_selftest)
     except Exception:
         _startup_log("window.expose failed:\n" + traceback.format_exc())
