@@ -975,6 +975,12 @@ export default function App() {
   const lastJobRef = useRef(null)
   const autoRetryRef = useRef(0)
   const busyRef = useRef(false)
+  const busyTimer = useRef(null)
+  const clearBusy = useCallback(() => {
+    if (busyTimer.current) { clearTimeout(busyTimer.current); busyTimer.current = null }
+    busyRef.current = false
+    setBusy(null)
+  }, [])
   const showToast = useCallback((message, kind = 'info', action = null) => {
     clearTimeout(toastTimer.current)
     setToast({ id: Date.now(), message, kind, action })
@@ -1003,8 +1009,7 @@ export default function App() {
         const st = event.data?.result?.state
         if (st) setSnap(st)
         else refresh()
-        setBusy(null)
-        busyRef.current = false
+        clearBusy()
         const r = event.data?.result
         const failed = r?.result?.ok === false || r?.ok === false
         const job = lastJobRef.current
@@ -1013,8 +1018,7 @@ export default function App() {
           failed && job ? { label: '重试', job } : null)
       } else if (type === 'job.error') {
         if (event.jobId !== jobIdRef.current) return
-        setBusy(null)
-        busyRef.current = false
+        clearBusy()
         const msg = event.data?.message || '操作失败'
         const job = lastJobRef.current
         const transient = /网络|超时|timeout|timed out|连接|Connection|ECONN|502|503|504|429/i.test(msg)
@@ -1028,8 +1032,7 @@ export default function App() {
         showToast(msg, 'error', job ? { label: '重试', job } : null)
       } else if (type === 'job.cancelled') {
         if (event.jobId !== jobIdRef.current) return
-        setBusy(null)
-        busyRef.current = false
+        clearBusy()
         showToast('操作已取消', 'info')
         refresh()
       } else if (type === 'state.changed') {
@@ -1123,8 +1126,8 @@ export default function App() {
       jobIdRef.current = data?.jobId || ''
       setBusy((prev) => prev ? { ...prev, jobId: jobIdRef.current,
         cancelable: Boolean(data?.cancelable) } : prev)
-      if (!jobIdRef.current) { busyRef.current = false; setBusy(null); await refresh() }
-    } catch (err) { busyRef.current = false; setBusy(null); showToast(err.message, 'error') }
+      if (!jobIdRef.current) { clearBusy(); await refresh() }
+    } catch (err) { clearBusy(); showToast(err.message, 'error') }
   }, [refresh, showToast])
 
   const cancelJob = useCallback(async () => {
