@@ -786,8 +786,16 @@ class AppController:
             n += 1
             preset_name = f"{base}-{n}"
         self.create_preset(preset_name)
-        self.bind_source(preset_name, url, password)
-        out = self.sync_auto(preset_name, ctx=ctx)
+        try:
+            self.bind_source(preset_name, url, password)
+            out = self.sync_auto(preset_name, ctx=ctx)
+        except Exception:
+            # 失败不留空预设，避免重试时出现 -2 / -3
+            try:
+                self.delete_preset(preset_name)
+            except Exception:
+                pass
+            raise
         out["message"] = f"已从云端添加「{preset_name}」 · {out.get('message', '')}"
         return out
 
@@ -1160,6 +1168,7 @@ class AppController:
 
     @_locked
     def publish_new(self, name: str, ctx=None):
+        """开发者把未绑定本地预设上传到云端，自动创建 /PulsesSwap/<name>。"""
         pm = self.preset_manager
         info = (pm.presets.get(name) if pm else None) or {}
         if not info.get("gunpacks"):
@@ -1171,7 +1180,6 @@ class AppController:
                 info = pm.presets.get(name) or {}
             if not info.get("gunpacks"):
                 raise ValueError("这个预设还没有枪包：先点「导入枪包」，再上传到云端")
-        """开发者把未绑定本地预设上传到云端，自动创建 /PulsesSwap/<name>。"""
         if self.role != "developer":
             raise PermissionError("只有开发者可以发布")
         if not self.preset_manager or name not in self.preset_manager.presets:

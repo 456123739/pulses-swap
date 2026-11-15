@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { AnimatePresence, Reorder, motion } from 'motion/react'
+import { AnimatePresence, Reorder, motion, useDragControls } from 'motion/react'
 import Icon from './components/Icons.jsx'
 import Hint from './components/Hint.jsx'
 import CloudFiles from './components/CloudFiles.jsx'
@@ -271,15 +271,15 @@ function nextStepOf(snap) {
   if (!selected) {
     return { tone: 'todo', title: '选一个预设', text: '从左边的预设列表点一个，就能看到它的枪包和操作。', cta: '', action: '' }
   }
+  if (!(selected.count > 0)) {
+    return { tone: 'warn', title: '这个预设还没有枪包', text: '先点「导入枪包」选 .zip 或文件夹；空预设不能替换，否则会把 tacz 清空。', cta: '导入枪包', action: 'import' }
+  }
   if (snap.role === 'player' && !snap.online.binding?.url) {
     return { tone: 'warn', title: '这个预设还没绑定云端', text: '如果别人给了你分享链接，点「从云端拉取预设」；自己做的预设可以直接替换，不用绑定。', cta: '从云端拉取预设', action: 'cloud' }
   }
   const pending = (selected.pending || 0) + (selected.extra || 0)
   if (pending > 0) {
     return { tone: 'todo', title: `有 ${pending} 项可以处理`, text: snap.role === 'developer' ? '点「一键上传」，只上传有变化的枪包，云端多出来的文件不会被动。' : '点「一键更新」，只下载有变化的枪包；已替换的预设会自动收紧再换回去。', cta: snap.role === 'developer' ? '一键上传' : '一键更新', action: 'sync' }
-  }
-  if (!(selected.count > 0)) {
-    return { tone: 'warn', title: '这个预设还没有枪包', text: '先点「导入枪包」选 .zip 或文件夹；空预设不能替换，否则会把 tacz 清空。', cta: '导入枪包', action: 'import' }
   }
   if (!selected.applied) {
     return { tone: 'ready', title: '可以替换到游戏里', text: '点「一键替换」，把这个预设的枪包写进整合包的 tacz；替换前会再确认一次。', cta: '一键替换', action: 'apply' }
@@ -326,6 +326,7 @@ function PresetRow({ item, selected, role, onSelect, onRename, onDelete, onDetai
   const pending = (item.pending || 0) + (item.extra || 0)
   const updateWord = role === 'developer' ? '上传' : '更新'
   const accent = presetAccent(item.name)
+  const [menuOpen, setMenuOpen] = useState(false)
   return (
     <motion.div
       layout
@@ -360,11 +361,34 @@ function PresetRow({ item, selected, role, onSelect, onRename, onDelete, onDetai
             : '把这个预设更新到云端最新，再自动换回游戏。'} />
         </button>
       )}
-      <div className="row-actions" onClick={(e) => e.stopPropagation()}>
-        <button className="text-btn" onClick={() => onRename(item)}>重命名</button>
-        <button className="text-btn danger" onClick={() => onDelete(item)}>删除</button>
+      <div className="row-menu-wrap" onClick={(e) => e.stopPropagation()}>
+        <button className="row-menu-btn" aria-haspopup="menu" aria-expanded={menuOpen}
+          aria-label="更多操作" onClick={() => setMenuOpen((v) => !v)}>⋯</button>
+        {menuOpen && (
+          <div className="row-menu" role="menu">
+            <button role="menuitem" onClick={() => { setMenuOpen(false); onDetails(item) }}>详情</button>
+            <button role="menuitem" onClick={() => { setMenuOpen(false); onRename(item) }}>重命名</button>
+            <button role="menuitem" className="danger" onClick={() => { setMenuOpen(false); onDelete(item) }}>删除</button>
+          </div>
+        )}
       </div>
     </motion.div>
+  )
+}
+
+function PresetItemRow({ item, selected, role, onSelect, onRename, onDelete, onDetails, onUpdate }) {
+  const controls = useDragControls()
+  return (
+    <Reorder.Item value={item.name} as="div" className="preset-item"
+      dragListener={false} dragControls={controls}
+      whileDrag={{ scale: 1.02, boxShadow: '0 14px 30px rgba(44, 62, 63, .14)' }}
+      transition={SPRING}>
+      <button className="preset-grip" aria-label="拖动排序" title="按住拖动排序"
+        onPointerDown={(e) => { e.preventDefault(); controls.start(e) }}>⠿</button>
+      <PresetRow item={item} selected={selected} role={role}
+        onSelect={onSelect} onRename={onRename} onDelete={onDelete}
+        onDetails={onDetails} onUpdate={onUpdate} />
+    </Reorder.Item>
   )
 }
 
@@ -595,14 +619,10 @@ function Home({ snap, actions, busy }) {
               <Reorder.Group axis="y" values={snap.presets.map((p) => p.name)}
                 onReorder={(order) => actions.reorderPresets(order)} className="preset-list" as="div">
                 {snap.presets.length === 0 ? <p className="muted pad">还没有预设</p> : snap.presets.map((p) => (
-                  <Reorder.Item key={p.name} value={p.name} as="div" className="preset-item"
-                    whileDrag={{ scale: 1.02, boxShadow: '0 14px 30px rgba(44,62,63,.14)' }}
-                    transition={SPRING}>
-                    <PresetRow item={p} selected={p.name === snap.selected} role={snap.role}
-                      onSelect={actions.select} onRename={actions.rename} onDelete={actions.delete}
-                      onDetails={actions.presetDetails}
-                      onUpdate={(item) => (snap.role === 'developer' ? actions.publishAuto(item.name) : actions.syncAuto(item.name))} />
-                  </Reorder.Item>
+                  <PresetItemRow key={p.name} item={p} selected={p.name === snap.selected} role={snap.role}
+                    onSelect={actions.select} onRename={actions.rename} onDelete={actions.delete}
+                    onDetails={actions.presetDetails}
+                    onUpdate={(item) => (snap.role === 'developer' ? actions.publishAuto(item.name) : actions.syncAuto(item.name))} />
                 ))}
               </Reorder.Group>
             </section>
@@ -1202,7 +1222,7 @@ export default function App() {
     catch (err) { showToast(err.message, 'error') }
   }, [showToast])
   const createPreset = useCallback(async (name) => {
-    if (!name?.trim()) return
+    if (!name?.trim()) throw new Error('预设名不能为空')
     try { const state = await invoke('preset.create', { name: name.trim() }); setSnap(state); showToast('预设已创建', 'success') }
     catch (err) { showToast(err.message, 'error') }
   }, [showToast])
@@ -1226,6 +1246,7 @@ export default function App() {
       } catch (err) { showToast(err.message, 'error'); throw err }
     }), [confirm, showToast])
   const saveVersion = useCallback(async (name, version) => {
+    if (!String(version || '').trim()) throw new Error('版本号不能为空')
     try { const state = await invoke('preset.version', { name, version }); setSnap(state); showToast('版本已保存', 'success') }
     catch (err) { showToast(err.message, 'error') }
   }, [showToast])
@@ -1406,6 +1427,8 @@ export default function App() {
         ? { ...m, details } : m)
     } catch (err) {
       showToast(err.message, 'error')
+      setModal((m) => (m?.kind === 'preset' && m.preset?.name === preset.name
+        ? { ...m, details: { error: err.message } } : m))
     }
   }, [refresh, showToast])
   const actions = { openPack, openCloud, startJob, reorderPresets, detach, cloudDelete, openTacz, clearCache, clearLogs, addFromCloud, openDatabase, select, createPreset, rename, delete: remove, saveVersion, apply, bind, unbind, check, sync, syncAuto, publishAuto, syncAllAuto, publishAllAuto, publishNew, publishPlan, publish, login, logout, updateSettings, switchRole, prompt, toast: showToast, navigate, cancelJob, presetDetails: openPresetDetail, importGunpacks }
