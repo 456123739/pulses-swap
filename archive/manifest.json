@@ -1,41 +1,163 @@
 {
-  "archive": "2026-11",
-  "created_at": "2026-11-15",
+  "schema": 2,
   "repo": "456123739/pulses-swap",
-  "release_tag": "archive-2026-11",
-  "why": "原会话上下文超限（2.03M tokens > 1.05M）报废，把交接资料与压缩后的会话存档，方便以后拉取复用，同时释放本地磁盘。",
-  "sessions": [
+  "batch": "2026-11",
+  "updated_at": "2026-11-15",
+  "tool": "python archive/tools/fetch_archive.py --list",
+  "policy": {
+    "git": "文档、清单、脚本、小截图：体积小、要看 diff、要跟代码同版本",
+    "release": "大会话原文、构建环境包、大截图集：走 Release 资产，git 里只留 sha256 与拉取脚本",
+    "never": "第三方二进制（TACZ 模组、Chrome for Testing、PCL2 启动器）不转载，只记录来源"
+  },
+  "releases": [
     {
-      "id": "session-5a5350c1-8f2a-40da-b687-9a99f0e96da1",
-      "title": "【新UI】Pulses Swap 分支",
-      "messages": 6025,
-      "turns": 139,
-      "span": "2026-10-07 .. 2026-11-07",
-      "outcome": "Pulses Swap 新界面 3.0.x → 3.1.9 全部功能与发布；会话在 2026-11-07 因上下文超限终止"
+      "tag": "archive-2026-11",
+      "date": "2026-11-15",
+      "title": "Archive 2026-11 · 会话存档",
+      "holds": "session / 界面素材",
+      "prerelease": true
+    },
+    {
+      "tag": "bundle-3.2.0",
+      "date": "2026-11-15",
+      "title": "Bundle 3.2.0 · 构建环境",
+      "holds": "bundle / 离线依赖",
+      "prerelease": true
     }
   ],
-  "assets": [
+  "items": [
     {
+      "id": "session-5a5350c1",
+      "kind": "session",
       "name": "session-5a5350c1.sanitized.jsonl.zst",
       "release_tag": "archive-2026-11",
       "size": 11072728,
       "sha256": "6d6d3eee09fef52735893c82902c27a94a2ee26907efc48ebbf5f0a84057cbf4",
-      "format": "zstd 压缩的 JSONL（DSH session v4 事件流，一行一个事件）",
-      "note": "已脱敏：GitHub token、蓝奏账号手机号、账号密码、JSON password 字段全部替换为 REDACTED"
+      "format": "zstd(JSONL)",
+      "unpack": "zstd",
+      "session": {
+        "id": "session-5a5350c1-8f2a-40da-b687-9a99f0e96da1",
+        "title": "【新UI】Pulses Swap 分支",
+        "lines": 33306,
+        "messages": 6664,
+        "turns": 139,
+        "span": "2026-10-29 .. 2026-11-07（父会话 session-76da53c0 自 2026-10-07 起，本会话继承了它的 27023 条事件）"
+      },
+      "note": "3.0.x → 3.1.9 的全部开发过程；因上下文超限（2.03M tokens）终止。已脱敏。"
+    },
+    {
+      "id": "session-b59b64a4",
+      "kind": "session",
+      "name": "session-b59b64a4.sanitized.jsonl.zst",
+      "release_tag": "archive-2026-11",
+      "size": 9641799,
+      "sha256": "c5b37a4bec535dd4f234a0d0a781359e55c6330abf3644c0a46d495cb35507f5",
+      "content": {
+        "name": "session-b59b64a4.sanitized.jsonl",
+        "size": 86095914,
+        "sha256": "8863447e6634e75391bde384563df411c75046bb6baaa4ca4f3139df203a765e"
+      },
+      "format": "zstd(JSONL)",
+      "unpack": "zstd",
+      "session": {
+        "id": "session-b59b64a4-2cc3-4ff5-b671-9df32a3208b9",
+        "title": "Pulses Swap 2.x 界面细节（顶栏 / 曲线动画 / 自动保存）",
+        "lines": 27054,
+        "messages": 5422,
+        "turns": 122,
+        "span": "2026-10-29 .. 2026-11-08"
+      },
+      "note": "与 5a5350c1 同一父会话分出的另一条线（customtkinter 2.x 打磨）。脱敏脚本见 archive/tools/sanitize_session.py，本轮替换 493 处。"
+    },
+    {
+      "id": "ctk-ui-shots-2026-11",
+      "kind": "bundle",
+      "name": "ctk-ui-shots-2026-11.tar.zst",
+      "release_tag": "archive-2026-11",
+      "size": 67480474,
+      "sha256": "c0fc2d2695b73bd1dcb6f2341e603787bb7ae494fe9a8d7ac2d244f37ff826b2",
+      "format": "zstd(tar)",
+      "unpack": "tar.zst",
+      "payload": "shots/（92 张 PNG，customtkinter 2.x 逐轮界面证据）",
+      "note": "解包后是 shots/ 目录；截图不进 git，避免仓库被二进制撑大。"
+    },
+    {
+      "id": "web-node_modules",
+      "kind": "bundle",
+      "name": "web-node-modules-3.2.0-5f4c7582.tar.zst",
+      "release_tag": "bundle-3.2.0",
+      "size": 22820401,
+      "sha256": "b61ca0e49acf00f1b92b792a383a51617a251a44f6e584cc658a230b2aa57a3a",
+      "format": "zstd(tar)",
+      "unpack": "tar.zst",
+      "payload": "node_modules/（前端依赖，对应 package-lock.json 5f4c7582…）",
+      "restore": "python archive/tools/fetch_archive.py --id web-node_modules --unpack --dest src/pulses_web/web",
+      "lock_sha256": "5f4c75822247f3bd6b579608bf69976f6347b4dd77bae071e8d19868b892bf35",
+      "package_version": "3.2.0",
+      "note": "离线/断网时不用 npm ci 也能构建；内容与 package-lock.json 一一对应，lock 变了就该重新打一个。"
     }
   ],
   "in_git": [
-    "archive/history/2026-11/RESUME.md — 交接说明（分支/架构/命令/坑位/文档债）",
+    "archive/README.md — 本批存档的规则与取用方式",
+    "archive/manifest.json — 清单（版本 / 大小 / sha256 / 来源）",
+    "archive/tools/fetch_archive.py — 下载 + 校验 + 解包",
+    "archive/tools/sanitize_session.py — 上传前的会话脱敏",
+    "archive/tools/publish_asset.py — 打新资产（REST 上传 + digest 校验）",
+    "archive/history/2026-11/RESUME.md — 交接说明（分支 / 架构 / 命令 / 坑位 / 文档债）",
     "archive/history/2026-11/USER_PROMPTS.md — 384 条用户需求原文（已脱敏）",
     "archive/history/2026-11/ASSISTANT_TIMELINE.md — 助手阶段总结与发布记录",
     "archive/history/2026-11/easier-STATUS.md — Pulses Easier 新界面现状核对（2026-11-08）",
-    "archive/history/2026-11/easier-shots/*.png — Easier 界面截图（6 态 + 真机 e2e）"
+    "archive/history/2026-11/easier-shots/*.png — Easier 界面截图（6 态 + 真机 e2e）",
+    "docs/web-ui/*.png — 3.x 界面实拍（首页 / 管理 / 设置 / 日志 / 覆盖层 / 各版本验证）"
   ],
-  "redactions": [
-    "gho_* / ghp_* / github_pat_* 令牌",
-    "x-access-token:* 形式的 URL 凭证",
-    "蓝奏云账号密码（明文）与账号手机号",
-    "JSON 里的 password 字段值"
-  ],
-  "how_to_fetch": "python archive/tools/fetch_archive.py            # 下载并校验\npython archive/tools/fetch_archive.py --unpack       # 顺便解压成 .jsonl\n# 私有/草稿 release 需要 export GITHUB_TOKEN=..."
+  "purged": [
+    {
+      "path": "/tmp/chrome",
+      "size": 274088347,
+      "reason": "Chrome for Testing 解包产物，跟仓库无关",
+      "restore": "npx playwright install chromium（或复用 ~/.cache/ms-playwright）"
+    },
+    {
+      "path": "/tmp/v2prev",
+      "size": 213304279,
+      "reason": "旧版本前端 dist 解包（用于更新测试），可由旧 tag 重新构建",
+      "restore": "git checkout v3.1.x && cd src/pulses_web/web && npm ci && npm run build"
+    },
+    {
+      "path": "/tmp/pcl2work",
+      "size": 183706119,
+      "reason": "PCL2 启动器工作目录（下载的启动器与素材）",
+      "restore": "PCL2 官网重新下载"
+    },
+    {
+      "path": "/tmp/chs.zip",
+      "size": 120504312,
+      "reason": "大文件上传/断点续传测试素材",
+      "restore": "dd if=/dev/urandom of=chs.zip bs=1M count=115"
+    },
+    {
+      "path": "/tmp/big100.jar",
+      "size": 104857600,
+      "reason": "100MB 大文件测试素材",
+      "restore": "dd if=/dev/urandom of=big100.jar bs=1M count=100"
+    },
+    {
+      "path": "/tmp/tacz_default_gun*.tmp",
+      "size": 249096536,
+      "reason": "TACZ 默认枪包解包临时文件，程序重新解包可得",
+      "restore": "用本程序再解析一次任意整合包"
+    },
+    {
+      "path": "/tmp/e2e-pack",
+      "size": 87889147,
+      "reason": "E2E 测试生成的枪包与产物",
+      "restore": "按 docs/swap-online.md 流程重新生成"
+    },
+    {
+      "path": "/tmp/s59.jsonl、/tmp/ui_swap_session.jsonl、_history/newui-swap/session*.jsonl",
+      "size": 470000000,
+      "reason": "会话原文与中间产物；压缩后的脱敏版已在 archive-2026-11，本地不再留副本",
+      "restore": "python archive/tools/fetch_archive.py --unpack"
+    }
+  ]
 }

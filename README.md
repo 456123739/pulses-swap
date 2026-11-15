@@ -95,3 +95,13 @@ cd src/pulses_web/web && node test-ui.mjs
 ![首页](docs/web-ui/home.png)
 
 更多截图在 `docs/web-ui/`。
+
+## 存档与资源
+
+会话原文、逐轮界面截图、前端依赖包这类大文件不进 git，挂在 GitHub Release 上；
+清单在 `archive/manifest.json`，规则和新增流程见 [`archive/README.md`](archive/README.md)。
+
+```bash
+python archive/tools/fetch_archive.py --list      # 有哪些存档
+python archive/tools/fetch_archive.py --unpack    # 下载 + 校验 sha256 + 解包
+```
