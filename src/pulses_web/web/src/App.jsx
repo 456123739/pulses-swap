@@ -1293,6 +1293,10 @@ export default function App() {
   }, [startJob, showToast])
 
   const bind = useCallback(async (name, url, password) => {
+    if (!/^https?:\/\//i.test(String(url || '').trim())) {
+      showToast('分享链接要以 http:// 或 https:// 开头', 'warning')
+      throw new Error('链接格式不对')
+    }
     try {
       const data = await invoke('online.bind', { name, url, password })
       setSnap(data.state)
