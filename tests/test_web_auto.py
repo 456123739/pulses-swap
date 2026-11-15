@@ -12,7 +12,8 @@ class FakePM:
     def __init__(self):
         self.presets = {
             "P": {"path": str(Path(tempfile.gettempdir()) / "P"),
-                  "applied": True, "version": "v1.0.0", "gunpacks": {}},
+                  "applied": True, "version": "v1.0.0",
+                  "gunpacks": {"f0.zip": {"type": "zip"}}},
         }
 
     def detach_preset(self, name, progress_callback=None):

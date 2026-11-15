@@ -206,7 +206,9 @@ await page.waitForTimeout(120)
 assert.equal(await page.evaluate(() => window.__autoMethod), 'online.sync.all')
 await page.evaluate(() => window.PS.push({ type: 'job.done', jobId: 'j_auto', data: { result: { message: '一键更新完成', state: null } } }))
 await page.waitForTimeout(120)
-// 切回开发者，保持后续截图一致
+// 折叠态身份按钮是一个小徽标，悬停侧栏展开后再点文字按钮
+await page.locator('.sidebar').hover()
+await page.waitForTimeout(560)
 await page.locator('.role-switch').click()
 await page.waitForTimeout(110)
 assert.ok(await page.locator('.cover').count(), '切回开发者缺少渐变覆盖层')

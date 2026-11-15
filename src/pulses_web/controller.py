@@ -475,6 +475,20 @@ class AppController:
         return self.state()
 
     @_locked
+    def detach_preset(self, name: str):
+        """把已应用的预设从 tacz 收回（不删文件），之后才能导入/删除。"""
+        pm = self.preset_manager
+        if not pm or name not in pm.presets:
+            raise ValueError("预设不存在")
+        if not pm.presets[name].get("applied"):
+            return self.state()
+        if not pm.detach_preset(name):
+            raise RuntimeError("收回失败，请查看日志")
+        self._checks.pop(name, None)
+        self._rev += 1
+        return self.state()
+
+    @_locked
     def import_gunpacks(self, name: str, paths: list[str], ctx=None):
         """把枪包文件/文件夹复制进预设（新建的预设本身是空的，需要这个入口）。"""
         pm = self.preset_manager
@@ -513,7 +527,14 @@ class AppController:
             pm.save_cache()
             self._checks.pop(name, None)
             self._rev += 1
-        return {"imported": imported, "skipped": skipped, "state": self.state()}
+        if imported and skipped:
+            message = f"导入 {len(imported)} 个，跳过 {len(skipped)} 个（同名或不存在）"
+        elif imported:
+            message = f"已导入 {len(imported)} 个枪包"
+        else:
+            message = "没有导入任何文件：同名已存在或路径无效"
+        return {"imported": imported, "skipped": skipped,
+                "message": message, "state": self.state()}
 
     @_locked
     def create_preset(self, name: str, version: str = "v1.0.0"):
@@ -569,6 +590,16 @@ class AppController:
             raise ValueError("请先加载整合包")
         if not name or name not in pm.presets:
             raise ValueError("请选择预设")
+
+        info = pm.presets[name]
+        if not info.get("gunpacks"):
+            try:                                        # 索引可能过期，先重扫一次
+                pm.update_preset_index(name)
+            except Exception:
+                pass
+            info = pm.presets[name]
+        if not info.get("gunpacks"):
+            raise ValueError("这个预设还没有枪包：先点「导入枪包」再加枪包，替换会把 tacz 清空")
 
         def progress(current, total, message=""):
             if ctx is not None:
@@ -680,6 +711,14 @@ class AppController:
                                      cancel=(lambda: ctx.cancelled) if ctx else None)
         self._rev += 1
         return {"result": result, "state": self.state()}
+
+    @_locked
+    def cloud_delete(self, kind: str, obj_id: int):
+        if self.role != "developer":
+            raise PermissionError("只有开发者可以删除云端文件")
+        out = self._require_online().cloud_delete(kind, obj_id)
+        self._rev += 1
+        return {"result": out, "state": self.state()}
 
     def cloud_path(self, name: str):
         return {"path": self._require_online().cloud_path_of(name)
@@ -1121,6 +1160,17 @@ class AppController:
 
     @_locked
     def publish_new(self, name: str, ctx=None):
+        pm = self.preset_manager
+        info = (pm.presets.get(name) if pm else None) or {}
+        if not info.get("gunpacks"):
+            if pm:
+                try:
+                    pm.update_preset_index(name)
+                except Exception:
+                    pass
+                info = pm.presets.get(name) or {}
+            if not info.get("gunpacks"):
+                raise ValueError("这个预设还没有枪包：先点「导入枪包」，再上传到云端")
         """开发者把未绑定本地预设上传到云端，自动创建 /PulsesSwap/<name>。"""
         if self.role != "developer":
             raise PermissionError("只有开发者可以发布")
@@ -1138,7 +1188,8 @@ class AppController:
         out = self.publish_auto(name, ctx=ctx)
         if not out.get("changed"):
             raise ValueError("预设里还没有枪包，先拖入枪包再上传到云端")
-        out["message"] = out.get("message", "上传完成") + f" · 云端 {cloud_path}"
+        out["message"] = (out.get("message", "上传完成")
+                          + f" · 云端 {cloud_path} · 分享链接在「管理 → 云端来源」可复制")
         return out
 
     @_locked

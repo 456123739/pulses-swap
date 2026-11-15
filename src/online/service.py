@@ -1179,6 +1179,20 @@ class OnlineService:
         return {"path": clean, "folder_id": folder,
                 "folders": folders, "files": files}
 
+    def cloud_delete(self, kind: str, obj_id: int) -> dict:
+        """删除云端文件/文件夹（文件夹会连同里面内容一起删）。"""
+        account = self._require_account()
+        kind = "folder" if str(kind) == "folder" else "file"
+        try:
+            ok = (account.delete_folder(int(obj_id)) if kind == "folder"
+                  else account.delete_file(int(obj_id)))
+        except Exception as exc:                       # noqa: BLE001
+            raise SourceError(f"删除失败：{exc}", hint="刷新后重试；文件夹里有文件时可能删不掉。") from exc
+        if not ok:
+            raise SourceError("云端没有确认删除", hint="刷新后重试，或到网页版里删。")
+        self._log(f"已删除云端{'文件夹' if kind == 'folder' else '文件'} #{obj_id}", "SUCCESS")
+        return {"ok": True, "kind": kind, "id": int(obj_id)}
+
     def cloud_mkdir(self, parent: str, name: str) -> dict:
         """在 parent 下新建一个文件夹，返回新路径。"""
         account = self._require_account()

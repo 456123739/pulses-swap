@@ -91,3 +91,42 @@ class ReorderPresetsTests(unittest.TestCase):
     def test_unknown_names_are_ignored(self):
         self.ctrl.reorder_presets(["x", "b"])
         self.assertEqual(list(self.ctrl.preset_manager.presets), ["b", "a", "c"])
+
+
+class GuardTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.ctrl = AppController(base_dir=Path(self.tmp.name) / "db")
+
+    def tearDown(self):
+        self.ctrl._stop_watcher()
+        self.tmp.cleanup()
+
+    def test_empty_preset_cannot_be_applied(self):
+        root = Path(self.tmp.name) / "empty"
+
+        class PM:
+            presets = {"empty": {"path": str(root), "applied": False, "gunpacks": {}}}
+
+            def update_preset_index(self, name):
+                return True
+
+        self.ctrl.preset_manager = PM()
+        with self.assertRaises(ValueError):
+            self.ctrl.apply_preset("empty")
+
+    def test_detach_clears_applied_and_refreshes(self):
+        class PM:
+            def __init__(self):
+                self.presets = {"p": {"path": "", "applied": True}}
+                self.detached = 0
+
+            def detach_preset(self, name):
+                self.presets[name]["applied"] = False
+                self.detached += 1
+                return True
+
+        self.ctrl.preset_manager = PM()
+        self.ctrl.detach_preset("p")
+        self.assertFalse(self.ctrl.preset_manager.presets["p"]["applied"])
+        self.assertEqual(self.ctrl.preset_manager.detached, 1)

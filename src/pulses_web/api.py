@@ -77,6 +77,7 @@ class Api:
                 p["name"]),
             "preset.apply": self._job("preset.apply"),
             "preset.import": self._job("preset.import"),
+            "preset.detach": lambda p: self._controller.detach_preset(p["name"]),
             "preset.reorder": lambda p: self._controller.reorder_presets(
                 p.get("order") or []),
             "preset.gunpacks": lambda p: {"gunpacks": self._controller.gunpacks()},
@@ -97,6 +98,8 @@ class Api:
                 p.get("parent", ""), p.get("name", "")),
             "online.cloud.quota": lambda p: self._controller.cloud_quota(),
             "online.cloud.upload": self._job("online.cloud.upload"),
+            "online.cloud.delete": lambda p: self._controller.cloud_delete(
+                p.get("kind", "file"), p.get("id")),
             "online.account.state": lambda p: self._controller.account_state(),
             "online.unbind": lambda p: self._controller.unbind_source(p["name"]),
             "online.check": self._job("online.check"),

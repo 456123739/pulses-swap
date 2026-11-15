@@ -1028,3 +1028,41 @@ h3 { font-size: 15px; font-weight: 600; }
 .preset-item { list-style: none; }
 .preset-item:active { cursor: grabbing; }
 .preset-item[data-dragging="true"] { z-index: 5; }
+
+/* ---- 验收修复：行高/换行、未检查状态、折叠身份、云端删除、分享链接 ---- */
+.preset-row { min-height: 56px; }
+.preset-main span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row-actions { gap: 6px; }
+.gunpack-row.status-unknown .gp-dot { background: #C6CED0; }
+.gp-badge[data-kind="unknown"] { color: var(--muted); background: var(--input); }
+
+.role-mini { display: none; }
+.sidebar:not(.expanded) .sidebar-foot { display: flex; }
+.sidebar:not(.expanded) .role-switch { display: none; }
+.sidebar:not(.expanded) .role-mini {
+  display: grid; place-items: center; width: 30px; height: 30px; margin: 0 auto;
+  border-radius: 9px; background: var(--accent-soft); color: var(--accent);
+  font-size: 11.5px; font-weight: 600; }
+.sidebar:not(.expanded) .role-mini.developer { background: #DFE6F2; color: #5A75A5; }
+.sidebar:not(.expanded) .role-mini.offline { background: var(--input); color: var(--muted); }
+
+.cloud-row { grid-template-columns: 22px minmax(0, 1fr) auto auto; }
+.cloud-row.folder-wrap { display: flex; align-items: center; gap: 4px; padding: 0 4px 0 0; }
+.cloud-row.folder-wrap:hover { background: var(--input); }
+.cloud-row-main { flex: 1; min-width: 0; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto;
+  gap: 9px; align-items: center; padding: 8px; border-radius: 9px; text-align: left; }
+.cloud-del { flex: none; font-size: 10.5px; padding: 4px 8px; border-radius: 7px; color: var(--error); }
+.cloud-del:hover { background: rgba(201, 123, 123, .12); }
+
+.share-row { display: flex; align-items: center; gap: 6px; margin: 8px 0 2px; font-size: 11px; color: var(--text-2); }
+.share-row code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  background: var(--input); padding: 4px 7px; border-radius: 6px; font-size: 10.5px; }
+
+/* 关闭动画：不做位移、不做光斑、不做过渡 */
+.animations-off .btn, .animations-off .nav-item, .animations-off .preset-row,
+.animations-off .gunpack-row, .animations-off .cloud-row, .animations-off .mini-btn,
+.animations-off .preset-bar, .animations-off .preset-sheen, .animations-off .gp-glow {
+  transition: none !important; animation: none !important; }
+.animations-off .preset-row:hover, .animations-off .gunpack-row:hover,
+.animations-off .btn:active, .animations-off .nav-item:active { transform: none !important; }
+.animations-off .preset-sheen, .animations-off .gp-glow { opacity: 0 !important; }

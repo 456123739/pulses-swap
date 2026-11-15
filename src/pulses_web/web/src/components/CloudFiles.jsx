@@ -86,18 +86,23 @@ export default function CloudFiles({ snap, actions, busy }) {
       {data ? <>
         <div className="cloud-list">
           {data.folders.map((folder) => (
-            <button key={`d${folder.id}`} className="cloud-row folder"
-              onClick={() => load(`${path.replace(/\/$/, '')}/${folder.name}`)}>
-              <span className="cloud-ico"><Icon name="folder" size={15} /></span>
-              <span className="cloud-name">{folder.name}</span>
-              <Icon name="chevron" size={13} />
-            </button>
+            <div key={`d${folder.id}`} className="cloud-row folder-wrap">
+              <button className="cloud-row-main" onClick={() => load(`${path.replace(/\/$/, '')}/${folder.name}`)}>
+                <span className="cloud-ico"><Icon name="folder" size={15} /></span>
+                <span className="cloud-name">{folder.name}</span>
+                <Icon name="chevron" size={13} />
+              </button>
+              {snap.role === 'developer' && <button className="cloud-del" title="删除文件夹"
+                onClick={() => actions.cloudDelete('folder', folder.id, folder.name)}>删除</button>}
+            </div>
           ))}
           {data.files.map((file) => (
             <div key={`f${file.id}`} className="cloud-row">
               <span className="cloud-ico file"><Icon name="download" size={14} /></span>
               <span className="cloud-name" title={file.name}>{file.name}</span>
               <span className="muted">{file.size || ''}</span>
+              {snap.role === 'developer' && <button className="cloud-del" title="删除文件"
+                onClick={() => actions.cloudDelete('file', file.id, file.name)}>删除</button>}
             </div>
           ))}
           {!data.folders.length && !data.files.length &&

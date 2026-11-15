@@ -94,6 +94,9 @@ function Sidebar({ page, onNavigate, role, loggedIn, expanded, setExpanded, vers
         <span className="sidebar-pack-copy"><strong>{pack.name}</strong><small>{presetCount} 个预设</small></span>
       </button>}
       <div className="sidebar-foot">
+        <button className={`role-mini ${loggedIn ? role : 'offline'}`} onClick={onSwitchRole}
+          title={loggedIn ? (role === 'developer' ? '开发者（点击切换）' : '玩家（点击切换）') : '未登录'}
+          aria-label="切换身份">{loggedIn ? (role === 'developer' ? 'D' : 'P') : '—'}</button>
         <button className={`role-switch ${loggedIn ? '' : 'logged-out'}`} onClick={onSwitchRole}
           title={loggedIn ? (role === 'developer' ? '切换为玩家' : '切换为开发者') : '未登录 · 无法切换身份'}
           aria-label={loggedIn ? '切换身份' : '未登录 · 无法切换身份'}>
@@ -275,6 +278,9 @@ function nextStepOf(snap) {
   if (pending > 0) {
     return { tone: 'todo', title: `有 ${pending} 项可以处理`, text: snap.role === 'developer' ? '点「一键上传」，只上传有变化的枪包，云端多出来的文件不会被动。' : '点「一键更新」，只下载有变化的枪包；已替换的预设会自动收紧再换回去。', cta: snap.role === 'developer' ? '一键上传' : '一键更新', action: 'sync' }
   }
+  if (!(selected.count > 0)) {
+    return { tone: 'warn', title: '这个预设还没有枪包', text: '先点「导入枪包」选 .zip 或文件夹；空预设不能替换，否则会把 tacz 清空。', cta: '导入枪包', action: 'import' }
+  }
   if (!selected.applied) {
     return { tone: 'ready', title: '可以替换到游戏里', text: '点「一键替换」，把这个预设的枪包写进整合包的 tacz；替换前会再确认一次。', cta: '一键替换', action: 'apply' }
   }
@@ -416,6 +422,7 @@ function Home({ snap, actions, busy }) {
     else if (action === 'cloud') actions.addFromCloud()
     else if (action === 'sync' && selected) (snap.role === 'developer' ? actions.publishAuto : actions.syncAuto)(selected.name)
     else if (action === 'apply' && selected) actions.apply(selected)
+    else if (action === 'import' && selected) actions.importGunpacks(selected.name)
   }
   return (
     <div className="page home-page">
@@ -524,7 +531,8 @@ function Home({ snap, actions, busy }) {
                     onClick={() => actions.apply(selected)} title="重新把这个预设写进整合包">
                     <Icon name="check" size={21} />已应用 · 重新替换
                   </button>
-                : <button className="btn hero-primary" disabled={!selected || busy}
+                : <button className="btn hero-primary" disabled={!selected || busy || (selected?.count ?? 0) === 0}
+                    title={(selected?.count ?? 0) === 0 ? '先导入枪包，再替换' : undefined}
                     onClick={() => selected && actions.apply(selected)}>
                     <Icon name="check" size={21} />一键替换
                     <Hint text="把这个预设里的枪包写进整合包的 tacz。替换前会再确认一次，不会动别的文件。" />
@@ -608,8 +616,15 @@ function Home({ snap, actions, busy }) {
                 <div className="detail-row"><span>版本</span><strong>{selected.version}</strong>
                   <button className="text-btn" onClick={() => actions.prompt('修改版本号', '版本号', selected.version, (v) => actions.saveVersion(selected.name, v))}>修改</button></div>
                 <div className="detail-row"><span>枪包</span>
-                  <button className="text-btn" data-testid="import-gunpacks" title="从电脑里选 .zip 或枪包文件夹，复制进这个预设"
-                    onClick={() => actions.importGunpacks(selected.name)}>导入枪包 <Hint text="选 .zip 或文件夹，软件会把它们复制进这个预设；同名的会跳过，不动游戏里的文件。" /></button></div>
+                  <button className="text-btn" data-testid="import-gunpacks" disabled={selected.applied || busy}
+                    title={selected.applied ? '已应用到游戏，先点「收回」再导入' : '从电脑里选 .zip 或枪包文件夹'}
+                    onClick={() => actions.importGunpacks(selected.name)}>导入枪包
+                    <Hint text={selected.applied
+                      ? '这个预设已经写进游戏了。先点下面的「收回」，再导入新枪包。'
+                      : '选 .zip 或文件夹，软件会把它们复制进这个预设；同名的会跳过，不动游戏里的文件。'} /></button>
+                  {selected.applied && <button className="text-btn danger-text" data-testid="detach-preset"
+                    disabled={busy} onClick={() => actions.detach(selected.name)}>收回
+                    <Hint text="把枪包从 tacz 拿回预设目录，游戏里会变回没有枪包的状态；文件不会丢。" /></button>}</div>
                 <div className="detail-row"><span>云端</span><strong>{snap.online.binding?.url ? '已绑定' : '未绑定'}</strong></div>
                 <div className="gunpack-head"><span>枪包列表</span><span className="muted">共 {snap.gunpacks.length} 个</span></div>
                 <GunpackLegend summary={snap.gunpack_summary} role={snap.role} bound={Boolean(snap.online.binding?.url)} />
@@ -642,7 +657,9 @@ function Home({ snap, actions, busy }) {
                           <Icon name="folder" size={15} />
                           <span className="gp-name">{g.name}</span>
                           <span className="muted">{g.type || 'zip'}</span>
-                          {g.status && <span className="gp-badge" data-kind={g.status}>{statusLabel(g.status, snap.role)}</span>}
+                          {g.status
+                            ? <span className="gp-badge" data-kind={g.status}>{statusLabel(g.status, snap.role)}</span>
+                            : <span className="gp-badge" data-kind="unknown">未检查</span>}
                         </motion.div>
                       ))}
                     </AnimatePresence>
@@ -817,6 +834,16 @@ function Manage({ snap, actions, busy, tab = 'overview', onTab }) {
               </div>
             </label>
             <p className="field-note">保存后会立刻检查一次云端，有新版本这里会出现「一键更新」。</p>
+            {snap.online.binding?.url && <div className="share-row">
+              <span>分享给玩家：</span><code title={snap.online.binding.url}>{snap.online.binding.url}</code>
+              <button className="text-btn" onClick={async () => {
+                try {
+                  await navigator.clipboard.writeText(snap.online.binding.url)
+                  actions.toast('链接已复制，发给玩家即可', 'success')
+                } catch { actions.toast('复制失败，请手动选中链接', 'warning') }
+              }}>复制</button>
+              <Hint text="玩家在「从云端拉取预设」里粘贴这条链接就能拿到你的预设。" />
+            </div>}
             <div className="button-row"><button className="btn primary" disabled={!url || !onlineReady} onClick={() => actions.bind(selected.name, url, password)}>保存绑定
                 <Hint text="保存链接并自动检查一次；链接失效会提示你换一个。" /></button>
               {selectedBound && <button className="btn ghost danger-text" onClick={() => actions.unbind(selected.name)}>解除绑定
@@ -1186,16 +1213,42 @@ export default function App() {
     setSnap(state)
     showToast('已重命名', 'success')
   }), [prompt, showToast])
-  const remove = useCallback((item) => confirm('删除预设', `确定删除「${item.name}」？`, async () => {
-    try { const state = await invoke('preset.delete', { name: item.name }); setSnap(state); showToast('已删除', 'success') }
-    catch (err) { showToast(err.message, 'error') }
-  }), [confirm, showToast])
+  const remove = useCallback((item) => confirm('删除预设',
+    item.applied
+      ? `「${item.name}」正在游戏里使用。删除会先把它从 tacz 收回，再删预设目录里的枪包（进回收站没法保证）。继续？`
+      : `确定删除「${item.name}」？预设目录里的枪包会一起删除。`,
+    async () => {
+      try {
+        if (item.applied) await invoke('preset.detach', { name: item.name })
+        const state = await invoke('preset.delete', { name: item.name })
+        setSnap(state)
+        showToast('已删除', 'success')
+      } catch (err) { showToast(err.message, 'error'); throw err }
+    }), [confirm, showToast])
   const saveVersion = useCallback(async (name, version) => {
     try { const state = await invoke('preset.version', { name, version }); setSnap(state); showToast('版本已保存', 'success') }
     catch (err) { showToast(err.message, 'error') }
   }, [showToast])
   const apply = useCallback((item) => confirm('确认替换', `将应用「${item.name}」并替换 TACZ 枪包。`, () =>
     startJob('preset.apply', { name: item.name }, '一键替换')), [confirm, startJob])
+
+  const cloudDelete = useCallback((kind, id, name) => confirm('删除云端内容',
+    `删除${kind === 'folder' ? '文件夹' : '文件'}「${name}」？云端删除不可恢复；玩家如果已经下载则不受影响。`,
+    async () => {
+      try {
+        const out = await invoke('online.cloud.delete', { kind, id })
+        setSnap(out.state)
+        showToast('已删除', 'success')
+      } catch (err) { showToast(err.message, 'error'); throw err }
+    }), [confirm, showToast])
+
+  const detach = useCallback((name) => confirm('收回预设', `把「${name}」从游戏里收回？枪包会回到预设目录，不会删文件。`, async () => {
+    try {
+      const state = await invoke('preset.detach', { name })
+      setSnap(state)
+      showToast('已收回，可以导入或删除这个预设了', 'success')
+    } catch (err) { showToast(err.message, 'error'); throw err }
+  }), [confirm, showToast])
 
   const reorderPresets = useCallback(async (order) => {
     if (!Array.isArray(order) || !order.length) return
@@ -1355,7 +1408,7 @@ export default function App() {
       showToast(err.message, 'error')
     }
   }, [refresh, showToast])
-  const actions = { openPack, openCloud, startJob, reorderPresets, openTacz, clearCache, clearLogs, addFromCloud, openDatabase, select, createPreset, rename, delete: remove, saveVersion, apply, bind, unbind, check, sync, syncAuto, publishAuto, syncAllAuto, publishAllAuto, publishNew, publishPlan, publish, login, logout, updateSettings, switchRole, prompt, toast: showToast, navigate, cancelJob, presetDetails: openPresetDetail, importGunpacks }
+  const actions = { openPack, openCloud, startJob, reorderPresets, detach, cloudDelete, openTacz, clearCache, clearLogs, addFromCloud, openDatabase, select, createPreset, rename, delete: remove, saveVersion, apply, bind, unbind, check, sync, syncAuto, publishAuto, syncAllAuto, publishAllAuto, publishNew, publishPlan, publish, login, logout, updateSettings, switchRole, prompt, toast: showToast, navigate, cancelJob, presetDetails: openPresetDetail, importGunpacks }
   const animations = snap.settings?.animations !== false
   const pageEl = page === 'home' ? <Home snap={snap} actions={actions} busy={busy} />
     : page === 'manage' ? <Manage snap={snap} actions={actions} busy={busy} tab={manageTab} onTab={setManageTab} />
