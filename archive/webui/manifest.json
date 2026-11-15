@@ -1,0 +1,45 @@
+{
+  "schema": 2,
+  "line": "webui",
+  "batch": "2026-11",
+  "repo": "456123739/pulses-swap",
+  "updated_at": "2026-11-15",
+  "tool": "python archive/webui/tools/fetch_archive.py --list",
+  "isolation": {
+    "branch": "release/3.2.0",
+    "worktree": "/home/admin/111/pulses-swap-web",
+    "rule": "WebView（React 新界面）线只写 archive/webui/**；Python/CTk 旧界面线写 archive/python-ui/**；两边不共用清单和 Release"
+  },
+  "releases": [
+    {
+      "tag": "archive-webui-2026-11",
+      "date": "2026-11-15",
+      "title": "Archive WebUI 2026-11 · 新界面会话存档",
+      "holds": "session",
+      "prerelease": true
+    }
+  ],
+  "items": [
+    {
+      "id": "session-5a5350c1",
+      "kind": "session",
+      "name": "session-5a5350c1.sanitized.jsonl.zst",
+      "release_tag": "archive-webui-2026-11",
+      "size": 11072728,
+      "sha256": "6d6d3eee09fef52735893c82902c27a94a2ee26907efc48ebbf5f0a84057cbf4",
+      "format": "zstd(JSONL)",
+      "unpack": "zstd",
+      "note": "已脱敏：token / 手机号 / 密码 / password 字段 → REDACTED",
+      "session": {
+        "id": "session-5a5350c1-8f2a-40da-b687-9a99f0e96da1",
+        "title": "【新UI】Pulses Swap 分支",
+        "messages": 6025,
+        "turns": 139,
+        "span": "2026-10-07 .. 2026-11-07",
+        "outcome": "Pulses Swap 新界面 3.0.x → 3.2.0 的开发与发布，会话因上下文超限终止"
+      }
+    }
+  ],
+  "why": "原会话上下文超限报废；交接资料进 git，大会话挂 Release，换机器可一键取回。",
+  "how_to_fetch": "python archive/webui/tools/fetch_archive.py --list      # 看清单\npython archive/webui/tools/fetch_archive.py --unpack    # 下载 + 校验 + 解压"
+}

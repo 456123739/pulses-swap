@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""拉取 ``archive/manifest.json`` 里登记的存档资源，校验 sha256，可选解包。
+"""拉取 ``archive/webui/manifest.json`` 里登记的存档资源（WebView 线专用），校验 sha256，可选解包。
 
 仓库里只放清单和脚本，大会话原文 / 构建环境包挂在这个仓库的 Release 上，
 这样 git 历史不会被二进制撑大，换机器时又能一键取回。
 
 用法：
-    python archive/tools/fetch_archive.py --list                 # 清单
-    python archive/tools/fetch_archive.py                        # 下载缺的，全部校验
-    python archive/tools/fetch_archive.py --check                # 只校验本地已有文件
-    python archive/tools/fetch_archive.py --unpack               # 校验后再解包
-    python archive/tools/fetch_archive.py --id session-b59b64a4  # 只取一条
-    python archive/tools/fetch_archive.py --id web-node_modules --unpack \\
+    python archive/webui/tools/fetch_archive.py --list                 # 清单
+    python archive/webui/tools/fetch_archive.py                        # 下载缺的，全部校验
+    python archive/webui/tools/fetch_archive.py --check                # 只校验本地已有文件
+    python archive/webui/tools/fetch_archive.py --unpack               # 校验后再解包
+    python archive/webui/tools/fetch_archive.py --id session-b59b64a4  # 只取一条
+    python archive/webui/tools/fetch_archive.py --id web-node_modules --unpack \\
         --dest src/pulses_web/web                                # 还原 node_modules
 
 公开 Release 不需要凭证；草稿/私有 Release 需要：
@@ -31,8 +31,8 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]          # 仓库根
-ARCHIVE = ROOT / "archive"
+ROOT = Path(__file__).resolve().parents[3]          # 仓库根（archive/webui/tools → repo）
+ARCHIVE = ROOT / "archive" / "webui"
 MANIFEST = ARCHIVE / "manifest.json"
 CACHE = ARCHIVE / "cache"
 API = "https://api.github.com"
