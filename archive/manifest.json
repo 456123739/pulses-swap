@@ -1,0 +1,41 @@
+{
+  "archive": "2026-11",
+  "created_at": "2026-11-15",
+  "repo": "456123739/pulses-swap",
+  "release_tag": "archive-2026-11",
+  "why": "原会话上下文超限（2.03M tokens > 1.05M）报废，把交接资料与压缩后的会话存档，方便以后拉取复用，同时释放本地磁盘。",
+  "sessions": [
+    {
+      "id": "session-5a5350c1-8f2a-40da-b687-9a99f0e96da1",
+      "title": "【新UI】Pulses Swap 分支",
+      "messages": 6025,
+      "turns": 139,
+      "span": "2026-10-07 .. 2026-11-07",
+      "outcome": "Pulses Swap 新界面 3.0.x → 3.1.9 全部功能与发布；会话在 2026-11-07 因上下文超限终止"
+    }
+  ],
+  "assets": [
+    {
+      "name": "session-5a5350c1.sanitized.jsonl.zst",
+      "release_tag": "archive-2026-11",
+      "size": 11072728,
+      "sha256": "6d6d3eee09fef52735893c82902c27a94a2ee26907efc48ebbf5f0a84057cbf4",
+      "format": "zstd 压缩的 JSONL（DSH session v4 事件流，一行一个事件）",
+      "note": "已脱敏：GitHub token、蓝奏账号手机号、账号密码、JSON password 字段全部替换为 REDACTED"
+    }
+  ],
+  "in_git": [
+    "archive/history/2026-11/RESUME.md — 交接说明（分支/架构/命令/坑位/文档债）",
+    "archive/history/2026-11/USER_PROMPTS.md — 384 条用户需求原文（已脱敏）",
+    "archive/history/2026-11/ASSISTANT_TIMELINE.md — 助手阶段总结与发布记录",
+    "archive/history/2026-11/easier-STATUS.md — Pulses Easier 新界面现状核对（2026-11-08）",
+    "archive/history/2026-11/easier-shots/*.png — Easier 界面截图（6 态 + 真机 e2e）"
+  ],
+  "redactions": [
+    "gho_* / ghp_* / github_pat_* 令牌",
+    "x-access-token:* 形式的 URL 凭证",
+    "蓝奏云账号密码（明文）与账号手机号",
+    "JSON 里的 password 字段值"
+  ],
+  "how_to_fetch": "python archive/tools/fetch_archive.py            # 下载并校验\npython archive/tools/fetch_archive.py --unpack       # 顺便解压成 .jsonl\n# 私有/草稿 release 需要 export GITHUB_TOKEN=..."
+}

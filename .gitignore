@@ -9,3 +9,8 @@ PulsesSwap_config.json
 PulsesSwap_database/
 
 node_modules/
+
+# 会话存档：大文件走 Release 资产，不提交到 git
+archive/cache/
+archive/history/**/*.zst
+archive/history/**/*.jsonl
