@@ -62,3 +62,32 @@ class ImportGunpacksTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReorderPresetsTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.ctrl = AppController(base_dir=Path(self.tmp.name) / "db")
+
+        class PM:
+            def __init__(self):
+                self.presets = {"a": {"path": ""}, "b": {"path": ""}, "c": {"path": ""}}
+                self.saved = 0
+
+            def save_cache(self):
+                self.saved += 1
+
+        self.ctrl.preset_manager = PM()
+
+    def tearDown(self):
+        self.ctrl._stop_watcher()
+        self.tmp.cleanup()
+
+    def test_reorders_and_persists(self):
+        self.ctrl.reorder_presets(["c", "a"])
+        self.assertEqual(list(self.ctrl.preset_manager.presets), ["c", "a", "b"])
+        self.assertEqual(self.ctrl.preset_manager.saved, 1)
+
+    def test_unknown_names_are_ignored(self):
+        self.ctrl.reorder_presets(["x", "b"])
+        self.assertEqual(list(self.ctrl.preset_manager.presets), ["b", "a", "c"])

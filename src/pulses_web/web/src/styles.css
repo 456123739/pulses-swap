@@ -1022,3 +1022,9 @@ h3 { font-size: 15px; font-weight: 600; }
 .btn:active, .text-btn:active, .mini-btn:active, .chip:active, .segmented button:active,
 .nav-item:active, .icon-btn:active, .cloud-row.folder:active { transform: scale(.97); }
 .animations-off .btn:active, .animations-off .nav-item:active { transform: none; }
+
+/* 预设列表：可拖动排序（拖动时有抬起的阴影，松手弹回） */
+.preset-list { list-style: none; margin: 0; padding: 0; }
+.preset-item { list-style: none; }
+.preset-item:active { cursor: grabbing; }
+.preset-item[data-dragging="true"] { z-index: 5; }

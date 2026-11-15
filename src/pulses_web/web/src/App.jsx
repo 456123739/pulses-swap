@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { AnimatePresence, motion } from 'motion/react'
+import { AnimatePresence, Reorder, motion } from 'motion/react'
 import Icon from './components/Icons.jsx'
 import Hint from './components/Hint.jsx'
 import CloudFiles from './components/CloudFiles.jsx'
@@ -584,14 +584,19 @@ function Home({ snap, actions, busy }) {
                 <div className="button-row"><button className="btn small ghost" onClick={() => actions.select(snap.selected)} disabled={!snap.selected}><Icon name="refresh" />刷新</button>
                   <button className="btn small" onClick={() => actions.prompt('新建预设', '名称', '', (v) => actions.createPreset(v))}><Icon name="plus" />新建</button></div>
               </div>
-              <div className="preset-list">
+              <Reorder.Group axis="y" values={snap.presets.map((p) => p.name)}
+                onReorder={(order) => actions.reorderPresets(order)} className="preset-list" as="div">
                 {snap.presets.length === 0 ? <p className="muted pad">还没有预设</p> : snap.presets.map((p) => (
-                  <PresetRow key={p.name} item={p} selected={p.name === snap.selected} role={snap.role}
-                    onSelect={actions.select} onRename={actions.rename} onDelete={actions.delete}
-                    onDetails={actions.presetDetails}
-                    onUpdate={(item) => (snap.role === 'developer' ? actions.publishAuto(item.name) : actions.syncAuto(item.name))} />
+                  <Reorder.Item key={p.name} value={p.name} as="div" className="preset-item"
+                    whileDrag={{ scale: 1.02, boxShadow: '0 14px 30px rgba(44,62,63,.14)' }}
+                    transition={SPRING}>
+                    <PresetRow item={p} selected={p.name === snap.selected} role={snap.role}
+                      onSelect={actions.select} onRename={actions.rename} onDelete={actions.delete}
+                      onDetails={actions.presetDetails}
+                      onUpdate={(item) => (snap.role === 'developer' ? actions.publishAuto(item.name) : actions.syncAuto(item.name))} />
+                  </Reorder.Item>
                 ))}
-              </div>
+              </Reorder.Group>
             </section>
 
             <motion.section className="card detail-card" key={selected?.name || 'none'}
@@ -1192,6 +1197,19 @@ export default function App() {
   const apply = useCallback((item) => confirm('确认替换', `将应用「${item.name}」并替换 TACZ 枪包。`, () =>
     startJob('preset.apply', { name: item.name }, '一键替换')), [confirm, startJob])
 
+  const reorderPresets = useCallback(async (order) => {
+    if (!Array.isArray(order) || !order.length) return
+    setSnap((prev) => {
+      const map = new Map((prev.presets || []).map((p) => [p.name, p]))
+      const next = order.map((n) => map.get(n)).filter(Boolean)
+      return { ...prev, presets: next }
+    })
+    try {
+      const state = await invoke('preset.reorder', { order })
+      setSnap(state)
+    } catch (err) { showToast(err.message, 'error'); refresh() }
+  }, [refresh, showToast])
+
   const importGunpacks = useCallback(async (name) => {
     try {
       const paths = await pickFiles()
@@ -1337,7 +1355,7 @@ export default function App() {
       showToast(err.message, 'error')
     }
   }, [refresh, showToast])
-  const actions = { openPack, openCloud, startJob, openTacz, clearCache, clearLogs, addFromCloud, openDatabase, select, createPreset, rename, delete: remove, saveVersion, apply, bind, unbind, check, sync, syncAuto, publishAuto, syncAllAuto, publishAllAuto, publishNew, publishPlan, publish, login, logout, updateSettings, switchRole, prompt, toast: showToast, navigate, cancelJob, presetDetails: openPresetDetail, importGunpacks }
+  const actions = { openPack, openCloud, startJob, reorderPresets, openTacz, clearCache, clearLogs, addFromCloud, openDatabase, select, createPreset, rename, delete: remove, saveVersion, apply, bind, unbind, check, sync, syncAuto, publishAuto, syncAllAuto, publishAllAuto, publishNew, publishPlan, publish, login, logout, updateSettings, switchRole, prompt, toast: showToast, navigate, cancelJob, presetDetails: openPresetDetail, importGunpacks }
   const animations = snap.settings?.animations !== false
   const pageEl = page === 'home' ? <Home snap={snap} actions={actions} busy={busy} />
     : page === 'manage' ? <Manage snap={snap} actions={actions} busy={busy} tab={manageTab} onTab={setManageTab} />

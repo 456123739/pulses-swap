@@ -457,6 +457,24 @@ class AppController:
         }
 
     @_locked
+    def reorder_presets(self, order: list[str]):
+        """按界面拖拽后的顺序保存预设（顺序写进缓存，重启仍然有效）。"""
+        pm = self.preset_manager
+        if not pm:
+            raise ValueError("请先加载整合包")
+        names = [str(n) for n in (order or []) if str(n) in pm.presets]
+        names += [n for n in pm.presets if n not in names]
+        if names == list(pm.presets):
+            return self.state()
+        pm.presets = {n: pm.presets[n] for n in names}
+        try:
+            pm.save_cache()
+        except Exception as exc:                     # noqa: BLE001
+            self.add_log(f"保存预设顺序失败：{exc}", "WARNING")
+        self._rev += 1
+        return self.state()
+
+    @_locked
     def import_gunpacks(self, name: str, paths: list[str], ctx=None):
         """把枪包文件/文件夹复制进预设（新建的预设本身是空的，需要这个入口）。"""
         pm = self.preset_manager

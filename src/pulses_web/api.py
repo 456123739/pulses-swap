@@ -77,6 +77,8 @@ class Api:
                 p["name"]),
             "preset.apply": self._job("preset.apply"),
             "preset.import": self._job("preset.import"),
+            "preset.reorder": lambda p: self._controller.reorder_presets(
+                p.get("order") or []),
             "preset.gunpacks": lambda p: {"gunpacks": self._controller.gunpacks()},
             "online.bind": lambda p: self._controller.bind_source(
                 p["name"], p.get("url", ""), p.get("password", ""),
