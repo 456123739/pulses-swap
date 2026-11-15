@@ -65,8 +65,15 @@ def request(url: str, *, accept: str | None = None):
 
 def releases_by_tag(repo: str) -> dict[str, dict]:
     """一次列全 Release（省 API 配额，匿名额度只有 60/小时）。"""
-    with request(f"{API}/repos/{repo}/releases?per_page=100") as resp:
-        return {rel["tag_name"]: rel for rel in json.load(resp)}
+    try:
+        with request(f"{API}/repos/{repo}/releases?per_page=100") as resp:
+            return {rel["tag_name"]: rel for rel in json.load(resp)}
+    except urllib.error.HTTPError as exc:
+        if exc.code in (403, 429):
+            raise SystemExit(
+                "GitHub API 限流了（匿名只有 60 次/小时）。\n"
+                "设置一个 token 再跑：export GITHUB_TOKEN=$(gh auth token)")
+        raise
 
 
 def find_asset(release: dict, name: str) -> dict:
