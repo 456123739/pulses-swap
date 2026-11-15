@@ -87,15 +87,24 @@ JSON 的 `password/passwd/pwd/secret/token/api_key`、「账号186…」里的�
 - **构建环境包**跟版本走（`bundle-3.2.0`），文件名带 `package-lock.json` 的 sha256 前 8 位，lock 变了就重新打；
 - 每次更新 `updated_at`，历史条目只增不改——要改内容就换 `id`/文件名，别偷偷覆盖。
 
-## 本批清理记录
+## 本批清理记录（2026-11-15）
 
-`manifest.json` 的 `purged` 里有完整列表（含恢复方式）。摘要：
+`manifest.json` 的 `purged` 有完整列表（含恢复方式）。这一轮就地删掉约 **1.3 GB**：
 
-- 第三方下载：`/tmp/chrome`(261 MB)、`/tmp/pcl2work`(175 MB)、`/tmp/v2prev`(203 MB，旧版本 dist 可重建)；
-- 测试素材：`/tmp/chs.zip`(115 MB)、`/tmp/big100.jar`(100 MB)、`/tmp/e2e-pack`(84 MB)、
-  `/tmp/tacz_default_gun*.tmp`(238 MB)；
-- 会话原文副本：`/tmp/s59.jsonl`、`/tmp/ui_swap_session.jsonl`、`_history/newui-swap/session*.jsonl`，
-  压缩脱敏版已在 Release 里，本地不再留。
+| 对象 | 体积 | 说明 |
+|---|---|---|
+| `node_modules` | 103 MB | 已打成 `bundle-3.2.0` 资产，需要时一条命令还原 |
+| 会话原文副本（`/tmp/s59.jsonl`、`ui_swap_session.jsonl`、`_history/session*`） | 540 MB | Release 里是压缩脱敏版 |
+| `/tmp/v2prev`、`/tmp/pcl2work` | 378 MB | 旧版本 dist 可重建、启动器可重下 |
+| `tacz_default_gun*.tmp` ×5 | 237 MB | 解包临时文件 |
+| `dist/`、`.git` 松对象与 tmp_pack | 57 MB | 构建产物、`git gc` 回收 |
 
-这些都可以按 `purged[].restore` 的说明重新造出来，所以删了不心疼；
-真正的原始资料（会话、截图、交接文档）都在 git 或 Release 里。
+还剩约 **620 MB 属 `admin` 用户**，Harness 账号没有删除权限（同组不同主，`/tmp` 带 sticky 位）：
+
+```bash
+# 用有权限的账号执行；/tmp/shots 已经归档，删的是本地副本
+sudo rm -rf /tmp/chrome /tmp/chs.zip /tmp/big100.jar /tmp/e2e-pack /tmp/shots
+```
+
+这些都能按 `purged[].restore` 重新造出来；真正的原始资料（会话、截图、交接文档）
+都在 git 或 Release 里，删本地副本不会丢东西。

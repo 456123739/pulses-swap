@@ -41,7 +41,8 @@ def token() -> str:
 
 
 def call(method: str, url: str, payload: dict | None = None, *,
-         raw: bytes | None = None, content_type: str = "application/json"):
+         raw: bytes | None = None, content_type: str = "application/json",
+         allow: tuple[int, ...] = ()):
     """带重试的 API 调用；这里是这台机器网络的补丁，不是业务逻辑。"""
     last: Exception | None = None
     for attempt in range(1, ATTEMPTS + 1):
@@ -59,6 +60,8 @@ def call(method: str, url: str, payload: dict | None = None, *,
                 return json.loads(body.decode() or "{}")
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode(errors="replace")[:300]
+            if exc.code in allow:
+                return {}
             if exc.code in (401, 403, 404, 422):
                 raise SystemExit(f"HTTP {exc.code} {url}\n{detail}")
             last = RuntimeError(f"HTTP {exc.code} {detail}")
@@ -70,8 +73,23 @@ def call(method: str, url: str, payload: dict | None = None, *,
     raise SystemExit(f"放弃：{last}")
 
 
-def release_by_tag(repo: str, tag: str) -> dict:
-    return call("GET", f"{API}/repos/{repo}/releases/tags/{tag}")
+def release_by_tag(repo: str, tag: str) -> dict | None:
+    return call("GET", f"{API}/repos/{repo}/releases/tags/{tag}", allow=(404,)) or None
+
+
+def ensure_release(repo: str, tag: str, *, title: str, notes: str,
+                   target: str | None = None, prerelease: bool = True) -> dict:
+    """没有就建一个；target 决定新 tag 落到哪个 commit/branch。"""
+    existing = release_by_tag(repo, tag)
+    if existing:
+        return existing
+    payload = {"tag_name": tag, "name": title, "body": notes,
+               "prerelease": prerelease, "draft": False}
+    if target:
+        payload["target_commitish"] = target
+    release = call("POST", f"{API}/repos/{repo}/releases", payload)
+    print(f"[建 Release] {tag} -> {release.get('html_url')}")
+    return release
 
 
 def sha256_of(path: Path) -> str:
@@ -84,6 +102,8 @@ def sha256_of(path: Path) -> str:
 
 def upload(repo: str, tag: str, path: Path, name: str, *, replace: bool) -> dict:
     release = release_by_tag(repo, tag)
+    if not release:
+        raise SystemExit(f"没有 release {tag}，先加 --create-release")
     for asset in release.get("assets", []):
         if asset["name"] == name:
             if not replace:
@@ -111,6 +131,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--name", default=None)
     ap.add_argument("--replace", action="store_true")
     ap.add_argument("--list", action="store_true", help="只列出该 release 的资产")
+    ap.add_argument("--create-release", action="store_true", help="release 不存在时创建")
+    ap.add_argument("--title", default=None)
+    ap.add_argument("--notes", default="")
+    ap.add_argument("--target", default=None, help="新 Release 的 tag 指向哪个 commit/branch")
     args = ap.parse_args(argv)
 
     repo = args.repo
@@ -118,8 +142,14 @@ def main(argv: list[str] | None = None) -> int:
         manifest = Path(__file__).resolve().parents[1] / "manifest.json"
         repo = json.loads(manifest.read_text(encoding="utf-8"))["repo"]
 
+    if args.create_release:
+        ensure_release(repo, args.tag, title=args.title or args.tag,
+                       notes=args.notes, target=args.target)
+
     if args.list:
         release = release_by_tag(repo, args.tag)
+        if not release:
+            raise SystemExit(f"没有 release {args.tag}")
         for asset in release.get("assets", []):
             print(f"{asset['name']:48s} {asset['size'] / 1048576:7.1f} MB  "
                   f"{asset.get('digest') or '-'}")

@@ -112,52 +112,95 @@
   ],
   "purged": [
     {
-      "path": "/tmp/chrome",
-      "size": 274088347,
-      "reason": "Chrome for Testing 解包产物，跟仓库无关",
-      "restore": "npx playwright install chromium（或复用 ~/.cache/ms-playwright）"
-    },
-    {
       "path": "/tmp/v2prev",
-      "size": 213304279,
-      "reason": "旧版本前端 dist 解包（用于更新测试），可由旧 tag 重新构建",
+      "size": 213175500,
+      "status": "deleted",
+      "reason": "旧版本前端 dist 解包（更新测试用），可由旧 tag 重新构建",
       "restore": "git checkout v3.1.x && cd src/pulses_web/web && npm ci && npm run build"
     },
     {
       "path": "/tmp/pcl2work",
-      "size": 183706119,
+      "size": 183605657,
+      "status": "deleted",
       "reason": "PCL2 启动器工作目录（下载的启动器与素材）",
       "restore": "PCL2 官网重新下载"
     },
     {
+      "path": "/tmp/tacz_default_gun*.tmp（5 个）",
+      "size": 248931942,
+      "status": "deleted",
+      "reason": "TACZ 默认枪包解包临时文件，程序重新解包可得",
+      "restore": "用本程序再解析一次任意整合包"
+    },
+    {
+      "path": "/tmp/s59.jsonl、/tmp/s59.sanitized.jsonl、/tmp/ui_swap_session.jsonl",
+      "size": 271371468,
+      "status": "deleted",
+      "reason": "会话原文与脱敏中间产物；压缩脱敏版已在 Release，本地不再留副本",
+      "restore": "python archive/tools/fetch_archive.py --id session-b59b64a4 --unpack"
+    },
+    {
+      "path": "_history/newui-swap/session*.jsonl",
+      "size": 294649856,
+      "status": "deleted",
+      "reason": "同上（5a5350c1 的原文 / 脱敏版 / 中间 zst）",
+      "restore": "python archive/tools/fetch_archive.py --id session-5a5350c1 --unpack"
+    },
+    {
+      "path": "src/pulses_web/web/node_modules",
+      "size": 108003328,
+      "status": "deleted",
+      "reason": "前端依赖，已打成 bundle-3.2.0 资产（22 MB），需要时一键还原",
+      "restore": "python archive/tools/fetch_archive.py --id web-node_modules --unpack --dest src/pulses_web/web"
+    },
+    {
+      "path": "dist/",
+      "size": 6606028,
+      "status": "deleted",
+      "reason": "PyInstaller 产物，CI 与本地都能重新打",
+      "restore": "pyinstaller packaging/pulses_web.spec --noconfirm --clean"
+    },
+    {
+      "path": ".git（git gc --prune=now）",
+      "size": 53477376,
+      "status": "deleted",
+      "reason": "中断推送留下的 tmp_pack 与 831 个可清理松对象",
+      "restore": "不需要：历史已完整"
+    },
+    {
+      "path": "/tmp/chrome",
+      "size": 274097766,
+      "status": "pending-admin",
+      "reason": "Chrome for Testing 解包产物；文件属 admin 用户，Harness 账号删不掉",
+      "restore": "npx playwright install chromium（或复用 ~/.cache/ms-playwright）"
+    },
+    {
       "path": "/tmp/chs.zip",
-      "size": 120504312,
-      "reason": "大文件上传/断点续传测试素材",
+      "size": 120481382,
+      "status": "pending-admin",
+      "reason": "大文件上传/断点续传测试素材，同上权限限制",
       "restore": "dd if=/dev/urandom of=chs.zip bs=1M count=115"
     },
     {
       "path": "/tmp/big100.jar",
       "size": 104857600,
-      "reason": "100MB 大文件测试素材",
+      "status": "pending-admin",
+      "reason": "100MB 大文件测试素材，同上权限限制",
       "restore": "dd if=/dev/urandom of=big100.jar bs=1M count=100"
     },
     {
-      "path": "/tmp/tacz_default_gun*.tmp",
-      "size": 249096536,
-      "reason": "TACZ 默认枪包解包临时文件，程序重新解包可得",
-      "restore": "用本程序再解析一次任意整合包"
-    },
-    {
       "path": "/tmp/e2e-pack",
-      "size": 87889147,
-      "reason": "E2E 测试生成的枪包与产物",
+      "size": 87870668,
+      "status": "pending-admin",
+      "reason": "E2E 测试生成的枪包与产物，同上权限限制",
       "restore": "按 docs/swap-online.md 流程重新生成"
     },
     {
-      "path": "/tmp/s59.jsonl、/tmp/ui_swap_session.jsonl、_history/newui-swap/session*.jsonl",
-      "size": 470000000,
-      "reason": "会话原文与中间产物；压缩后的脱敏版已在 archive-2026-11，本地不再留副本",
-      "restore": "python archive/tools/fetch_archive.py --unpack"
+      "path": "/tmp/shots",
+      "size": 66060288,
+      "status": "pending-admin",
+      "reason": "已打包成 ctk-ui-shots-2026-11 资产，源目录属 admin，待有权限时删",
+      "restore": "python archive/tools/fetch_archive.py --id ctk-ui-shots-2026-11 --unpack"
     }
   ]
 }
