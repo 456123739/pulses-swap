@@ -27,6 +27,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -109,6 +110,11 @@ def download(asset: dict, target: Path, *, attempts: int = 6) -> None:
         if not total or part.stat().st_size >= total:
             break
     part.replace(target)
+
+
+def direct_url(repo: str, tag: str, name: str) -> str:
+    """公开 release 的直链，不经过 API（避免 60 次/小时的限流）。"""
+    return f"https://github.com/{repo}/releases/download/{tag}/{urllib.parse.quote(name)}"
 
 
 def needs_zstd() -> None:
@@ -208,14 +214,20 @@ def main(argv: list[str] | None = None) -> int:
             continue
 
         tag = item["release_tag"]
-        if tag not in releases:
-            releases = releases_by_tag(repo)
-        if tag not in releases:
-            raise SystemExit(f"仓库里没有 release {tag}")
-        asset = find_asset(releases[tag], item["name"])
-
         print(f"[下载] {item['name']}  {size / 1048576:.1f} MB  <- {tag}")
-        download(asset, target)
+        try:
+            # 公开 release 直接走下载直链，不碰 API（限流 60 次/小时）
+            download({"url": direct_url(repo, tag, item["name"]), "size": size}, target)
+        except urllib.error.HTTPError as exc:
+            if exc.code != 404:
+                raise
+            # 草稿 / 私有 release 只能走 API（需要 token）
+            if tag not in releases:
+                releases = releases_by_tag(repo)
+            if tag not in releases:
+                raise SystemExit(f"仓库里没有 release {tag}（草稿需要 GITHUB_TOKEN）") from exc
+            asset = find_asset(releases[tag], item["name"])
+            download(asset, target)
         digest = sha256_of(target)
         if digest != expected:
             target.unlink(missing_ok=True)
