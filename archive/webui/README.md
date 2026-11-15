@@ -38,8 +38,8 @@ python archive/webui/tools/fetch_archive.py --check     # 只校验本地已有�
 
 | 线 | 分支 / 工作树 | 存档目录 | Release |
 |---|---|---|---|
-| 新界面（WebView） | `release/3.2.0` · `/home/admin/111/pulses-swap-web` | `archive/webui/**` | `archive-webui-2026-11` |
-| 旧界面（Python/CTk） | `fix/ctk-2.8.x` · `/home/admin/111/pulses-swap-ctk` | `archive/python-ui/**` | 由那条线自己维护 |
+| 新界面（WebView） | `release/webui-3.2` · `/home/admin/111/pulses-swap-web` | `archive/webui/**` | `archive-webui-2026-11` |
+| 旧界面（Python/CTk） | `fix/ctk-2.8.x` · `/home/admin/111/pulses-swap-ctk`（及主目录的 `release/ctk-2.8.0`） | `archive/python-ui/**` | 由那条线自己维护 |
 
 - 各自只改自己的目录与 release，**不要动对方的 manifest**；
 - 共享仓库根下的 `README.md`、`.gitignore` 改动尽量小，冲突时以本文档为准重排；

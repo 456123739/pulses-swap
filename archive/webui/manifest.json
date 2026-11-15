@@ -6,7 +6,7 @@
   "updated_at": "2026-11-15",
   "tool": "python archive/webui/tools/fetch_archive.py --list",
   "isolation": {
-    "branch": "release/3.2.0",
+    "branch": "release/webui-3.2",
     "worktree": "/home/admin/111/pulses-swap-web",
     "rule": "WebView（React 新界面）线只写 archive/webui/**；Python/CTk 旧界面线写 archive/python-ui/**；两边不共用清单和 Release"
   },
