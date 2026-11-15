@@ -1014,3 +1014,11 @@ h3 { font-size: 15px; font-weight: 600; }
   background: var(--accent-soft); color: var(--accent); }
 .cloud-ico.file { background: var(--panel-alt); color: var(--text-2); }
 .cloud-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 点击也要有回弹感：按下缩一点，松开弹回（弹簧曲线） */
+.btn, .text-btn, .mini-btn, .chip, .segmented button, .nav-item, .icon-btn, .cloud-row {
+  transition: transform 120ms var(--ease-spring), background 160ms, color 160ms, box-shadow 160ms;
+}
+.btn:active, .text-btn:active, .mini-btn:active, .chip:active, .segmented button:active,
+.nav-item:active, .icon-btn:active, .cloud-row.folder:active { transform: scale(.97); }
+.animations-off .btn:active, .animations-off .nav-item:active { transform: none; }
