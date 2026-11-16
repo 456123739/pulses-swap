@@ -579,6 +579,8 @@ class AppController:
 
     @_locked
     def save_version(self, name: str, version: str):
+        if not str(version or "").strip():
+            raise ValueError("版本号不能为空")
         if not self.preset_manager or not self.preset_manager.update_preset_version(name, version):
             raise ValueError("版本保存失败")
         return self._refresh_after_mutation()
@@ -1006,7 +1008,7 @@ class AppController:
                 "state": self.state(), "message": message}
 
     @_locked
-    def publish_all_auto(self, ctx=None):
+    def publish_all_auto(self, ctx=None, notes: str = ""):
         """开发者一键发布全部：所有已绑定预设自动计划、递增版本、上传。"""
         if self.role != "developer":
             raise PermissionError("只有开发者可以发布")
@@ -1020,7 +1022,7 @@ class AppController:
                 raise RuntimeError("操作已取消")
             self._batch_phase(ctx, i, total, f"发布 {name}")
             try:
-                out = self.publish_auto(name, ctx=ctx)
+                out = self.publish_auto(name, ctx=ctx, notes=notes)
                 if out.get("changed"):
                     published.append(name)
                 else:
@@ -1101,8 +1103,11 @@ class AppController:
             raise
 
     @_locked
-    def publish_auto(self, name: str, ctx=None):
-        """开发者一键发布：收回已应用预设 → 自动计划/递增版本/上传 → 再应用。"""
+    def publish_auto(self, name: str, ctx=None, notes: str = ""):
+        """开发者一键发布：收回已应用预设 → 自动计划/递增版本/上传 → 再应用。
+
+        notes: 给玩家看的更新说明；留空时自动写“一键发布 · 上传 N 项”。
+        """
         if self.role != "developer":
             raise PermissionError("只有开发者可以发布")
         was_applied = bool(
@@ -1146,7 +1151,8 @@ class AppController:
                 else "")
             version = self._next_version(base_version)
             out = self.publish(name, version,
-                               f"一键发布 · 上传 {len(selection)} 项",
+                               str(notes or "").strip()
+                               or f"一键发布 · 上传 {len(selection)} 项",
                                "", selection, ctx)
             result = out.get("result")
             if isinstance(result, dict) and not result.get("ok", True):

@@ -338,15 +338,18 @@ class Api:
                                            name, ctx))
             elif method == "online.publish.auto":
                 name = params.get("name", "")
+                notes = params.get("notes") or ""
                 job = self._jobs.submit("一键发布",
                                        lambda ctx: self._controller.publish_auto(
-                                           name, ctx))
+                                           name, ctx, notes=notes))
             elif method == "online.sync.all":
                 job = self._jobs.submit("一键更新全部",
                                        lambda ctx: self._controller.sync_all_auto(ctx))
             elif method == "online.publish.all":
+                notes = params.get("notes") or ""
                 job = self._jobs.submit("一键发布全部",
-                                       lambda ctx: self._controller.publish_all_auto(ctx))
+                                       lambda ctx: self._controller.publish_all_auto(
+                                           ctx, notes=notes))
             elif method == "online.publish.new":
                 name = params.get("name", "")
                 job = self._jobs.submit("上传到云端",

@@ -251,3 +251,50 @@ class ApiSurfaceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PublishNotesTests(unittest.TestCase):
+    """一键发布/一键上传全部要能把用户写的更新说明带下去。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.ctrl = AppController(base_dir=Path(self.tmp.name) / "db")
+        self.ctrl.preset_manager = FakePM()
+        self.ctrl.preset_manager.presets["P"]["applied"] = False
+        self.ctrl.selected = "P"
+        self.ctrl.state = lambda: {"ok": True}
+        self.ctrl.settings.role = "developer"
+        self.ctrl.apply_preset = lambda name, ctx=None: {"state": {"ok": True}}
+
+    def tearDown(self):
+        self.ctrl._stop_watcher()
+        self.tmp.cleanup()
+
+    def _plan(self):
+        p = diff.Plan(role="developer", cloud_version="v1.0.0")
+        p.items.append(diff.DiffItem("f0.zip", diff.UPLOAD,
+                                     local={"path": "f0.zip", "sha256": "a"},
+                                     cloud={"path": "f0.zip", "sha256": "b"}))
+        return p
+
+    def test_custom_notes_reach_publish(self):
+        fake = FakeOnline(self._plan())
+        self.ctrl.online = fake
+        self.ctrl.publish_auto("P", notes="新增两把枪")
+        self.assertEqual(fake.published[1].get("notes"), "新增两把枪")
+
+    def test_blank_notes_fall_back_to_default_text(self):
+        fake = FakeOnline(self._plan())
+        self.ctrl.online = fake
+        self.ctrl.publish_auto("P", notes="   ")
+        self.assertIn("一键发布", fake.published[1].get("notes", ""))
+
+    def test_publish_all_forwards_notes(self):
+        fake = FakeOnline(self._plan())
+        self.ctrl.online = fake
+        self.ctrl.publish_all_auto(notes="统一说明")
+        self.assertEqual(fake.published[1].get("notes"), "统一说明")
+
+    def test_empty_version_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self.ctrl.save_version("P", "   ")

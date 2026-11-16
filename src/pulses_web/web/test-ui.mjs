@@ -147,7 +147,7 @@ assert.equal((await page.locator('[data-testid="one-click-upload"]').innerText()
 assert.ok(await page.locator('[data-testid="preset-update-轻量生存"]').count(), '预设条目缺少更新小按钮')
 const collapsed = await page.locator('.sidebar').evaluate(el => getComputedStyle(el).width)
 assert.equal(collapsed, '60px')
-assert.equal(await page.locator('.nav-item span').first().evaluate(el => getComputedStyle(el).display), 'none')
+assert.equal(await page.locator('.nav-item span').first().evaluate(el => getComputedStyle(el).display), 'block', '折叠态应显示两字标签')
 
 await page.locator('.sidebar').hover()
 await page.waitForTimeout(550)

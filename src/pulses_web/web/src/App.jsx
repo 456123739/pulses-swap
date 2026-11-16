@@ -757,10 +757,16 @@ function Manage({ snap, actions, busy, tab = 'overview', onTab }) {
             <span>{plan?.summary || (isDeveloper ? '待上传检查' : '待更新检查')}</span>
             <span>{isDeveloper ? '开发者' : '玩家'}</span>
           </div>
+          {isDeveloper && <label className="field publish-notes-inline">
+            <span>这次更新了什么（可选） <Hint text="玩家更新时会看到这句话；留空会自动写「一键发布 · 上传 N 项」。" /></span>
+            <input value={publishNotes} onChange={(e) => setPublishNotes(e.target.value)}
+              placeholder="例如：新增 3 把枪，修了音效" />
+          </label>}
         </div>
         <div className="action-buttons">
           <button className="btn xl primary action-primary" disabled={!boundCount || busy}
-            onClick={runAuto}><Icon name={isDeveloper ? 'upload' : 'cloud'} size={20} />{autoLabel}
+            onClick={() => (isDeveloper ? actions.publishAllAuto(publishNotes) : runAuto())}>
+            <Icon name={isDeveloper ? 'upload' : 'cloud'} size={20} />{autoLabel}
             <Hint text={isDeveloper
               ? '遍历所有绑定过云端的预设：有变化就递增版本号上传，云端多余文件不会删。'
               : '遍历所有绑定过云端的预设：有更新就下载，删除项进回收站，已替换的自动换回去。'} />
@@ -1264,11 +1270,13 @@ export default function App() {
     }), [confirm, showToast])
 
   const detach = useCallback((name) => confirm('收回预设', `把「${name}」从游戏里收回？枪包会回到预设目录，不会删文件。`, async () => {
+    setBusy({ title: '收回预设', progress: 0, text: '正在把枪包从 tacz 拿回预设目录…' })
     try {
       const state = await invoke('preset.detach', { name })
       setSnap(state)
       showToast('已收回，可以导入或删除这个预设了', 'success')
     } catch (err) { showToast(err.message, 'error'); throw err }
+    finally { setBusy(null) }
   }), [confirm, showToast])
 
   const reorderPresets = useCallback(async (order) => {
@@ -1315,9 +1323,9 @@ export default function App() {
   }), [confirm, showToast])
   const sync = useCallback((name, selection) => startJob('online.sync', { name, selection }, '同步预设'), [startJob])
   const syncAuto = useCallback((name) => startJob('online.sync.auto', { name }, '一键更新'), [startJob])
-  const publishAuto = useCallback((name) => startJob('online.publish.auto', { name }, '一键发布'), [startJob])
+  const publishAuto = useCallback((name, notes = '') => startJob('online.publish.auto', { name, notes }, '一键发布'), [startJob])
   const syncAllAuto = useCallback(() => startJob('online.sync.all', {}, '一键更新全部'), [startJob])
-  const publishAllAuto = useCallback(() => startJob('online.publish.all', {}, '一键发布全部'), [startJob])
+  const publishAllAuto = useCallback((notes = '') => startJob('online.publish.all', { notes }, '一键发布全部'), [startJob])
   const publishNew = useCallback((name) => startJob('online.publish.new', { name }, '上传到云端'), [startJob])
   const publishPlan = useCallback((name) => startJob('online.publish.plan', { name }, '生成发布计划'), [startJob])
   const publish = useCallback((name, version, notes, selection) => {

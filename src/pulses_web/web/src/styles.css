@@ -1098,3 +1098,11 @@ h3 { font-size: 15px; font-weight: 600; }
 .row-menu button:hover { background: var(--input); }
 .row-menu button.danger { color: var(--error); }
 .row-actions { display: none !important; }
+
+/* 折叠侧栏也显示两字标签，新用户不用悬停猜图标 */
+.sidebar:not(.expanded) .nav { gap: 2px; }
+.sidebar:not(.expanded) .nav-item { height: 50px; flex-direction: column; gap: 3px; padding: 6px 4px; }
+.sidebar:not(.expanded) .nav-item span { display: block; opacity: .78; transform: none; font-size: 9.5px; letter-spacing: .02em; }
+.sidebar:not(.expanded) .nav-item.active span { opacity: 1; }
+
+.publish-notes-inline { margin-top: 12px; max-width: 420px; }
