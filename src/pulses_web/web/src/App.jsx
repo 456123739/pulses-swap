@@ -597,7 +597,7 @@ function Home({ snap, actions, busy }) {
                     </button>
                   )}
                   {(snap.online.bound_count || 0) > 0 && <button className="btn hero-secondary" disabled={busy}
-                    onClick={actions.publishAllAuto}><Icon name="upload" size={17} />一键上传全部
+                    onClick={() => actions.publishAllAuto()}><Icon name="upload" size={17} />一键上传全部
                     <Hint text="把所有绑定过云端的预设扫一遍，有变化就递增版本并上传。" />
                   </button>}
                   {!selected && <button className="btn hero-secondary" disabled>
