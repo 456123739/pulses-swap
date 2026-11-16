@@ -401,7 +401,7 @@ function PresetItemRow({ item, selected, role, onSelect, onRename, onDelete, onD
   )
 }
 
-function Home({ snap, actions, busy }) {
+function Home({ snap, actions, busy, publishNotes = '' }) {
   const selected = snap.presets.find((p) => p.name === snap.selected)
   const animations = snap.settings?.animations !== false
   const [celebrate, setCelebrate] = useState(false)
@@ -1054,6 +1054,7 @@ export default function App() {
   const clearBusy = useCallback(() => {
     if (busyTimer.current) { clearTimeout(busyTimer.current); busyTimer.current = null }
     busyRef.current = false
+    jobIdRef.current = ''
     setBusy(null)
   }, [])
   const showToast = useCallback((message, kind = 'info', action = null) => {
@@ -1077,6 +1078,12 @@ export default function App() {
       const type = event?.type
       if (type === 'job.progress') {
         if (jobIdRef.current && event.jobId !== jobIdRef.current) return
+        if (busyTimer.current) clearTimeout(busyTimer.current)
+        busyTimer.current = setTimeout(() => {
+          busyRef.current = false
+          setBusy(null)
+          showToast('任务长时间没有响应，已自动解锁；可以重试或到日志页看原因', 'warning')
+        }, 5 * 60 * 1000)
         const d = event.data || {}
         setBusy((prev) => prev ? { ...prev, progress: d.percent ?? prev.progress, text: d.message || prev.text } : prev)
       } else if (type === 'job.done') {
@@ -1469,7 +1476,7 @@ export default function App() {
   }, [refresh, showToast])
   const actions = { openPack, openCloud, startJob, reorderPresets, detach, cloudDelete, openTacz, clearCache, clearLogs, addFromCloud, openDatabase, select, createPreset, rename, delete: remove, saveVersion, apply, bind, unbind, check, sync, syncAuto, publishAuto, syncAllAuto, publishAllAuto, publishNew, publishPlan, publish, login, logout, updateSettings, switchRole, prompt, toast: showToast, navigate, cancelJob, presetDetails: openPresetDetail, importGunpacks }
   const animations = snap.settings?.animations !== false
-  const pageEl = page === 'home' ? <Home snap={snap} actions={actions} busy={busy} />
+  const pageEl = page === 'home' ? <Home snap={snap} actions={actions} busy={busy} publishNotes={publishNotes} />
     : page === 'manage' ? <Manage snap={snap} actions={actions} busy={busy} tab={manageTab} onTab={setManageTab} publishNotes={publishNotes} setPublishNotes={setPublishNotes} />
     : page === 'settings' ? <Settings snap={snap} actions={actions} />
     : <LogPage logs={logs} snap={snap} onClear={clearLogs} />
