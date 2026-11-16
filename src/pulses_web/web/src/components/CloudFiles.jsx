@@ -63,11 +63,13 @@ export default function CloudFiles({ snap, actions, busy }) {
         <div><span className="eyebrow">CLOUD</span><h2>云端文件</h2></div>
         <div className="button-row">
           <button className="btn small ghost" disabled={loading} onClick={() => load(path)}>刷新</button>
-          <button className="btn small" onClick={mkdir}>新建文件夹</button>
-          <button className="btn small primary" disabled={Boolean(busy)} onClick={upload}>
-            <Icon name="upload" />上传文件
-            <Hint text="选本地文件或文件夹，会上传到当前云端目录；同名文件会被覆盖。" />
-          </button>
+          {snap.role === 'developer' && <>
+            <button className="btn small" onClick={mkdir}>新建文件夹</button>
+            <button className="btn small primary" disabled={Boolean(busy)} onClick={upload}>
+              <Icon name="upload" />上传文件
+              <Hint text="选本地文件或文件夹，会上传到当前云端目录；同名文件会被覆盖。" />
+            </button>
+          </>}
         </div>
       </div>
       <div className="cloud-path">

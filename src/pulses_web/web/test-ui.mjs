@@ -117,7 +117,7 @@ assert.equal(await page.locator('.gunpack-row.status-cloud_only').count(), 1, '�
 assert.equal(await page.locator('.gunpack-row.status-local_only').count(), 1, '缺少“多余/待上传”着色')
 assert.equal(await page.locator('.gunpack-legend .legend-chip').count() >= 3, true, '缺少差异图例')
 const badgeText = await page.locator('.gunpack-row.status-changed .gp-badge').innerText()
-assert.equal(badgeText, '待上传', `变更行标签 ${badgeText}`)
+assert.equal(badgeText, '有变更', `变更行标签 ${badgeText}`)
 const firstGunOpacity = await page.locator('.gunpack-row').first().evaluate(el => Number(getComputedStyle(el).opacity))
 assert.ok(firstGunOpacity > 0.9, `枪包行未完成滑入 ${firstGunOpacity}`)
 await page.locator('.preset-row').nth(1).click()

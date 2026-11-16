@@ -1199,9 +1199,22 @@ class AppController:
             cloud_path = f"/PulsesSwap/{safe}"
         # 先把云端路径绑定到该预设；发布成功后 _remember_share 会补上分享链接。
         self.bind_source(name, "", "", cloud_path=cloud_path)
-        out = self.publish_auto(name, ctx=ctx)
+        try:
+            out = self.publish_auto(name, ctx=ctx)
+        except Exception:
+            # 上传失败且还没生成分享链接：把刚写进去的空绑定撤掉，避免残留
+            record = self.online.source_of(name) or {}
+            if not (record.get("lanzou") or {}).get("url"):
+                try:
+                    self.online.unbind(name)
+                except Exception:
+                    pass
+            raise
         if not out.get("changed"):
-            raise ValueError("预设里还没有枪包，先拖入枪包再上传到云端")
+            message = str(out.get("message") or "")
+            if "最新" in message or "无需发布" in message or "没有需要上传" in message:
+                return out                      # 云端已一致，不算失败
+            raise ValueError("云端还没有这个预设的内容可传：先导入枪包，再上传")
         out["message"] = (out.get("message", "上传完成")
                           + f" · 云端 {cloud_path} · 分享链接在「管理 → 云端来源」可复制")
         return out

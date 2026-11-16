@@ -254,7 +254,7 @@ function Empty({ title, hint, children }) {
 // 差异状态 → 给人看的词。玩家和开发者看同一份差异，叫法不同。
 const STATUS_LABELS = {
   player: { cloud_only: '缺失', changed: '变更', local_only: '多余', blocked: '无法处理', same: '一致' },
-  developer: { cloud_only: '云端多余', changed: '待上传', local_only: '待上传', blocked: '无法处理', same: '一致' },
+  developer: { cloud_only: '云端多余', changed: '有变更', local_only: '待上传', blocked: '无法处理', same: '一致' },
 }
 const STATUS_ORDER = ['cloud_only', 'changed', 'local_only', 'blocked']
 
@@ -274,17 +274,26 @@ function nextStepOf(snap) {
   if (!(selected.count > 0)) {
     return { tone: 'warn', title: '这个预设还没有枪包', text: '先点「导入枪包」选 .zip 或文件夹；空预设不能替换，否则会把 tacz 清空。', cta: '导入枪包', action: 'import' }
   }
-  if (snap.role === 'player' && !snap.online.binding?.url) {
-    return { tone: 'warn', title: '这个预设还没绑定云端', text: '如果别人给了你分享链接，点「从云端拉取预设」；自己做的预设可以直接替换，不用绑定。', cta: '从云端拉取预设', action: 'cloud' }
-  }
   const pending = (selected.pending || 0) + (selected.extra || 0)
+  if (snap.role === 'developer') {
+    if (!selected.bound) {
+      return { tone: 'todo', title: '这个预设还没上传到云端', text: '点「上传到云端」会自动建 /PulsesSwap/预设名 并生成分享链接。', cta: '上传到云端', action: 'publishNew' }
+    }
+    if (pending > 0) {
+      return { tone: 'todo', title: `有 ${pending} 项待上传`, text: '点「一键上传」，只传有变化的枪包，版本号自动 +1，云端多余文件保留。', cta: '一键上传', action: 'publishAuto' }
+    }
+    return { tone: 'done', title: '云端已是最新', text: '有改动时这里会提示；也可以随时重新上传。', cta: '', action: '' }
+  }
   if (pending > 0) {
-    return { tone: 'todo', title: `有 ${pending} 项可以处理`, text: snap.role === 'developer' ? '点「一键上传」，只上传有变化的枪包，云端多出来的文件不会被动。' : '点「一键更新」，只下载有变化的枪包；已替换的预设会自动收紧再换回去。', cta: snap.role === 'developer' ? '一键上传' : '一键更新', action: 'sync' }
+    return { tone: 'todo', title: `有 ${pending} 项可以处理`, text: '点「一键更新」，只下载有变化的枪包；已替换的预设会自动收回再换回去。', cta: '一键更新', action: 'sync' }
   }
   if (!selected.applied) {
     return { tone: 'ready', title: '可以替换到游戏里', text: '点「一键替换」，把这个预设的枪包写进整合包的 tacz；替换前会再确认一次。', cta: '一键替换', action: 'apply' }
   }
-  return { tone: 'done', title: '已经是这个预设了', text: '需要恢复或换一组枪包时，随时可以重新替换；云端有更新时这里会提示。', cta: '', action: '' }
+  if (!snap.online.binding?.url) {
+    return { tone: 'done', title: '已经在游戏里用了', text: '想以后一键更新，再把开发者给你的分享链接绑上（可选）；不绑定也能正常替换。', cta: '', action: '' }
+  }
+  return { tone: 'done', title: '已经是最新', text: '需要换一组枪包时，随时可以重新替换。', cta: '', action: '' }
 }
 
 function NextStep({ step, onAct }) {
@@ -447,6 +456,8 @@ function Home({ snap, actions, busy }) {
     else if (action === 'sync' && selected) (snap.role === 'developer' ? actions.publishAuto : actions.syncAuto)(selected.name)
     else if (action === 'apply' && selected) actions.apply(selected)
     else if (action === 'import' && selected) actions.importGunpacks(selected.name)
+    else if (action === 'publishNew' && selected) actions.publishNew(selected.name)
+    else if (action === 'publishAuto' && selected) actions.publishAuto(selected.name)
   }
   return (
     <div className="page home-page">
@@ -496,9 +507,13 @@ function Home({ snap, actions, busy }) {
                       </button>
                     ))}
                   </div>
+                  <button className="recent-open-row browse-row" onClick={() => { setRecentOpen(false); openPack() }}>
+                    <span className="recent-open-icon"><Icon name="plus" size={15} /></span>
+                    <span className="recent-open-copy"><strong>浏览其他文件夹…</strong><small>选一个整合包根目录</small></span>
+                  </button>
                 </div>}
               </div>
-              <span className="drop-caption">点击选择，或拖入任意文件/文件夹</span>
+              <button className="drop-caption" onClick={() => openPack()}>点击选择，或拖入任意文件/文件夹</button>
             </div>
           </motion.section>
           <div className="home-grid empty-home-grid">
@@ -597,7 +612,7 @@ function Home({ snap, actions, busy }) {
                     </button>
                   )}
                   {(snap.online.bound_count || 0) > 0 && <button className="btn hero-secondary" disabled={busy}
-                    onClick={() => actions.publishAllAuto()}><Icon name="upload" size={17} />一键上传全部
+                    onClick={() => actions.publishAllAuto(publishNotes)}><Icon name="upload" size={17} />一键上传全部
                     <Hint text="把所有绑定过云端的预设扫一遍，有变化就递增版本并上传。" />
                   </button>}
                   {!selected && <button className="btn hero-secondary" disabled>
@@ -704,7 +719,7 @@ function Home({ snap, actions, busy }) {
   )
 }
 
-function Manage({ snap, actions, busy, tab = 'overview', onTab }) {
+function Manage({ snap, actions, busy, tab = 'overview', onTab, publishNotes = '', setPublishNotes = () => {} }) {
   const animations = snap.settings?.animations !== false
   const advanced = snap.settings?.advanced_actions === true
   const [url, setUrl] = useState(snap.online.binding?.url || '')
@@ -713,7 +728,6 @@ function Manage({ snap, actions, busy, tab = 'overview', onTab }) {
   const onlineReady = snap.online.available !== false
   const [selection, setSelection] = useState(null)
   const [publishVersion, setPublishVersion] = useState('')
-  const [publishNotes, setPublishNotes] = useState('')
   const selected = snap.presets.find((p) => p.name === snap.selected)
   useEffect(() => { setUrl(snap.online.binding?.url || ''); setPassword(snap.online.binding?.password || '') }, [snap.online.binding?.url, snap.online.binding?.password])
   useEffect(() => { setPublishVersion(selected?.version || '') }, [selected?.name, selected?.version])
@@ -751,7 +765,9 @@ function Manage({ snap, actions, busy, tab = 'overview', onTab }) {
         <div className="action-copy">
           <span className="eyebrow">ONE CLICK</span>
           <h2>全部云端预设 · {boundCount} 个</h2>
-          <p>{boundCount ? autoHint : '还没有绑定云端来源；先选择一个预设并保存分享链接。'}</p>
+          <p>{boundCount ? autoHint : (isDeveloper
+            ? '还没有云端预设：先在左侧选一个预设，点「上传到云端」。'
+            : '还没有绑定云端来源：从云端拉取预设，或先选一个本地预设直接替换。')}</p>
           <div className="action-meta">
             <span>{boundCount} 个已绑定</span>
             <span>{plan?.summary || (isDeveloper ? '待上传检查' : '待更新检查')}</span>
@@ -1017,6 +1033,7 @@ export default function App() {
   const [snap, setSnap] = useState(EMPTY)
   const [page, setPage] = useState('home')
   const [manageTab, setManageTab] = useState('overview')
+  const [publishNotes, setPublishNotes] = useState('')
   const [expanded, setExpanded] = useState(false)
   const [busy, setBusy] = useState(null)
   const [toast, setToast] = useState(null)
@@ -1059,11 +1076,11 @@ export default function App() {
       if (!alive) return
       const type = event?.type
       if (type === 'job.progress') {
-        if (event.jobId !== jobIdRef.current) return
+        if (jobIdRef.current && event.jobId !== jobIdRef.current) return
         const d = event.data || {}
         setBusy((prev) => prev ? { ...prev, progress: d.percent ?? prev.progress, text: d.message || prev.text } : prev)
       } else if (type === 'job.done') {
-        if (event.jobId !== jobIdRef.current) return
+        if (jobIdRef.current && event.jobId !== jobIdRef.current) return
         const st = event.data?.result?.state
         if (st) setSnap(st)
         else refresh()
@@ -1075,7 +1092,7 @@ export default function App() {
         showToast(r?.message || '操作完成', failed ? 'warning' : 'success',
           failed && job ? { label: '重试', job } : null)
       } else if (type === 'job.error') {
-        if (event.jobId !== jobIdRef.current) return
+        if (jobIdRef.current && event.jobId !== jobIdRef.current) return
         clearBusy()
         const msg = event.data?.message || '操作失败'
         const job = lastJobRef.current
@@ -1089,7 +1106,7 @@ export default function App() {
         autoRetryRef.current = 0
         showToast(msg, 'error', job ? { label: '重试', job } : null)
       } else if (type === 'job.cancelled') {
-        if (event.jobId !== jobIdRef.current) return
+        if (jobIdRef.current && event.jobId !== jobIdRef.current) return
         clearBusy()
         showToast('操作已取消', 'info')
         refresh()
@@ -1180,6 +1197,13 @@ export default function App() {
       busyRef.current = true
       lastJobRef.current = { method, params, title }
       setBusy({ title, progress: 0, text: '准备中…' })
+      // 事件丢失（后端在 invoke 返回前就失败 / evaluate_js 被吞）时，最多锁 5 分钟
+      if (busyTimer.current) clearTimeout(busyTimer.current)
+      busyTimer.current = setTimeout(() => {
+        busyRef.current = false
+        setBusy(null)
+        showToast('任务长时间没有响应，已自动解锁；可以重试或到日志页看原因', 'warning')
+      }, 5 * 60 * 1000)
       const data = await invoke(method, params)
       jobIdRef.current = data?.jobId || ''
       setBusy((prev) => prev ? { ...prev, jobId: jobIdRef.current,
@@ -1446,7 +1470,7 @@ export default function App() {
   const actions = { openPack, openCloud, startJob, reorderPresets, detach, cloudDelete, openTacz, clearCache, clearLogs, addFromCloud, openDatabase, select, createPreset, rename, delete: remove, saveVersion, apply, bind, unbind, check, sync, syncAuto, publishAuto, syncAllAuto, publishAllAuto, publishNew, publishPlan, publish, login, logout, updateSettings, switchRole, prompt, toast: showToast, navigate, cancelJob, presetDetails: openPresetDetail, importGunpacks }
   const animations = snap.settings?.animations !== false
   const pageEl = page === 'home' ? <Home snap={snap} actions={actions} busy={busy} />
-    : page === 'manage' ? <Manage snap={snap} actions={actions} busy={busy} tab={manageTab} onTab={setManageTab} />
+    : page === 'manage' ? <Manage snap={snap} actions={actions} busy={busy} tab={manageTab} onTab={setManageTab} publishNotes={publishNotes} setPublishNotes={setPublishNotes} />
     : page === 'settings' ? <Settings snap={snap} actions={actions} />
     : <LogPage logs={logs} snap={snap} onClear={clearLogs} />
 

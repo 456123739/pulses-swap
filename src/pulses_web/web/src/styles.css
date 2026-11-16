@@ -1106,3 +1106,11 @@ h3 { font-size: 15px; font-weight: 600; }
 .sidebar:not(.expanded) .nav-item.active span { opacity: 1; }
 
 .publish-notes-inline { margin-top: 12px; max-width: 420px; }
+
+/* 渲染崩溃兜底 */
+.crash-screen { min-height: 100vh; display: flex; flex-direction: column; justify-content: center; gap: 12px;
+  padding: 48px; max-width: 720px; margin: 0 auto; }
+.crash-screen h1 { font-size: 20px; }
+.crash-screen p { color: var(--text-2); font-size: 13px; }
+.crash-screen pre { padding: 10px 12px; border-radius: 10px; background: var(--input); font-size: 11px;
+  white-space: pre-wrap; max-height: 200px; overflow: auto; }
