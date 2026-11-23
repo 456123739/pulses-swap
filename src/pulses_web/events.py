@@ -7,6 +7,7 @@ pywebview 的 js_api 方法运行在独立线程，而且官方明确说这些�
 from __future__ import annotations
 
 import json
+import copy
 import queue
 import threading
 import time
@@ -155,6 +156,17 @@ class JobRunner:
         self._queue.put((job, fn))
         return job.id
 
+    def get_status(self, job_id: str) -> dict:
+        """Return an isolated snapshot; terminal status and payload change atomically."""
+        with self._lock:
+            job = self._jobs.get(str(job_id))
+            if job is None:
+                return {"jobId": str(job_id), "status": "unknown", "result": None,
+                        "error": "任务不存在", "cancelable": False}
+            return {"jobId": job.id, "status": job.status,
+                    "result": copy.deepcopy(job.result), "error": job.error,
+                    "cancelable": job.cancelable}
+
     def cancelable(self, job_id: str) -> bool:
         with self._lock:
             job = self._jobs.get(job_id)
@@ -173,24 +185,29 @@ class JobRunner:
         while True:
             job, fn = self._queue.get()
             if job.cancel_event.is_set():
-                job.status = "cancelled"
+                with self._lock:
+                    job.status = "cancelled"
                 self.bus.emit("job.cancelled", {}, job_id=job.id)
                 continue
-            job.status = "running"
+            with self._lock:
+                job.status = "running"
             ctx = JobContext(self, job)
             self.bus.emit("job.started", {"title": job.title}, job_id=job.id)
             try:
                 result = fn(ctx)
                 if job.cancel_event.is_set():
-                    job.status = "cancelled"
+                    with self._lock:
+                        job.status = "cancelled"
                     self.bus.emit("job.cancelled", {}, job_id=job.id)
                 else:
-                    job.status = "done"
-                    job.result = result
+                    with self._lock:
+                        job.result = result
+                        job.status = "done"
                     self.bus.emit("job.done", {"result": result}, job_id=job.id)
             except Exception as exc:
-                job.status = "error"
-                job.error = str(exc)
+                with self._lock:
+                    job.error = str(exc)
+                    job.status = "error"
                 if self.logger:
                     try:
                         self.logger(f"任务失败: {exc}\n{traceback.format_exc()}",

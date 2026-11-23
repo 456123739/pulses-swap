@@ -89,17 +89,22 @@ class ApiFlowTest(unittest.TestCase):
                            {"name": name, "notes": "新增 beta"})
         self.assertEqual(second.status, "done", second.error)
 
-        # 分享页故障（账号接口仍然可用）：更新不能失败，也不能假装“云端不可用”
+        # 强制公开清单读取失败，即使有历史清单也必须停止发布。
         folder_id = (ctrl.online.source_of(name) or {}).get("folder_id")
-        share = self.server.share_server(folder_id)
-        if share is not None:
-            share.stop()
-            self.server._shares.pop(folder_id, None)
+        from unittest.mock import patch
+        from online.errors import NetworkError
         self._zip(self.base / "gamma.zip", "c.json", b'{"c":3}')
         self._job(api, jobs, "preset.import",
                   {"name": name, "paths": [str(self.base / "gamma.zip")]})
+        before = dict(self.server.files_in(folder_id))
+        with patch.object(ctrl.online, "_fetch_manifest_bounded",
+                          side_effect=NetworkError("模拟分享页连接失败")):
+            failed = self._job(api, jobs, "online.publish.auto",
+                               {"name": name, "notes": "不允许使用缓存"})
+        self.assertEqual(failed.status, "error")
+        self.assertEqual(self.server.files_in(folder_id), before)
         third = self._job(api, jobs, "online.publish.auto",
-                          {"name": name, "notes": "分享页故障时更新"})
+                          {"name": name, "notes": "恢复联网后更新"})
         self.assertEqual(third.status, "done", third.error)
 
         diag = ctrl.net_diagnose(name)["steps"]

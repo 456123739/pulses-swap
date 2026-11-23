@@ -418,7 +418,7 @@ class OnlineService:
         """读分享里的 manifest，最多等 timeout 秒。
 
         网盘抽风时「解析分享页 → 轮询直链」这条重试链能卡好几分钟，
-        界面上就是「一直在检查、连不上」。到点直接放弃，让调用方退回缓存。
+        界面上就是「一直在检查、连不上」。到点明确失败，调用方不得退回缓存。
         """
         box: dict = {}
 
@@ -482,8 +482,9 @@ class OnlineService:
 
     def _touch_source(self, preset: str, data: dict) -> None:
         record = self.sources.get(preset)
-        record["last_version"] = str(data.get("version") or "")
-        record["last_generation"] = int(data.get("generation") or 0)
+        # 看见云端版本不代表已安装/发布该版本，二者必须分开记录。
+        record["checked_version"] = str(data.get("version") or "")
+        record["checked_generation"] = int(data.get("generation") or 0)
         record["last_check"] = int(time.time())
         self.sources.put(preset, record)
 
@@ -565,18 +566,8 @@ class OnlineService:
         source_error = ""
         last_error: OnlineError | None = None
         phase("连接云端…")
-        if prefer_cache:
-            record = self.sources.get(ref.name)
-            last_check = int(record.get("last_check") or 0)
-            cached = self.load_cloud_manifest(ref.name)
-            if cached is not None and time.time() - last_check < cache_ttl:
-                phase("使用最近缓存…")
-                local = self.scan(ref)
-                plan = diff.compare(local, self._sanitize_cloud(cached),
-                                    role=role, app_version=self.app_version,
-                                    max_file_size=max_file_size)
-                plan.source_error = ""
-                return plan
+        # 保留旧参数供调用方兼容，但任何云端检查都必须实时读取。
+        # 本地哈希缓存仍可复用；历史云端 manifest 不能证明当前远端内容。
         # 主链接 + 备用链接一共只给 45 秒：别在一个源上吊死
         deadline = time.monotonic() + 45.0
         for share in self._share_candidates(ref.name):
@@ -595,12 +586,7 @@ class OnlineService:
                 self._log(f"源不可用（{share.share_url}）：{exc}", "WARNING")
         if cloud is None:
             source_error = str(last_error or "没有可用的源")
-            if allow_cache:
-                cloud = self.load_cloud_manifest(ref.name)
-                offline = cloud is not None
-            if cloud is None:
-                raise last_error or SourceError(source_error)
-            self._log(f"云端不可用，改用上次缓存：{source_error}", "WARNING")
+            raise last_error or SourceError(source_error)
 
         cloud = self._sanitize_cloud(cloud)
         phase("扫描本地文件…")
@@ -610,6 +596,8 @@ class OnlineService:
                             max_file_size=max_file_size)
         plan.offline = offline
         plan.source_error = source_error
+        plan._cloud_snapshot = json.dumps(cloud, sort_keys=True, ensure_ascii=False)
+        plan._local_snapshot = json.dumps(local, sort_keys=True, ensure_ascii=False)
         return plan
 
     # ------------------------------------------------------------------
@@ -617,7 +605,18 @@ class OnlineService:
     # ------------------------------------------------------------------
     def sync(self, ref: PresetRef, plan: diff.Plan, selection,
              *, on_item=None, on_progress=None, cancel=None) -> SyncResult:
+        if plan.offline:
+            raise SourceError("不能执行离线缓存同步计划，请重新联网检查")
+        if plan.blocked:
+            raise SourceError("当前版本无法同步这个预设：" + "；".join(plan.blocked))
+        if getattr(plan, "_cloud_snapshot", None) is not None:
+            fresh = self.check(ref, role="player", allow_cache=False, prefer_cache=False)
+            if (fresh._cloud_snapshot != plan._cloud_snapshot
+                    or fresh._local_snapshot != plan._local_snapshot):
+                raise SourceError("本地或云端内容在检查后发生变化，请重新检查再同步")
         items = plan.selected_items(selection)
+        if not items:
+            raise SourceError("没有可执行的同步项，请重新检查并选择文件")
         downloads = [i for i in items if i.action in (diff.DOWNLOAD, diff.REPAIR)]
         removals = [i for i in items
                     if i.action in (diff.DELETE_LOCAL, diff.ASK_DELETE_LOCAL)]
@@ -639,6 +638,8 @@ class OnlineService:
                     [i.cloud for i in downloads],
                     on_item=on_item, on_progress=on_progress)
                 for item, outcome in zip(downloads, results):
+                    if cancel is not None and cancel():
+                        raise CancelledError("同步已取消")
                     if not outcome.ok:
                         result.failed.append((item.path, outcome.error))
                         continue
@@ -656,7 +657,11 @@ class OnlineService:
                 entry = item.local or {}
                 if installer.remove_local(entry):
                     result.removed.append(item.path)
+                else:
+                    result.failed.append((item.path, "本地文件移入回收站失败"))
 
+            if cancel is not None and cancel():
+                raise CancelledError("同步已取消")
             # 取消时只装好了一部分：不能把版本/manifest 推进到云端。
             self._finish(ref, plan, result,
                          all_ok=not result.failed and not result.cancelled)
@@ -672,10 +677,13 @@ class OnlineService:
                 result: SyncResult, *, all_ok: bool) -> None:
         """同步成功后更新 index.json / version.txt / 本地 manifest。"""
         cloud = self.load_cloud_manifest(ref.name) or {}
-        if all_ok and cloud.get("files"):
-            self.save_local_manifest(ref.name, cloud["files"])
-        else:
-            self.scan(ref)
+        # 部分勾选仅代表这些条目执行成功，不能把整个预设版本提前推进。
+        actual = self.scan(ref)
+        remaining = diff.compare(actual, self._sanitize_cloud(cloud), role="player",
+                                 app_version=self.app_version)
+        incomplete = any(i.action in (diff.DOWNLOAD, diff.REPAIR, diff.BLOCKED)
+                         for i in remaining.items)
+        all_ok = all_ok and not incomplete
 
         try:
             # 有文件失败时不能把版本推进到云端新版本：本地并不完整
@@ -1080,12 +1088,8 @@ class OnlineService:
 
     def _cloud_manifest_for_publish(self, preset: str, account: LanzouAccount,
                                     folder: int) -> dict:
-        """开发者侧读云端 manifest：用自己文件夹的分享链接去取。
-
-        取不到就退回上次缓存——发布器会先删同名文件，所以即使缓存旧了也不会
-        传重复文件，只是多做几次删除。
-        """
-        cached = self.load_cloud_manifest(preset)
+        """实时读取云端 manifest；任何读取失败都中止，绝不以历史清单代替。"""
+        # 云端计划必须来自本次在线读取；历史清单只用于恢复，不能作为发布依据。
         self._cloud_offline = False
 
         # 先看文件夹里到底有没有东西：新建的空文件夹根本不需要去抓分享页，
@@ -1127,10 +1131,6 @@ class OnlineService:
             except OnlineError as exc:
                 self._log(f"读取云端 manifest 失败：{exc}", "WARNING")
 
-        if cached is not None:
-            self._log("账号在线，但分享页暂时读不到 manifest：用上次记录做比对（发布前仍会重新列云端文件）",
-                      "WARNING")
-            return cached
         raise SourceError(
             "云端已经有文件，但读不到 manifest（分享页不可用）",
             hint="稍后重试；或确认这个文件夹的分享链接还能打开。不会用缓存假装成功。")
@@ -1183,11 +1183,17 @@ class OnlineService:
         record = self.sources.get(preset) if preset else {}
         folder = record.get("folder_id") if record else None
         path = str(record.get("cloud_path") or "") if record else ""
-        if path and not folder:
-            run("定位预设目录", lambda: (account.ensure_path(path) and path))
-        elif path:
-            run("读取预设目录", lambda: f"{len(account.list_files(int(folder)))} 个文件")
         if path:
+            def locate_folder():
+                nonlocal folder
+                folder = account.find_path(path)
+                if folder is None:
+                    raise SourceError(f"预设目录不存在：{path}")
+                return f"{path} · {len(account.list_files(int(folder)))} 个文件"
+            located = run("读取预设目录", locate_folder)
+        else:
+            located = False
+        if path and located:
             share = {}
             ok = run("取分享链接",
                      lambda: share.update(account.folder_share(int(folder))) or
@@ -1196,9 +1202,7 @@ class OnlineService:
                 def open_share():
                     reader = LanzouShare(share["url"], share.get("password", ""),
                                          log=self.log, sleep=self.sleep)
-                    info = reader.find_manifest()
-                    if not info:
-                        raise SourceError("分享页能打开，但没有找到 manifest")
+                    info = self._fetch_manifest_bounded(reader)
                     return f"{info.get('version', '')} · {len(info.get('files') or [])} 项"
                 run("打开分享页并读取 manifest", open_share)
         run("账号容量", lambda: (account.quota() or {}).get("used", ""))
@@ -1415,8 +1419,9 @@ class OnlineService:
         plan = diff.compare(local, cloud, role="developer",
                             app_version=self.app_version)
         plan.cloud_name = plan.cloud_name or ref.name
-        # 云端这次没读到时，计划是基于缓存的：可以展示，但不能拿来发布
         plan.offline = False
+        plan._cloud_snapshot = json.dumps(cloud, sort_keys=True, ensure_ascii=False)
+        plan._local_snapshot = json.dumps(local, sort_keys=True, ensure_ascii=False)
         return plan
 
     def publish(self, ref: PresetRef, plan: diff.Plan, selection,
@@ -1427,7 +1432,16 @@ class OnlineService:
             raise AuthError("只有开发者可以发布到云端")
         account = self._require_account()
         folder = self._folder_of(ref.name, account)
+        if plan.offline:
+            raise SourceError("不能执行离线缓存发布计划，请重新联网检查")
         entries = self.scan(ref)
+        cloud = self._sanitize_cloud(self._cloud_manifest_for_publish(ref.name, account, folder))
+        if getattr(plan, "_cloud_snapshot", None) is not None and (
+                plan._cloud_snapshot != json.dumps(cloud, sort_keys=True, ensure_ascii=False)):
+            raise SourceError("云端内容在检查后发生变化，请重新生成发布计划")
+        if getattr(plan, "_local_snapshot", None) is not None and (
+                plan._local_snapshot != json.dumps(entries, sort_keys=True, ensure_ascii=False)):
+            raise SourceError("本地文件在检查后发生变化，请重新生成发布计划")
         staging = paths.staging_dir(self.db_path, ref.name)
         shutil.rmtree(staging, ignore_errors=True)
         os.makedirs(staging, exist_ok=True)
@@ -1439,7 +1453,7 @@ class OnlineService:
                 selection=selection, version=version, notes=notes,
                 min_app=min_app, name=ref.name,
                 previous_generation=plan.cloud_generation,
-                previous_manifest=self.load_cloud_manifest(ref.name) or None,
+                previous_manifest=cloud or None,
                 on_item=on_item, on_progress=on_progress)
         finally:
             shutil.rmtree(staging, ignore_errors=True)

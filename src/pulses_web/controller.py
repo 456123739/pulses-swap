@@ -115,6 +115,8 @@ class AppController:
     def __init__(self, base_dir: Path | None = None, bus=None):
         self.bus = bus
         self.lock = threading.RLock()
+        # 网络清单读取线程会在持有业务锁的任务等待期间写日志，不能复用业务锁。
+        self._log_lock = threading.Lock()
         self.logs = deque(maxlen=1200)
         self.base_dir = Path(base_dir or self._load_database_path())
         self.base_dir.mkdir(parents=True, exist_ok=True)
@@ -209,9 +211,13 @@ class AppController:
     def add_log(self, message, level="INFO", verbose=True):
         entry = {"time": time.strftime("%H:%M:%S"), "message": str(message),
                  "level": str(level), "verbose": bool(verbose)}
-        with self.lock:
+        with self._log_lock:
             self.logs.append(entry)
         self.emit("log.append", entry)
+
+    def _log_snapshot(self):
+        with self._log_lock:
+            return list(self.logs)[-300:]
 
     def _init_online(self, db_path=None):
         self.online = None
@@ -284,7 +290,7 @@ class AppController:
                 "publish_ready": bool(self._publish_owner == self._owner(self.selected)
                                      and self.last_publish_plan is not None),
                 "recent": self.recent.get_all()[:8],
-                "logs": list(self.logs)[-300:],
+                "logs": self._log_snapshot(),
                 "settings": self._settings_state(),
                 "capabilities": {
                     "developer": self.role == "developer",
@@ -346,8 +352,9 @@ class AppController:
             data = json.loads(raw)
             if isinstance(data.get("last_ops"), dict):
                 self._last_ops = data["last_ops"]
-            if isinstance(data.get("checks"), dict):
-                self._checks = data["checks"]
+            # Checks belong to a particular live pack/local snapshot. Persisted names
+            # alone cannot establish identity or freshness after restart.
+            self._checks = {}
         except (OSError, ValueError, TypeError):
             pass
 
@@ -590,6 +597,7 @@ class AppController:
         if imported:
             pm.update_preset_index(name)
             pm.save_cache()
+            self._clear_current_plans()
             self._checks.pop(name, None)
             self._rev += 1
         if imported and skipped:
@@ -686,6 +694,9 @@ class AppController:
         except Exception:
             pass
         self.selected = name
+        self._clear_current_plans()
+        self._checks.pop(name, None)
+        self._save_online_state()
         self._rev += 1
         return {"ok": True, "state": self.state()}
 
@@ -783,12 +794,19 @@ class AppController:
     def cloud_delete(self, kind: str, obj_id: int, path: str = ""):
         if self.role != "developer":
             raise PermissionError("只有开发者可以删除云端文件")
-        if kind == "folder" and path:
-            target = path.rstrip("/")
+        if kind == "folder":
+            if not str(path or "").strip():
+                raise ValueError("缺少云端目录路径，无法确认是否包含已绑定预设")
+            from posixpath import normpath
+            target = normpath("/" + str(path).replace("\\", "/").lstrip("/"))
             for name in self._bound_names():
                 source = (self.online.source_of(name) or {}) if self.online else {}
-                if str(source.get("cloud_path") or "").rstrip("/") == target:
-                    raise ValueError(f"这个目录属于已绑定预设「{name}」；先解除绑定再删，避免预设指向空目录")
+                bound = str(source.get("cloud_path") or "").strip()
+                if not bound:
+                    continue
+                bound = normpath("/" + bound.replace("\\", "/").lstrip("/"))
+                if bound == target or bound.startswith(target.rstrip("/") + "/"):
+                    raise ValueError(f"这个目录包含已绑定预设「{name}」；先解除绑定再删，避免预设指向空目录")
         out = self._require_online().cloud_delete(kind, obj_id)
         self._rev += 1
         return {"result": out, "state": self.state()}
@@ -946,8 +964,9 @@ class AppController:
         online = self._require_online()
         if not self.preset_manager or name not in self.preset_manager.presets:
             raise ValueError("预设不存在")
-        self.last_publish_plan = None
-        self._publish_owner = None
+        self._clear_current_plans()
+        self._checks.pop(name, None)
+        self._save_online_state()
         plan = online.check(
             self._ref(name), role=self.role, allow_cache=False, prefer_cache=False,
             on_phase=lambda text: ctx.progress(None, phase="check", message=text)
@@ -1038,13 +1057,28 @@ class AppController:
                              current=index, total=count)
         else:
             on_progress = on_item = None
-        result = online.sync(self._ref(name), plan, selection,
-                             on_item=on_item, on_progress=on_progress,
-                             cancel=(lambda: ctx.cancelled) if ctx else None)
-        # 下载/删除已经改过本地文件：用这次计划写一份干净状态，避免成功后回落“未检查”
-        self._store_check_from_plan(name, plan, "已是最新", same_paths=set(selection))
+        # Consume before transfer: failure/cancellation may also change local files.
+        self._clear_current_plans()
+        self._checks.pop(name, None)
+        self._save_online_state()
+        try:
+            result = online.sync(self._ref(name), plan, selection,
+                                 on_item=on_item, on_progress=on_progress,
+                                 cancel=(lambda: ctx.cancelled) if ctx else None)
+        except Exception as exc:
+            self._record_op(name, False, "sync", str(exc))
+            self._rev += 1
+            raise
+        outcome = self._serialize(result)
+        cancelled = bool(outcome.get("cancelled") or (ctx and ctx.cancelled))
+        failed = len(outcome.get("failed") or [])
+        ok = not cancelled and not failed and outcome.get("ok", True)
+        message = ("同步已取消" if cancelled else
+                   f"同步失败 · {failed} 项" if not ok else "所选项目同步完成")
+        # A completed selection is not evidence of full equality; require a fresh check.
+        self._record_op(name, ok, "sync", message + " · 请重新检查")
         self._rev += 1
-        return {"result": self._serialize(result), "state": self.state()}
+        return {"result": outcome, "state": self.state()}
 
     @staticmethod
     def _next_version(value: str) -> str:
@@ -1086,7 +1120,9 @@ class AppController:
             self._batch_phase(ctx, i, total, f"更新 {name}")
             try:
                 out = self.sync_auto(name, ctx=ctx)
-                if out.get("changed"):
+                if out.get("ok") is False:
+                    failed.append((name, out.get("message") or "更新未完成"))
+                elif out.get("changed"):
                     updated.append(name)
                 else:
                     unchanged.append(name)
@@ -1154,6 +1190,10 @@ class AppController:
                 raise ValueError("没有生成差异计划")
             if plan.offline:
                 raise ValueError("云端暂时不可用，已保留本地预设，请稍后重试")
+            if ctx is not None and ctx.cancelled:
+                raise RuntimeError("更新已取消")
+            if plan.blocked:
+                raise ValueError("；".join(plan.blocked))
             actions = {diff.DOWNLOAD, diff.REPAIR}
             if bool(getattr(self.settings, "online_sync_clean", True)):
                 actions.add(diff.ASK_DELETE_LOCAL)
@@ -1163,6 +1203,8 @@ class AppController:
                 self.add_log(f"一键更新：{len(blocked)} 个文件无法自动处理，已跳过",
                              "WARNING")
             if not selection:
+                if blocked:
+                    raise ValueError(f"更新未完成：{len(blocked)} 个文件受限，无法自动处理")
                 message = ("当前预设已是最新" if not plan.has_changes
                            else "没有可自动处理的安全项；如确需删除本地多余，请开启高级操作")
                 self.add_log(f"一键更新：{message}", "SUCCESS", verbose=False)
@@ -1180,13 +1222,18 @@ class AppController:
                 out["state"] = applied_out["state"]
                 applied = True
             out["applied"] = applied
-            out["changed"] = len(selection)
-            failed_items = len((out.get("result") or {}).get("failed") or [])
-            out["ok"] = failed_items == 0
-            out["message"] = (f"更新完成 · {len(selection)} 项"
+            result = out.get("result") or {}
+            out["changed"] = len(result.get("installed") or []) + len(result.get("removed") or [])
+            failed_items = len(result.get("failed") or [])
+            cancelled = bool(result.get("cancelled") or (ctx and ctx.cancelled))
+            out["ok"] = not cancelled and failed_items == 0 and result.get("ok", True)
+            label = "更新已取消" if cancelled else "更新完成" if out["ok"] else "更新未完成"
+            out["message"] = (f"{label} · 实际变更 {out['changed']} 项"
                               + (" · 已重新替换" if applied else "")
-                              + (f" · 失败 {failed_items} 项" if failed_items else ""))
-            self._record_op(name, failed_items == 0, "sync", out["message"])
+                              + (f" · 失败 {failed_items} 项" if failed_items else "")
+                              + " · 请重新检查")
+            self._record_op(name, out["ok"], "sync", out["message"])
+            out["state"] = self.state()
             return out
         except Exception as exc:
             self._record_op(name, False, "sync", str(exc))
@@ -1226,6 +1273,10 @@ class AppController:
                 raise ValueError("没有生成发布计划")
             if plan.offline:
                 raise ValueError("云端读取失败，已拒绝用缓存计划发布")
+            if ctx is not None and ctx.cancelled:
+                raise RuntimeError("发布已取消")
+            if plan.blocked:
+                raise ValueError("；".join(plan.blocked))
             # 安全默认：只上传新增/变更，不自动删除云端多余文件。
             selection = [i.path for i in plan.items if i.action == diff.UPLOAD]
             extras = [i for i in plan.items if i.action == diff.DELETE_CLOUD]
@@ -1233,6 +1284,9 @@ class AppController:
                 self.add_log(f"一键发布：云端多余 {len(extras)} 项已保留",
                              "INFO")
             if not selection:
+                blocked = [i for i in plan.items if i.action == diff.BLOCKED]
+                if blocked:
+                    raise ValueError(f"发布未完成：{len(blocked)} 个文件受限，无法自动上传")
                 message = ("已是最新，无需发布" if not extras
                            else "云端多余文件已保留，没有需要上传的内容")
                 self.add_log(f"一键发布：{message}", "SUCCESS", verbose=False)
@@ -1261,6 +1315,7 @@ class AppController:
             out["changed"] = len(selection)
             out["message"] = f"发布完成 · {version} · {len(selection)} 项"
             self._record_op(name, True, "publish", out["message"])
+            out["state"] = self.state()
             return out
         except Exception as exc:
             self._record_op(name, False, "publish", str(exc))
@@ -1349,6 +1404,9 @@ class AppController:
         online = self._require_online()
         if self.role != "developer":
             raise PermissionError("只有开发者可以发布")
+        self._clear_current_plans()
+        self._checks.pop(name, None)
+        self._save_online_state()
         plan = online.publish_plan(
             self._ref(name),
             on_phase=lambda text: ctx.progress(None, phase="publish", message=text)
@@ -1387,6 +1445,9 @@ class AppController:
             selection = [p for p in selection if p in planned]
             if not selection:
                 raise ValueError("请至少勾选一项属于当前计划的文件；空选择不会发布")
+        self._clear_current_plans()
+        self._checks.pop(name, None)
+        self._save_online_state()
         result = online.publish(
             self._ref(name), plan, selection, version=version,
             notes=notes, min_app=min_app,
@@ -1400,14 +1461,14 @@ class AppController:
             if isinstance(result, dict):
                 return result.get(key, default)
             return getattr(result, key, default)
+        if _get("ok", False) and self.preset_manager:
+            info = self.preset_manager.presets.get(name)
+            if info is not None:
+                info["version"] = str(_get("version", version) or version)
         self.add_log(f"发布结束：上传 {len(_get('uploaded', []))} 项、"
                      f"删除 {len(_get('deleted', []))} 项、失败 {len(_get('failed', []))} 项",
                      "SUCCESS" if _get('ok', False) else "WARNING")
-        if _get("ok", False):
-            self._store_check_from_plan(name, plan, f"已上传 {version} · {plan.summary()}",
-                                        same_paths=set(selection))
-        else:
-            self._checks.pop(name, None)
+        # Selected publication does not prove full equality; leave comparison unverified.
         self._rev += 1
         return {"result": self._serialize(result), "state": self.state()}
 

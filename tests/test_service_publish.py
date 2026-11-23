@@ -145,6 +145,26 @@ class PublishLoopTest(unittest.TestCase):
         self.assertEqual(len(history), 1)
         self.assertEqual(history[0]["version"], "2026.10.18")
 
+    def test_stale_publish_plan_rejects_changed_cloud(self):
+        self._login()
+        self.dev.set_cloud_path("测试预设", "/PulsesSwap/测试预设")
+        old = self.dev.publish_plan(self.dev_ref)
+        fresh = self.dev.publish_plan(self.dev_ref)
+        first = self.dev.publish(self.dev_ref, fresh, diff.selection_of(fresh), version="v1")
+        self.assertTrue(first.ok, first.failed)
+        with self.assertRaises(SourceError):
+            self.dev.publish(self.dev_ref, old, diff.selection_of(old), version="v2")
+        self.assertEqual(self.dev.source_of("测试预设")["last_version"], "v1")
+
+    def test_publish_plan_rejects_changed_local_files(self):
+        self._login()
+        self.dev.set_cloud_path("测试预设", "/PulsesSwap/测试预设")
+        plan = self.dev.publish_plan(self.dev_ref)
+        write(self.dev_root / "readme.txt", b"changed after check")
+        with self.assertRaises(SourceError):
+            self.dev.publish(self.dev_ref, plan, diff.selection_of(plan), version="v2")
+        self.assertFalse(self.account_server.files_in(self._cloud_folder()))
+
     def _cloud_name(self, manifest, path):
         for entry in manifest.get("files") or []:
             if entry.get("path") == path:

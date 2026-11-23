@@ -341,7 +341,7 @@ function nextStepOf(snap) {
       return { tone: 'todo', title: '这个预设还没上传到云端', text: '点「上传到云端」会自动建 /PulsesSwap/预设名 并生成分享链接。', cta: '上传到云端', action: 'publishNew' }
     }
     if (lastFailed) {
-      return { tone: 'warn', title: '上次上传没有完成', text: (lastOp.message || '看日志了解卡在哪一步') + '；修好后重试即可，云端仍是上一个完整版本。', cta: '重试上传', action: 'publishAuto' }
+      return { tone: 'warn', title: '上次上传没有完成', text: (lastOp.message || '看日志了解卡在哪一步') + '；请查看日志中的回滚结果，重新检查后再上传。', cta: '重试上传', action: 'publishAuto' }
     }
     if (!selected.checked_at) {
       return { tone: 'todo', title: '还没检查过云端', text: '先检查一次，确认云端和本地到底差在哪，再决定上传什么。', cta: '检查差异', action: 'check' }
@@ -659,7 +659,7 @@ function Home({ snap, actions, busy, publishNotes = '' }) {
                 <span><b>{selected?.version || '—'}</b> 版本</span>
                 <span><b>{selected?.count ?? 0}</b> 个枪包</span>
                 <span><b>{snap.online.binding?.url ? '已绑定' : '未绑定'}</b> 云端</span>
-                <span><b>{snap.settings?.online_sync_clean ? '完全同步' : '保留多余'}</b> 本地多余</span>
+                <span><b>{snap.settings?.online_sync_clean ? '移入回收站' : '保留'}</b> 多余文件处理策略</span>
               </div>
             </motion.div>
             <div className="hero-actions">
@@ -723,7 +723,7 @@ function Home({ snap, actions, busy, publishNotes = '' }) {
                   </button>}
                 </>}
             </div>
-            {snap.plan?.offline && <p className="auto-note warning-note">云端暂时连不上，下面用的是上次缓存的结果；网络恢复后再点一次会自动走网络。</p>}
+            {snap.plan?.offline && <p className="auto-note warning-note">无法确认实时云端内容，已停止云端操作；请恢复网络后重新检查。</p>}
             {busy && <div className="hero-progress"><Progress value={busy.progress} text={busy.text || busy.title} /></div>}
           </motion.section>
 
@@ -839,14 +839,14 @@ function Manage({ snap, actions, busy, tab = 'overview', onTab, publishNotes = '
   }, [snap.online.account?.label, snap.online.available, snap.revision])
   useEffect(() => { setUrl(snap.online.binding?.url || ''); setPassword(snap.online.binding?.password || '') }, [snap.online.binding?.url, snap.online.binding?.password])
   useEffect(() => { setPublishVersion(selected?.version || '') }, [selected?.name, selected?.version])
-  const planMismatch = Boolean(snap.plan && snap.plan.role !== snap.role)
+  const planMismatch = Boolean(snap.plan && (snap.plan.role !== snap.role || snap.plan.preset !== snap.selected))
   const plan = planMismatch ? null : snap.plan
-  useEffect(() => { setSelection(null) }, [snap.selected, plan?.generation, snap.role])
-  const selectedPaths = selection ?? new Set((plan?.items || []).filter((i) => i.checked).map((i) => i.path))
+  const selectionScope = JSON.stringify([snap.database, snap.pack.path, snap.selected, snap.role, plan])
+  const selectedPaths = selection?.scope === selectionScope ? selection.paths : new Set((plan?.items || []).filter((i) => i.checked).map((i) => i.path))
   const toggle = (path) => {
     const next = new Set(selectedPaths)
     next.has(path) ? next.delete(path) : next.add(path)
-    setSelection(next)
+    setSelection({ scope: selectionScope, paths: next })
   }
   const isDeveloper = snap.role === 'developer'
   const boundCount = snap.online.bound_count || 0
@@ -909,9 +909,9 @@ function Manage({ snap, actions, busy, tab = 'overview', onTab, publishNotes = '
         {plan && plan.preset && plan.preset !== snap.selected &&
           <p className="auto-note warning-note">这份差异计划属于「{plan.preset}」，不是当前选中的「{snap.selected}”。
             <button className="text-btn" onClick={() => actions.select(plan.preset)}>切换到 {plan.preset}</button></p>}
-        {plan?.offline && <p className="auto-note warning-note">云端暂时连不上，这是上次缓存的结果；恢复后再点「{autoLabel}」会重新联网检查。</p>}
+        {plan?.offline && <p className="auto-note warning-note">无法读取实时云端内容，已停止操作；恢复网络后请重新检查，历史清单不会用于发布或同步。</p>}
         {planMismatch ? <p className="auto-note warning-note">当前差异计划属于另一个身份，已隐藏；点上方“{autoLabel}”会按当前身份重新计算。</p>
-          : !plan ? <p className="muted pad">不需要手动检查。点上方“{autoLabel}”，软件会逐个比对所有已绑定预设并完成操作。</p> : <>
+          : !plan ? <div className="pad"><p className="muted">{isDeveloper && selected && !selectedBound ? '先上传这个预设，自动初始化云端目录。' : '检查当前预设后查看差异，或返回总览执行全部更新。'}</p>{isDeveloper && selected && !selectedBound && <button className="btn primary" disabled={busy} onClick={() => actions.openUpload(selected.name)}>上传到云端</button>}</div> : <>
           {advanced && isDeveloper && <div className="publish-row">
             <label className="field">
               <span>发布版本号 <Hint text="给玩家看的版本，建议只改最后一位，例如 v1.0.4 → v1.0.5。" /></span>
@@ -932,7 +932,7 @@ function Manage({ snap, actions, busy, tab = 'overview', onTab, publishNotes = '
           </div> : <>
             <div className="plan-cta">
               <button className="btn primary plan-primary" disabled={busy || !selected || plan?.offline}
-                onClick={() => (isDeveloper ? actions.publishAuto(selected.name) : actions.syncAuto(selected.name))}>
+                onClick={() => (isDeveloper ? (selectedBound ? actions.publishAuto(selected.name) : actions.openUpload(selected.name)) : actions.syncAuto(selected.name))}>
                 {isDeveloper ? '上传这个预设' : '更新这个预设'}
               </button>
               {isDeveloper && selected && !selectedBound && <button className="btn ghost" disabled={busy}
@@ -1255,6 +1255,10 @@ export default function App() {
   const autoCheckRef = useRef('')
   const toastTimer = useRef(null)
 
+  const submittingJobRef = useRef(false)
+  const pendingJobEvents = useRef([])
+  const jobHandlerRef = useRef(null)
+  const startJobRef = useRef(null)
   const lastJobRef = useRef(null)
   const autoRetryRef = useRef(0)
   const busyRef = useRef(false)
@@ -1281,49 +1285,51 @@ export default function App() {
 
   useEffect(() => {
     let alive = true
-    const off = subscribe((event) => {
+    const handleEvent = (event) => {
       if (!alive) return
       const type = event?.type
+      if (type?.startsWith('job.') && submittingJobRef.current) { pendingJobEvents.current.push(event); return }
       if (type === 'job.progress') {
-        if (jobIdRef.current && event.jobId !== jobIdRef.current) return
+        if (!jobIdRef.current || event.jobId !== jobIdRef.current) return
         if (busyTimer.current) clearTimeout(busyTimer.current)
         busyTimer.current = setTimeout(() => {
-          busyRef.current = false
-          setBusy(null)
-          showToast('任务长时间没有响应，已自动解锁；可以重试或到日志页看原因', 'warning')
+          showToast('任务长时间没有响应，请查看日志或取消任务', 'warning')
         }, 5 * 60 * 1000)
         const d = event.data || {}
         setBusy((prev) => prev ? { ...prev, progress: d.percent ?? prev.progress,
           text: d.message || prev.text, current: d.current ?? prev.current,
           total: d.total ?? prev.total, updatedAt: Date.now() } : prev)
       } else if (type === 'job.done') {
-        if (jobIdRef.current && event.jobId !== jobIdRef.current) return
+        if (!jobIdRef.current || event.jobId !== jobIdRef.current) return
         const st = event.data?.result?.state
         if (st) setSnap(st)
         else refresh()
         clearBusy()
         const r = event.data?.result
-        const failed = r?.result?.ok === false || r?.ok === false
+        const result = r?.result || r
+        const cancelled = Boolean(result?.cancelled)
+        const failed = cancelled || result?.ok === false || r?.ok === false || Boolean(result?.failed?.length)
         const job = lastJobRef.current
         if (!failed) autoRetryRef.current = 0
-        showToast(r?.message || '操作完成', failed ? 'warning' : 'success',
+        showToast(r?.message || (cancelled ? '操作已取消' : failed ? `操作未完成${result?.failed?.length ? ` · 失败 ${result.failed.length} 项` : ''}` : '操作完成'), failed ? 'warning' : 'success',
           failed && job ? { label: '重试', job } : null)
       } else if (type === 'job.error') {
-        if (jobIdRef.current && event.jobId !== jobIdRef.current) return
+        if (!jobIdRef.current || event.jobId !== jobIdRef.current) return
         clearBusy()
+        refresh() // 错误/取消也会改变最后操作与计划状态，不能停留在旧快照。
         const msg = event.data?.message || '操作失败'
         const job = lastJobRef.current
         const transient = /网络|超时|timeout|timed out|连接|Connection|ECONN|502|503|504|429/i.test(msg)
         if (transient && job && autoRetryRef.current < 1) {
           autoRetryRef.current += 1
           showToast('网络不太稳，正在自动重试…', 'info')
-          setTimeout(() => startJob(job.method, job.params, job.title), 1200)
+          setTimeout(() => startJobRef.current?.(job.method, job.params, job.title), 1200)
           return
         }
         autoRetryRef.current = 0
         showToast(msg, 'error', job ? { label: '重试', job } : null)
       } else if (type === 'job.cancelled') {
-        if (jobIdRef.current && event.jobId !== jobIdRef.current) return
+        if (!jobIdRef.current || event.jobId !== jobIdRef.current) return
         clearBusy()
         showToast('操作已取消', 'info')
         refresh()
@@ -1336,6 +1342,8 @@ export default function App() {
         const jid = event.data?.jobId || event.jobId || ''
         if (jid) {
           jobIdRef.current = jid
+          busyRef.current = true
+          lastJobRef.current = null
           setBusy({ title: '拖入整合包', progress: 0, text: '正在读取拖入的整合包…', jobId: jid, cancelable: false })
         }
       } else if (type === 'dnd.error') {
@@ -1344,7 +1352,9 @@ export default function App() {
       } else if (type === 'watchdog.changed') {
         refresh()
       }
-    })
+    }
+    jobHandlerRef.current = handleEvent
+    const off = subscribe(handleEvent)
     let retryTimer = null
     const tryReady = () => {
       whenReady().then((ready) => {
@@ -1412,22 +1422,57 @@ export default function App() {
     if (busyRef.current) { showToast('上一个操作还在进行，等它结束再点', 'warning'); return }
     try {
       busyRef.current = true
+      jobIdRef.current = ''
+      submittingJobRef.current = true
+      pendingJobEvents.current = []
       lastJobRef.current = { method, params, title }
       setBusy({ title, progress: 0, text: '准备中…' })
       // 事件丢失（后端在 invoke 返回前就失败 / evaluate_js 被吞）时，最多锁 5 分钟
       if (busyTimer.current) clearTimeout(busyTimer.current)
       busyTimer.current = setTimeout(() => {
-        busyRef.current = false
-        setBusy(null)
-        showToast('任务长时间没有响应，已自动解锁；可以重试或到日志页看原因', 'warning')
+        showToast('任务长时间没有响应，请查看日志或取消任务', 'warning')
       }, 5 * 60 * 1000)
       const data = await invoke(method, params)
       jobIdRef.current = data?.jobId || ''
+      submittingJobRef.current = false
+      const queuedEvents = pendingJobEvents.current
+      pendingJobEvents.current = []
+      queuedEvents.filter((event) => event.jobId === data?.jobId).forEach((event) => jobHandlerRef.current?.(event))
       setBusy((prev) => prev ? { ...prev, jobId: jobIdRef.current,
         cancelable: Boolean(data?.cancelable) } : prev)
       if (!jobIdRef.current) { clearBusy(); await refresh() }
-    } catch (err) { clearBusy(); showToast(err.message, 'error') }
+    } catch (err) { submittingJobRef.current = false; pendingJobEvents.current = []; clearBusy(); showToast(err.message, 'error') }
   }, [refresh, showToast])
+  startJobRef.current = startJob
+
+  useEffect(() => {
+    if (!busy?.jobId) return undefined
+    const jobId = busy.jobId
+    let alive = true, polling = false, warned = false
+    const poll = async () => {
+      if (!alive || polling || jobIdRef.current !== jobId) return
+      polling = true
+      try {
+        const status = await invoke('job.status', { jobId })
+        if (!alive || jobIdRef.current !== jobId) return
+        const terminal = { done: 'job.done', error: 'job.error', cancelled: 'job.cancelled' }[status?.status]
+        if (terminal) jobHandlerRef.current?.({ type: terminal, jobId,
+          data: terminal === 'job.done' ? { result: status.result } : { message: status.error } })
+        else if (status?.status === 'unknown' && !warned) {
+          warned = true
+          showToast('无法查询当前任务，请查看日志；任务仍保持锁定', 'warning')
+        }
+      } catch (err) {
+        if (alive && jobIdRef.current === jobId && !warned) {
+          warned = true
+          showToast(`任务状态暂时无法查询：${err.message}`, 'warning')
+        }
+      } finally { polling = false }
+    }
+    const timer = setInterval(poll, 2000)
+    poll()
+    return () => { alive = false; clearInterval(timer) }
+  }, [busy?.jobId, showToast])
 
   const cancelJob = useCallback(async () => {
     if (!busy?.jobId) return

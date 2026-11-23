@@ -1,0 +1,100 @@
+{
+  "synthetic": true,
+  "account": "LOCAL MOCK ONLY — NOT A REAL ACCOUNT",
+  "steps": [
+    {
+      "operation": "pack.open",
+      "terminal": "job.done"
+    },
+    {
+      "operation": "preset.import",
+      "terminal": "job.done"
+    },
+    {
+      "operation": "online.publish.new",
+      "terminal": "job.done"
+    },
+    {
+      "operation": "preset.import",
+      "terminal": "job.done"
+    },
+    {
+      "operation": "online.publish.auto",
+      "terminal": "job.done"
+    },
+    {
+      "operation": "preset.import",
+      "terminal": "job.done"
+    },
+    {
+      "operation": "online.publish.auto",
+      "terminal": "job.error"
+    }
+  ],
+  "firstManifest": {
+    "files": [
+      {
+        "cloud": "alpha.f9193502.zip",
+        "packed_sha256": "f9193502feb190beee4725127d82580bc9627b1841d274b2d01aa17bbb2dd16e",
+        "packed_size": 154,
+        "path": "alpha.zip",
+        "sha256": "f9193502feb190beee4725127d82580bc9627b1841d274b2d01aa17bbb2dd16e",
+        "size": 154,
+        "type": "zip"
+      }
+    ],
+    "format": "pulses-manifest",
+    "generated_at": "2026-11-23T15:06:44Z",
+    "generation": 1,
+    "manifest_sha256": "f63a01e4532577d592255c494c02cc496f2936f434ff6c29d3688322facc6b3d",
+    "min_app": "",
+    "name": "模拟界面预设",
+    "notes": "模拟数据首发：alpha",
+    "schema": 2,
+    "version": "v2.3.4"
+  },
+  "visiblePresetVersion": "v2.3.5",
+  "secondManifest": {
+    "files": [
+      {
+        "cloud": "alpha.f9193502.zip",
+        "packed_sha256": "f9193502feb190beee4725127d82580bc9627b1841d274b2d01aa17bbb2dd16e",
+        "packed_size": 154,
+        "path": "alpha.zip",
+        "sha256": "f9193502feb190beee4725127d82580bc9627b1841d274b2d01aa17bbb2dd16e",
+        "size": 154,
+        "type": "zip"
+      },
+      {
+        "cloud": "beta.a12939fe.zip",
+        "packed_sha256": "a12939fef9409f846e0e0c63bfda6915c78297cc2ffc2d57f483c591053cafb0",
+        "packed_size": 151,
+        "path": "beta.zip",
+        "sha256": "a12939fef9409f846e0e0c63bfda6915c78297cc2ffc2d57f483c591053cafb0",
+        "size": 151,
+        "type": "zip"
+      }
+    ],
+    "format": "pulses-manifest",
+    "generated_at": "2026-11-23T15:06:45Z",
+    "generation": 2,
+    "manifest_sha256": "3baab53ca160f70d6c627394e290e7d0c6b8a3e04a1a4b3eff4b4fd5e4d53562",
+    "min_app": "",
+    "name": "模拟界面预设",
+    "notes": "一键发布 · 上传 1 项",
+    "schema": 2,
+    "version": "v2.3.5"
+  },
+  "incrementalUploads": [
+    "beta.a12939fe.zip",
+    "_pulses_manifest.cfg"
+  ],
+  "cacheRejection": {
+    "error": "云端已经有文件，但读不到 manifest（分享页不可用）",
+    "historicalCacheVersion": "v2.3.5",
+    "unchangedRemote": true,
+    "version": "v2.3.5"
+  },
+  "ok": true,
+  "pageErrors": []
+}

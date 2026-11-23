@@ -124,12 +124,12 @@ class ServiceTest(unittest.TestCase):
         self.assertEqual(plan.cloud_generation, 4)
         self.assertFalse(plan.offline)
 
-    def test_prefer_cache_reuses_fresh_manifest_without_network(self):
+    def test_prefer_cache_still_requires_live_network(self):
         self.service.bind("测试预设", self.cloud.url, "28pm")
         first = self.service.check(self.ref)
         before = self.cloud.request_count()
         cached = self.service.check(self.ref, prefer_cache=True)
-        self.assertEqual(self.cloud.request_count(), before)
+        self.assertGreater(self.cloud.request_count(), before)
         self.assertEqual(cached.cloud_generation, first.cloud_generation)
         self.assertEqual(cached.count_of(diff.DOWNLOAD),
                          first.count_of(diff.DOWNLOAD))
@@ -159,6 +159,37 @@ class ServiceTest(unittest.TestCase):
 
         again = self.service.check(self.ref)
         self.assertTrue(again.is_clean, again.summary())
+
+    def test_partial_sync_does_not_advance_full_version(self):
+        self.service.bind("测试预设", self.cloud.url, "28pm")
+        plan = self.service.check(self.ref)
+        selection = [next(i.path for i in plan.items if i.action == diff.DOWNLOAD)]
+        result = self.service.sync(self.ref, plan, selection)
+        self.assertTrue(result.ok, result.failed)
+        record = self.service.source_of("测试预设")
+        self.assertNotEqual(record.get("last_version"), plan.cloud_version)
+        index = json.loads((self.player_root / "index.json").read_text("utf-8"))
+        self.assertNotEqual(index["version"], plan.cloud_version)
+        actual = self.service.scan(self.ref)
+        self.assertEqual(len(actual), 1)
+        remaining = self.service.check(self.ref)
+        self.assertEqual(remaining.count_of(diff.DOWNLOAD), 2)
+
+    def test_sync_rejects_changed_local_snapshot(self):
+        self.service.bind("测试预设", self.cloud.url, "28pm")
+        plan = self.service.check(self.ref)
+        (self.player_root / "new-local.txt").write_text("keep me", encoding="utf-8")
+        with self.assertRaises(SourceError):
+            self.service.sync(self.ref, plan, diff.selection_of(plan))
+        self.assertEqual((self.player_root / "new-local.txt").read_text(), "keep me")
+
+    def test_sync_rejects_incompatible_manifest(self):
+        self.service.bind("测试预设", self.cloud.url, "28pm")
+        plan = self.service.check(self.ref)
+        plan.blocked = ["需要更新软件"]
+        with self.assertRaises(SourceError):
+            self.service.sync(self.ref, plan, diff.selection_of(plan))
+        self.assertFalse((self.player_root / "alpha.zip").exists())
 
     def test_sync_records_source(self):
         self.service.bind("测试预设", self.cloud.url, "28pm")
@@ -252,15 +283,14 @@ class ServiceTest(unittest.TestCase):
         record = self.service.source_of("测试预设")
         self.assertEqual(record["lanzou"]["active_url"], self.cloud.url)
 
-    def test_offline_fallback(self):
+    def test_offline_rejects_even_with_cached_manifest(self):
         self.service.bind("测试预设", self.cloud.url, "28pm")
         first = self.service.check(self.ref)
         self.assertFalse(first.offline)
         self.cloud.stop()
-        plan = self.service.check(self.ref)
-        self.assertTrue(plan.offline)
-        self.assertIn("连接", plan.source_error)
-        self.assertEqual(plan.count_of(diff.DOWNLOAD), 3)
+        from online.errors import OnlineError
+        with self.assertRaises(OnlineError):
+            self.service.check(self.ref, allow_cache=True, prefer_cache=True)
 
     def test_missing_manifest(self):
         empty = MockLanzou({"whatever.txt": b"x"}, password="")

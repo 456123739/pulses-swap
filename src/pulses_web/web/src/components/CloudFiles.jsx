@@ -17,28 +17,42 @@ export default function CloudFiles({ snap, actions, busy }) {
   const [auto, setAuto] = useState(true)
   const [peek, setPeek] = useState(null)
   const accountOk = Boolean(snap.online.account?.label) && snap.online.available !== false
+  const accountKey = `${snap.database || ''}:${snap.online.account?.label || ''}`
+  const activeScope = useRef(accountKey)
+  activeScope.current = accountKey
+  const mounted = useRef(false)
+  const requestId = useRef(0)
+  const targetPath = useRef('/')
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; requestId.current += 1 } }, [])
 
   const load = useCallback(async (target, quiet = false) => {
     if (!accountOk) return
+    if (quiet && target !== targetPath.current) return
+    if (!quiet) targetPath.current = target
+    const id = ++requestId.current, scope = accountKey
+    const current = () => mounted.current && id === requestId.current && activeScope.current === scope
     if (!quiet) setLoading(true)
     setError('')
     try {
       const out = await invoke('online.cloud.browse', { path: target })
+      if (!current()) return
       setData(out); setPath(out?.path || target)
       setTree((prev) => ({ ...prev, [out?.path || target]: out.folders || [] }))
       setUpdatedAt(new Date().toLocaleTimeString('zh-CN', { hour12: false }))
     } catch (err) {
+      if (!current()) return
       setError(err.message)
       if (!quiet) setData(null)
-    } finally { setLoading(false) }
-  }, [accountOk])
+    } finally { if (current()) setLoading(false) }
+  }, [accountOk, accountKey])
 
   const loadQuota = useCallback(() => {
     if (!accountOk) return
-    invoke('online.cloud.quota').then((out) => setQuota(out?.quota || null)).catch(() => {})
-  }, [accountOk])
+    const scope = accountKey
+    invoke('online.cloud.quota').then((out) => { if (mounted.current && activeScope.current === scope) setQuota(out?.quota || null) }).catch(() => {})
+  }, [accountOk, accountKey])
 
-  useEffect(() => { load('/') ; loadQuota() }, [load, loadQuota])
+  useEffect(() => { setData(null); setTree({}); setPeek(null); setQuota(null); setPath('/'); setError(''); load('/'); loadQuota() }, [load, loadQuota])
   useEffect(() => {
     const partsNow = path.split('/').filter(Boolean)
     const nodes = ['/', ...partsNow.map((_, i) => '/' + partsNow.slice(0, i + 1).join('/'))]
@@ -47,14 +61,15 @@ export default function CloudFiles({ snap, actions, busy }) {
       nodes.slice(0, -1).forEach((n) => { next[n] = true })
       return next
     })
+    const scope = accountKey
     nodes.slice(0, -1).forEach(async (n) => {
       if (tree[n]) return
       try {
         const out = await invoke('online.cloud.browse', { path: n })
-        setTree((prev) => (prev[n] ? prev : { ...prev, [n]: out.folders || [] }))
+        if (mounted.current && activeScope.current === scope) setTree((prev) => (prev[n] ? prev : { ...prev, [n]: out.folders || [] }))
       } catch { /* ignore */ }
     })
-  }, [path, tree])
+  }, [path, tree, accountKey])
   useEffect(() => { if (auto && accountOk) { const t = setInterval(() => { if (!document.hidden) load(path, true) }, 20000); return () => clearInterval(t) } return undefined }, [auto, path, accountOk, load])
   useEffect(() => { if (snap.revision) load(path, true) }, [snap.revision])
 
@@ -71,11 +86,12 @@ export default function CloudFiles({ snap, actions, busy }) {
   }, [folders, files, query])
 
   const toggleTree = async (nodePath) => {
+    const scope = accountKey
     const next = !expanded[nodePath]
     setExpanded((prev) => ({ ...prev, [nodePath]: next }))
     if (next && !tree[nodePath]) {
       try { const out = await invoke('online.cloud.browse', { path: nodePath })
-        setTree((prev) => ({ ...prev, [nodePath]: out.folders || [] }))
+        if (mounted.current && activeScope.current === scope) setTree((prev) => ({ ...prev, [nodePath]: out.folders || [] }))
       } catch { /* 没权限/已删除的目录忽略 */ }
     }
   }
@@ -85,7 +101,9 @@ export default function CloudFiles({ snap, actions, busy }) {
       const out = await invoke('online.cloud.share', { path: target })
       const share = out?.share || {}
       const text = share.password ? `${share.url}  密码：${share.password}` : share.url
-      await navigator.clipboard?.writeText(text)
+      if (!share.url) throw new Error('没有获取到分享链接')
+      if (!navigator.clipboard?.writeText) throw new Error('当前环境无法复制，请手动复制分享链接：' + text)
+      await navigator.clipboard.writeText(text)
       actions.toast(share.password ? '分享链接已复制（含密码）' : '分享链接已复制', 'success')
     } catch (err) { actions.toast(err.message, 'error') }
   }

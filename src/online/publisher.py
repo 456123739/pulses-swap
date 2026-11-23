@@ -127,7 +127,7 @@ class Publisher:
         # 让“初始化”是一个真实存在的状态，而不是等最后一步才出现。
         # 只有空目录（真正首次上传）才写初始 manifest；目录里已有文件但缺
         # manifest 时不能凭空生成空表，否则会把旧文件误判成“云端多余”。
-        if previous_manifest is None and not cloud_list:
+        if not cloud_list:
             self._log("云端没有 manifest：生成初始 manifest…", "INFO")
             try:
                 initial = normalize({
@@ -138,11 +138,14 @@ class Publisher:
                     "notes": "初始化",
                     "files": [],
                 })
-                self._upload_manifest(initial, folder_id, pack_dir, cloud_files,
-                                      previous_manifest=None, cloud_list=cloud_list)
+                previous_manifest = self._upload_manifest(
+                    initial, folder_id, pack_dir, cloud_files,
+                    previous_manifest=None, cloud_list=cloud_list)
                 self._log("初始 manifest 已写入云端（generation 0）", "SUCCESS")
             except (OnlineError, OSError) as exc:
-                self._log(f"初始 manifest 写入失败，稍后随发布一起写：{exc}", "WARNING")
+                result.failed.append((MANIFEST_NAME, str(exc)))
+                self._log(f"初始化清单失败，已停止上传：{exc}", "ERROR")
+                return result
         done_bytes = 0
         packed: dict[str, int] = {}
         uploaded_names: dict[str, str] = {}
@@ -197,7 +200,11 @@ class Publisher:
                       "WARNING")
             return result
 
-        self._check_cancel()
+        try:
+            self._check_cancel()
+        except CancelledError:
+            self._drop_uploads(uploaded_ids)
+            raise
         self._log(f"生成 manifest：{len(entries)} 个条目", "INFO")
         try:
             files = self._build_files(entries, plan, packed, uploaded_names,
@@ -415,21 +422,21 @@ class Publisher:
         except OSError as exc:
             raise SourceError("生成云端 manifest 失败",
                               detail=str(exc)) from exc
-        seen_ids = set()
-        for entry in list(cloud_files.values()) + list(cloud_list or []):
-            name = str(entry.get("name") or "")
-            ident = entry.get("id")
-            if not is_manifest_name(name) or not ident:
-                continue                     # 没有 id 的缓存条目不能删，交给下次
-            key = str(ident)
-            if key in seen_ids:
-                continue
-            seen_ids.add(key)
-            if not self.account.delete_file(ident):
-                raise SourceError("旧 manifest 删除失败")
-        for name in MANIFEST_NAMES:
-            cloud_files.pop(name.lower(), None)
         try:
+            seen_ids = set()
+            for entry in list(cloud_files.values()) + list(cloud_list or []):
+                name = str(entry.get("name") or "")
+                ident = entry.get("id")
+                if not is_manifest_name(name) or not ident:
+                    continue                     # 没有 id 的缓存条目不能删，交给下次
+                key = str(ident)
+                if key in seen_ids:
+                    continue
+                seen_ids.add(key)
+                if not self.account.delete_file(ident):
+                    raise SourceError("旧 manifest 删除失败")
+            for name in MANIFEST_NAMES:
+                cloud_files.pop(name.lower(), None)
             info = self.account.upload(target, folder_id)
             returned = str(info.get("name") or "")
             if returned and returned.lower() != MANIFEST_NAME.lower():
@@ -439,7 +446,7 @@ class Publisher:
                 except OnlineError:
                     pass
                 raise SourceError("manifest 上传后被改名，云端可能残留同名文件")
-        except OnlineError:
+        except (OnlineError, OSError):
             # 新 manifest 没上去：把旧的原样传回去，别让云端“没有 manifest”
             if previous_manifest is not None:
                 self._restore_manifest(previous_manifest, folder_id, pack_dir,
@@ -457,7 +464,12 @@ class Publisher:
             target = os.path.join(pack_dir, MANIFEST_NAME)
             save(previous, target)
             info = self.account.upload(target, folder_id)
-            cloud_files[str(info.get("name") or MANIFEST_NAME).lower()] = info
+            returned = str(info.get("name") or MANIFEST_NAME)
+            if returned.lower() != MANIFEST_NAME.lower():
+                raise SourceError("恢复清单被网盘改名，未能确认旧版本恢复")
+            cloud_files[returned.lower()] = info
             self._log("已恢复旧 manifest", "WARNING")
         except Exception as exc:                    # noqa: BLE001
             self._log(f"恢复旧 manifest 失败：{exc}", "ERROR")
+            raise SourceError("发布失败且旧清单恢复未确认，请检查云端目录",
+                              detail=str(exc)) from exc

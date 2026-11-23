@@ -116,6 +116,7 @@ class Api:
             "online.publish.new": self._job("online.publish.new"),
             "online.publish.plan": self._job("online.publish.plan"),
             "online.publish.run": self._job("online.publish.run"),
+            "job.status": lambda p: self._jobs.get_status(p.get("jobId", "")),
             "job.cancel": lambda p: {"cancelled": self._jobs.cancel(p["jobId"])},
         }
 
@@ -280,7 +281,8 @@ class Api:
 
     def _clear_logs(self):
         with self._controller.lock:
-            self._controller.logs.clear()
+            with self._controller._log_lock:
+                self._controller.logs.clear()
             self._controller._rev += 1
             return self._controller.state()
 

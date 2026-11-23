@@ -47,7 +47,8 @@ class FakeOnline:
     def sync(self, ref, plan, selection, on_item=None, on_progress=None,
              cancel=None):
         self.synced = list(selection)
-        return {"ok": True, "selection": list(selection)}
+        return {"ok": True, "selection": list(selection),
+                "installed": list(selection), "removed": [], "failed": []}
 
     def publish_plan(self, ref, on_phase=None):
         if on_phase:
@@ -515,7 +516,7 @@ class AuditGuardTests(unittest.TestCase):
         self.ctrl.login("u", "p")
         self.assertEqual(self.ctrl.settings.role, "player")
 
-    def test_success_writes_clean_check(self):
+    def test_success_requires_fresh_check_before_claiming_clean(self):
         fake = FakeOnline(self._plan(), bound=True)
         fake.account_info = lambda: {"label": "测试"}
         self.ctrl.online = fake
@@ -524,8 +525,8 @@ class AuditGuardTests(unittest.TestCase):
         self.ctrl.state = AppController.state.__get__(self.ctrl)
         self.ctrl.publish("P", "v1.0.1", "", "", ["f0.zip"])
         preset = next(p for p in self.ctrl.state()["presets"] if p["name"] == "P")
-        self.assertTrue(preset["checked_at"])
-        self.assertEqual(preset["pending"], 0)
+        self.assertEqual(preset["checked_at"], 0)
+        self.assertIsNone(self.ctrl.state()["plan"])
 
     def test_state_plan_has_preset_name(self):
         fake = FakeOnline(self._plan(), bound=True)

@@ -84,6 +84,7 @@ await page.addInitScript((s) => {
       } else if (method === 'preset.select') {
         s.selected = params.name
       }
+      if (s.plan) s.plan.preset = s.selected
       return { ok: true, data: JSON.parse(JSON.stringify(s)) }
     },
     async pick_folder() { return { ok: true, data: { path: s.pack.path } } },
@@ -92,8 +93,8 @@ await page.addInitScript((s) => {
 }, state)
 await page.goto('http://127.0.0.1:8765/index.html', { waitUntil: 'networkidle' })
 await page.waitForTimeout(500)
-fs.mkdirSync('/tmp/web_shots', { recursive: true })
-await page.screenshot({ path: '/tmp/web_shots/01-home.png' })
+fs.mkdirSync('/tmp/web_shots_webui', { recursive: true })
+await page.screenshot({ path: '/tmp/web_shots_webui/01-home.png' })
 assert.equal(await page.locator('h1').innerText(), '枪包预设')
 // 主操作必须足够大、在首屏内，且是页面最显眼的动作
 const primary = page.locator('.hero-primary')
@@ -153,7 +154,7 @@ await page.locator('.sidebar').hover()
 await page.waitForTimeout(550)
 assert.ok(Math.abs(parseFloat(await page.locator('.sidebar').evaluate(el => getComputedStyle(el).width)) - 200) < 2, '侧栏展开宽度异常')
 assert.ok(Math.abs(parseFloat(await page.locator('.app').evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ')[0])) - 200) < 2, '布局列宽异常')
-await page.screenshot({ path: '/tmp/web_shots/02-sidebar.png' })
+await page.screenshot({ path: '/tmp/web_shots_webui/02-sidebar.png' })
 await page.mouse.move(640, 450)
 await page.waitForTimeout(500)
 
@@ -164,7 +165,7 @@ assert.equal(await page.locator('.modal-card').count(), 1, '右键没有打开�
 assert.equal(await page.locator('#modal-title').innerText(), '预设详情')
 assert.ok(await page.locator('.preset-cloud-info').count(), '预设详情缺少云端信息')
 assert.ok(await page.locator('.preset-gunpack-stats').count(), '预设详情缺少枪包统计')
-await page.screenshot({ path: '/tmp/web_shots/14-preset-detail.png' })
+await page.screenshot({ path: '/tmp/web_shots_webui/14-preset-detail.png' })
 await page.keyboard.press('Escape')
 await page.waitForTimeout(120)
 assert.equal(await page.locator('.modal-card').count(), 0)
@@ -174,7 +175,7 @@ await page.waitForTimeout(520)
 assert.equal(await page.locator('.cover').count(), 0, '页面切换不应出现全窗幕布')
 assert.equal(await page.locator('h1').innerText(), '设置')
 assert.ok(await page.locator('.page-motion').count(), '页面缺少内容区过渡')
-await page.screenshot({ path: '/tmp/web_shots/05-settings.png' })
+await page.screenshot({ path: '/tmp/web_shots_webui/05-settings.png' })
 
 // 身份切换使用渐变覆盖层，并在覆盖层下完成主题切换
 await page.getByRole('button', { name: '玩家', exact: true }).click()
@@ -183,7 +184,7 @@ assert.ok(await page.locator('.cover').count(), '身份切换缺少覆盖层')
 assert.ok((await page.locator('.cover-kicker').innerText()).includes('切换为玩家'))
 const roleCover = page.locator('.cover')
 assert.equal(await roleCover.evaluate(el => getComputedStyle(el).position), 'fixed')
-await page.screenshot({ path: '/tmp/web_shots/03-role-cover.png' })
+await page.screenshot({ path: '/tmp/web_shots_webui/03-role-cover.png' })
 await page.waitForTimeout(1700)
 assert.equal(await page.locator('.cover').count(), 0)
 assert.ok(await page.locator('.app.role-player').count(), '身份没有切换为玩家')
@@ -204,7 +205,7 @@ assert.ok((await page.locator('.plan-card .pill').innerText()).includes('待下�
 assert.equal(await page.locator('.plan-card input[type=checkbox]').count(), 0, '玩家默认模式仍有差异勾选框')
 await page.locator('.manage-tabs button', { hasText: '总览' }).click()
 await page.waitForTimeout(300)
-await page.screenshot({ path: '/tmp/web_shots/12-player-manage.png' })
+await page.screenshot({ path: '/tmp/web_shots_webui/12-player-manage.png' })
 await page.locator('.manage-action .action-primary').click()
 await page.waitForTimeout(150)
 assert.equal(await page.locator('.modal-card').count(), 1, '批量更新缺少确认')
@@ -227,14 +228,14 @@ await page.waitForTimeout(1200)
 
 await page.locator('.tabs button').nth(1).click()
 await page.waitForTimeout(200)
-await page.screenshot({ path: '/tmp/web_shots/07-settings-db.png' })
+await page.screenshot({ path: '/tmp/web_shots_webui/07-settings-db.png' })
 const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)
 assert.ok(overflow <= 1, `horizontal overflow ${overflow}`)
 
 await page.locator('.nav-item').nth(3).click()
 await page.waitForTimeout(1200)
 assert.equal(await page.locator('h1').innerText(), '日志')
-await page.screenshot({ path: '/tmp/web_shots/06-log.png' })
+await page.screenshot({ path: '/tmp/web_shots_webui/06-log.png' })
 
 // 1140 最小窗口：首页主操作仍要在首屏且不横向溢出
 await page.setViewportSize({ width: 1140, height: 812 })
@@ -247,7 +248,7 @@ assert.ok(narrowPrimary.y + narrowPrimary.height <= 812, '1140 下主按钮不�
 assert.ok(narrowPrimary.x + narrowPrimary.width <= 1140 - 8, `1140 下主按钮横向溢出 ${narrowPrimary.x + narrowPrimary.width}`)
 const narrowOverflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)
 assert.ok(narrowOverflow <= 1, `1140 横向溢出 ${narrowOverflow}`)
-await page.screenshot({ path: '/tmp/web_shots/09-1140x812.png' })
+await page.screenshot({ path: '/tmp/web_shots_webui/09-1140x812.png' })
 
 // 管理页主操作条同样要大且可见
 await page.locator('.nav-item').nth(1).click()
@@ -266,7 +267,7 @@ assert.equal(await page.locator('.plan-card input[type=checkbox]').count(), 0, '
 assert.equal(await page.locator('.publish-row').count(), 0, '默认模式仍有版本号表单')
 await page.locator('.manage-tabs button', { hasText: '总览' }).click()
 await page.waitForTimeout(300)
-await page.screenshot({ path: '/tmp/web_shots/10-manage-1140.png' })
+await page.screenshot({ path: '/tmp/web_shots_webui/10-manage-1140.png' })
 await page.locator('.sidebar').hover()
 await page.waitForTimeout(500)
 assert.ok(Math.abs(parseFloat(await page.locator('.sidebar').evaluate(el => getComputedStyle(el).width)) - 200) < 2, '非首页侧栏不展开')
@@ -307,7 +308,7 @@ await page.evaluate(() => {
 })
 await page.waitForTimeout(200)
 assert.equal(await page.locator('.drop-overlay').count(), 1)
-await page.screenshot({ path: '/tmp/web_shots/08-dnd.png' })
+await page.screenshot({ path: '/tmp/web_shots_webui/08-dnd.png' })
 await page.evaluate(() => window.dispatchEvent(new DragEvent('dragleave', { bubbles: true })))
 await page.waitForTimeout(100)
 // drop 必须收起遮罩，不能留下永久覆盖层
@@ -337,7 +338,7 @@ for (const [w, h, name] of [[1140, 812, '09-1140x812'], [1600, 1000, '10-1600x10
   await page.waitForTimeout(300)
   const of = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)
   assert.ok(of <= 1, `${name} overflow ${of}`)
-  await page.screenshot({ path: `/tmp/web_shots/${name}.png` })
+  await page.screenshot({ path: `/tmp/web_shots_webui/${name}.png` })
 }
 // 高级操作默认关闭；开启后才出现版本号/勾选
 await page.locator('.nav-item').nth(2).click()
@@ -352,7 +353,7 @@ await page.locator('.manage-tabs button', { hasText: '发布' }).click()
 await page.waitForTimeout(400)
 assert.equal(await page.locator('.publish-row').count(), 1, '高级模式缺少版本号表单')
 assert.ok(await page.locator('.plan-card input[type=checkbox]').count() >= 4, '高级模式缺少差异勾选')
-await page.screenshot({ path: '/tmp/web_shots/13-developer-advanced.png' })
+await page.screenshot({ path: '/tmp/web_shots_webui/13-developer-advanced.png' })
 await page.locator('.nav-item').nth(2).click()
 await page.waitForTimeout(1200)
 await page.getByRole('switch', { name: '高级操作' }).click()
@@ -405,7 +406,7 @@ assert.equal(await emptyPage.locator('h1').innerText(), '枪包预设')
 assert.equal(await emptyPage.locator('.hero-empty').count(), 0, '仍在显示整页 onboarding')
 assert.equal(await emptyPage.locator('.empty-hero').count(), 1)
 assert.equal(await emptyPage.locator('.home-grid .presets-card').count(), 1)
-await emptyPage.screenshot({ path: '/tmp/web_shots/14-no-pack.png' })
+await emptyPage.screenshot({ path: '/tmp/web_shots_webui/14-no-pack.png' })
 await emptyPage.close()
 
 assert.deepEqual(errors, [], JSON.stringify(errors))
