@@ -118,6 +118,10 @@
     document.querySelectorAll('.nav-item')[1]?.click();
     await sleep(1300);
     check('manage.one-click', !!document.querySelector('.manage-action .action-primary'));
+    check('manage.tabs', document.querySelectorAll('.manage-tabs button').length >= 3,
+      document.querySelectorAll('.manage-tabs button').length);
+    document.querySelectorAll('.manage-tabs button')[1]?.click();
+    await sleep(600);
     check('manage.plan-guard', !!document.querySelector('.plan-card'));
     check('no-scrollbar', getComputedStyle(document.querySelector('.content')).scrollbarWidth === 'none');
 
