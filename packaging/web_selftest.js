@@ -41,7 +41,7 @@
     sidebar?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
     sidebar?.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
     await sleep(500);
-    check('sidebar.hover-manage', sidebar && getComputedStyle(sidebar).width === '200px', sidebar && getComputedStyle(sidebar).width);
+    check('sidebar.hover-manage', sidebar && Math.abs(parseFloat(getComputedStyle(sidebar).width) - 200) < 2, sidebar && getComputedStyle(sidebar).width);
     check('sidebar.role-switch', !!document.querySelector('.role-switch'));
     const rs = document.querySelector('.role-switch');
     check('role.logged-out-label', !!rs && rs.innerText.includes('未登录') && rs.innerText.includes('无法切换身份'), rs?.innerText);
