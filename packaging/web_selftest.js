@@ -58,7 +58,12 @@
     check('pack.loaded', s.pack.loaded, s.pack.name);
     document.querySelectorAll('.nav-item')[0]?.click();
     await sleep(1200);
-    check('home.applied-hidden', !document.querySelector('button.hero-primary') && !!document.querySelector('.applied-state'));
+    // 3.3 起已应用的预设也保留"重新替换"按钮（不再是不可点的静态块）
+    const appliedBtn = document.querySelector('button.hero-primary.applied-state');
+    check('home.applied-reapply', !!appliedBtn && !appliedBtn.disabled,
+      appliedBtn ? appliedBtn.innerText.replace(/\s+/g, ' ').trim() : 'missing');
+    check('home.next-step', !!document.querySelector('.next-step .next-copy strong'),
+      document.querySelector('.next-step .next-copy strong')?.innerText || 'missing');
 
     // 新建预设后应出现一键替换；再推一次，避免 pack.open 的 job.done 晚到覆盖
     const created = await call('preset.create', { name: 'CI 自测预设' });
