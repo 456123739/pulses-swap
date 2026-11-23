@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import assert from 'node:assert'
 
 const state = {
-  revision: 7, version: '3.3.1', role: 'developer',
+  revision: 7, version: '3.3.2', role: 'developer',
   pack: { path: 'D:\\Games\\Minecraft\\PCL\\.minecraft\\versions\\1.20.1-Fabric', name: '1.20.1-Fabric', tacz: 'D:\\Games\\Minecraft\\PCL\\.minecraft\\versions\\1.20.1-Fabric\\tacz', loaded: true },
   presets: [
     { name: '默认枪包', version: 'v1.2.0', applied: true, count: 18, path: '', bound: true, pending: 0, extra: 0, needs_update: false, checked_at: 0, check_summary: '' },
@@ -198,8 +198,12 @@ assert.equal(oneClick, '一键更新 4', `一键更新文案 ${oneClick}`)
 await page.locator('.nav-item').nth(1).click()
 await page.waitForTimeout(1200)
 assert.equal((await page.locator('.manage-action .action-primary').innerText()).trim(), '一键更新全部')
+await page.locator('.manage-tabs button', { hasText: '发布' }).click()
+await page.waitForTimeout(400)
 assert.ok((await page.locator('.plan-card .pill').innerText()).includes('待下载'))
 assert.equal(await page.locator('.plan-card input[type=checkbox]').count(), 0, '玩家默认模式仍有差异勾选框')
+await page.locator('.manage-tabs button', { hasText: '总览' }).click()
+await page.waitForTimeout(300)
 await page.screenshot({ path: '/tmp/web_shots/12-player-manage.png' })
 await page.locator('.manage-action .action-primary').click()
 await page.waitForTimeout(120)
@@ -251,10 +255,14 @@ assert.ok(manageBox, '管理页缺少主操作')
 assert.ok(manageBox.height >= 46, `管理页主操作高度 ${manageBox.height}`)
 assert.ok(manageBox.y + manageBox.height <= 812, '管理页主操作不在首屏')
 assert.equal((await managePrimary.innerText()).trim(), '一键上传全部')
+await page.locator('.manage-tabs button', { hasText: '发布' }).click()
+await page.waitForTimeout(400)
 assert.ok((await page.locator('.plan-card .pill').innerText()).includes('待上传'))
 assert.equal(await page.getByText('待下载', { exact: false }).count(), 0, '开发者页出现待下载')
 assert.equal(await page.locator('.plan-card input[type=checkbox]').count(), 0, '默认模式仍有勾选框')
 assert.equal(await page.locator('.publish-row').count(), 0, '默认模式仍有版本号表单')
+await page.locator('.manage-tabs button', { hasText: '总览' }).click()
+await page.waitForTimeout(300)
 await page.screenshot({ path: '/tmp/web_shots/10-manage-1140.png' })
 await page.locator('.sidebar').hover()
 await page.waitForTimeout(500)
@@ -334,6 +342,8 @@ await advancedSwitch.click()
 await page.waitForTimeout(200)
 await page.locator('.nav-item').nth(1).click()
 await page.waitForTimeout(1200)
+await page.locator('.manage-tabs button', { hasText: '发布' }).click()
+await page.waitForTimeout(400)
 assert.equal(await page.locator('.publish-row').count(), 1, '高级模式缺少版本号表单')
 assert.ok(await page.locator('.plan-card input[type=checkbox]').count() >= 4, '高级模式缺少差异勾选')
 await page.screenshot({ path: '/tmp/web_shots/13-developer-advanced.png' })

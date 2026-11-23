@@ -340,3 +340,124 @@ class FirstUploadTests(unittest.TestCase):
         joined = "\n".join(str(getattr(x, "message", x)) for x in self.ctrl.logs)
         self.assertIn("步骤 1/6", joined)
         self.assertIn("初始化上传", joined)
+
+
+class LastOpStatusTests(unittest.TestCase):
+    """上次上传/更新失败或取消后，不能继续显示“已是最新”。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.ctrl = AppController(base_dir=Path(self.tmp.name) / "db")
+        self.ctrl.preset_manager = FakePM()
+        self.ctrl.selected = "P"
+        self.ctrl.settings.role = "developer"
+        self.ctrl.apply_preset = lambda name, ctx=None: {"state": {"ok": True}}
+
+    def tearDown(self):
+        self.ctrl._stop_watcher()
+        self.tmp.cleanup()
+
+    def test_failed_publish_marks_last_op_failed(self):
+        plan = diff.Plan(role="developer", cloud_version="v1.0.0")
+        plan.items.append(diff.DiffItem("f0.zip", diff.UPLOAD,
+                                        local={"path": "f0.zip", "sha256": "a"},
+                                        cloud=None))
+        fake = FakeOnline(plan, bound=True)
+        fake.account_info = lambda: {"label": "测试账号"}
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("上传失败：网络中断")
+        fake.publish = boom
+        self.ctrl.online = fake
+        with self.assertRaises(RuntimeError):
+            self.ctrl.publish_auto("P", notes="x")
+        preset = next(p for p in self.ctrl.state()["presets"] if p["name"] == "P")
+        self.assertFalse(preset["last_op"]["ok"])
+        self.assertIn("网络中断", preset["last_op"]["message"])
+
+    def test_cancelled_publish_marks_failed(self):
+        plan = diff.Plan(role="developer", cloud_version="v1.0.0")
+        plan.items.append(diff.DiffItem("f0.zip", diff.UPLOAD,
+                                        local={"path": "f0.zip", "sha256": "a"},
+                                        cloud=None))
+        fake = FakeOnline(plan, bound=True)
+        fake.account_info = lambda: {"label": "测试账号"}
+        fake.publish = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("操作已取消"))
+        self.ctrl.online = fake
+        with self.assertRaises(RuntimeError):
+            self.ctrl.publish_auto("P")
+        preset = next(p for p in self.ctrl.state()["presets"] if p["name"] == "P")
+        self.assertFalse(preset["last_op"]["ok"])
+
+    def test_success_clears_failure(self):
+        plan = diff.Plan(role="developer", cloud_version="v1.0.0")
+        plan.items.append(diff.DiffItem("f0.zip", diff.UPLOAD,
+                                        local={"path": "f0.zip", "sha256": "a"},
+                                        cloud=None))
+        fake = FakeOnline(plan, bound=True)
+        fake.account_info = lambda: {"label": "测试账号"}
+        self.ctrl.online = fake
+        self.ctrl.publish_auto("P")
+        preset = next(p for p in self.ctrl.state()["presets"] if p["name"] == "P")
+        self.assertTrue(preset["last_op"]["ok"])
+
+
+class LastOpSyncTests(unittest.TestCase):
+    """玩家端：上次更新失败/取消后也要留下记录。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.ctrl = AppController(base_dir=Path(self.tmp.name) / "db")
+        self.ctrl.preset_manager = FakePM()
+        self.ctrl.preset_manager.presets["P"]["applied"] = False
+        self.ctrl.selected = "P"
+        self.ctrl.settings.role = "player"
+        self.ctrl.apply_preset = lambda name, ctx=None: {"state": {"ok": True}}
+
+    def tearDown(self):
+        self.ctrl._stop_watcher()
+        self.tmp.cleanup()
+
+    def test_failed_sync_marks_last_op(self):
+        plan = diff.Plan(role="player", cloud_version="v1.0.0")
+        plan.items.append(diff.DiffItem("f0.zip", diff.DOWNLOAD,
+                                        local=None,
+                                        cloud={"path": "f0.zip", "sha256": "b"}))
+        fake = FakeOnline(plan, bound=True)
+        fake.account_info = lambda: {"label": "测试账号"}
+        fake.sync = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("下载中断"))
+        self.ctrl.online = fake
+        with self.assertRaises(RuntimeError):
+            self.ctrl.sync_auto("P")
+        preset = next(p for p in self.ctrl.state()["presets"] if p["name"] == "P")
+        self.assertFalse(preset["last_op"]["ok"])
+        self.assertEqual(preset["last_op"]["action"], "sync")
+
+
+class CloudSummaryTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.ctrl = AppController(base_dir=Path(self.tmp.name) / "db")
+        self.ctrl.state = lambda: {"ok": True}
+
+    def tearDown(self):
+        self.ctrl._stop_watcher()
+        self.tmp.cleanup()
+
+    def test_quota_is_human_readable(self):
+        class FakeQuota:
+            def account_quota(self):
+                return {"used": 1073741824, "total": 10737418240}
+        self.ctrl.online = FakeQuota()
+        out = self.ctrl.cloud_quota()["quota"]
+        self.assertEqual(out["used_text"], "1.0 GB")
+        self.assertEqual(out["total_text"], "10.0 GB")
+        self.assertEqual(out["percent"], 10.0)
+
+    def test_cloud_share_forwards(self):
+        class FakeShare:
+            def cloud_share_path(self, path):
+                return {"path": path, "url": "https://x/b01", "password": "p"}
+        self.ctrl.online = FakeShare()
+        out = self.ctrl.cloud_share("/PulsesSwap/测试")
+        self.assertEqual(out["share"]["path"], "/PulsesSwap/测试")

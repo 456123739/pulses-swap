@@ -358,7 +358,8 @@ class LanzouAccount:
         for row in data.get("text") or []:
             try:
                 out.append({"id": int(row["fol_id"]),
-                            "name": str(row.get("name") or "")})
+                            "name": str(row.get("name") or ""),
+                            "time": str(row.get("time") or "")})
             except (KeyError, TypeError, ValueError):
                 continue
         return out
@@ -449,6 +450,7 @@ class LanzouAccount:
             out.append({"id": file_id,
                         "name": str(row.get("name_all") or ""),
                         "size": str(row.get("size") or ""),
+                        "time": str(row.get("time") or ""),
                         "downs": row.get("downs")})
         return out
 

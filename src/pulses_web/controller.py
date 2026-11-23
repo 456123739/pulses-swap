@@ -56,6 +56,16 @@ STATUS_RANK = {
 }
 
 
+def _size_text(size: float) -> str:
+    units = ["B", "KB", "MB", "GB", "TB"]
+    value = float(size or 0)
+    for unit in units:
+        if value < 1024 or unit == units[-1]:
+            return f"{int(value)} B" if unit == "B" else f"{value:.1f} {unit}"
+        value /= 1024
+    return "0 B"
+
+
 def _diff_status(item) -> str:
     """把 DiffItem 归到上面那五类里。"""
     if diff is None:
@@ -125,6 +135,8 @@ class AppController:
         # 每个预设最近一次检查的摘要（键 = 预设名）。用来给预设条目和枪包列表
         # 标“待更新 / 缺失 / 多余 / 变更”，不用等用户再点一次检查。
         self._checks: dict[str, dict] = {}
+        # 每个预设最近一次上传/下载的结果：失败/取消后不能装作“已是最新”
+        self._last_ops: dict[str, dict] = {}
         self._rev = 0
         self._init_online()
         self.add_log(f"Pulses Swap Web {getattr(paths, 'VERSION', '')}",
@@ -230,6 +242,7 @@ class AppController:
                         "needs_update": view["needs_update"],
                         "checked_at": view["checked_at"],
                         "check_summary": view["summary"],
+                        "last_op": self._last_ops.get(name),
                     })
             gunpacks_view = self._gunpacks_with_status()
             account = self.online.account_info() if self.online else {}
@@ -319,6 +332,11 @@ class AppController:
                 out.append({"name": name, "type": "zip", "size": 0,
                             "file_count": 1, "target": ""})
         return out
+
+    def _record_op(self, name: str, ok: bool, action: str, message: str) -> None:
+        self._last_ops[name] = {"ok": bool(ok), "action": action,
+                                "message": str(message or ""),
+                                "at": int(time.time())}
 
     def _check_view(self, name: str) -> dict:
         """某个预设最近一次检查的“给人看”的结果（没查过就返回空）。"""
@@ -728,7 +746,15 @@ class AppController:
 
     def cloud_quota(self):
         data = self._require_online().account_quota()
-        return {"quota": data}
+        used = float(data.get("used") or 0)
+        total = float(data.get("total") or 0)
+        return {"quota": {**data, "used": used, "total": total,
+                          "used_text": _size_text(used),
+                          "total_text": _size_text(total),
+                          "percent": round(used / total * 100, 1) if total else 0}}
+
+    def cloud_share(self, path: str):
+        return {"share": self._require_online().cloud_share_path(path)}
 
     def account_state(self):
         if not self.online:
@@ -1072,6 +1098,7 @@ class AppController:
                 message = ("当前预设已是最新" if not plan.has_changes
                            else "没有可自动处理的安全项；如确需删除本地多余，请开启高级操作")
                 self.add_log(f"一键更新：{message}", "SUCCESS", verbose=False)
+                self._record_op(name, True, "sync", message)
                 if detached:
                     restored = self.apply_preset(name, ctx)
                     return {"result": None, "state": restored["state"],
@@ -1091,8 +1118,10 @@ class AppController:
             out["message"] = (f"更新完成 · {len(selection)} 项"
                               + (" · 已重新替换" if applied else "")
                               + (f" · 失败 {failed_items} 项" if failed_items else ""))
+            self._record_op(name, failed_items == 0, "sync", out["message"])
             return out
-        except Exception:
+        except Exception as exc:
+            self._record_op(name, False, "sync", str(exc))
             if detached:
                 # 中途失败也要把 tacz 恢复成可用状态（可能包含已下载的部分）
                 try:
@@ -1139,6 +1168,7 @@ class AppController:
                 message = ("已是最新，无需发布" if not extras
                            else "云端多余文件已保留，没有需要上传的内容")
                 self.add_log(f"一键发布：{message}", "SUCCESS", verbose=False)
+                self._record_op(name, True, "publish", message)
                 if detached:
                     restored = self.apply_preset(name, ctx)
                     return {"result": None, "state": restored["state"],
@@ -1162,8 +1192,10 @@ class AppController:
                 out["state"] = applied_out["state"]
             out["changed"] = len(selection)
             out["message"] = f"发布完成 · {version} · {len(selection)} 项"
+            self._record_op(name, True, "publish", out["message"])
             return out
-        except Exception:
+        except Exception as exc:
+            self._record_op(name, False, "publish", str(exc))
             if detached:
                 try:
                     self.apply_preset(name, ctx)

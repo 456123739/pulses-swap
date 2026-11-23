@@ -1179,6 +1179,17 @@ class OnlineService:
         return {"path": clean, "folder_id": folder,
                 "folders": folders, "files": files}
 
+    def cloud_share_path(self, path: str) -> dict:
+        """按路径取云端文件夹的分享链接（不建目录、不改内容）。"""
+        account = self._require_account()
+        clean = self._clean_cloud_path(path)
+        folder = account.find_path(clean)
+        if folder is None:
+            raise SourceError(f"云端文件夹不存在：{clean}")
+        info = account.folder_share(folder)
+        return {"path": clean, "url": info.get("url", ""),
+                "password": info.get("password", "")}
+
     def cloud_delete(self, kind: str, obj_id: int) -> dict:
         """删除云端文件/文件夹（文件夹会连同里面内容一起删）。"""
         account = self._require_account()

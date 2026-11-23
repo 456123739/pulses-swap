@@ -1130,3 +1130,97 @@ h3 { font-size: 15px; font-weight: 600; }
 .job-bar-foot { display: flex; align-items: center; gap: 8px; margin-top: 7px; font-size: 11px; color: var(--text-2); }
 .job-bar-text { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .job-bar-speed { font-variant-numeric: tabular-nums; color: var(--text); }
+
+/* 预设条目：两行布局，按钮永远有位置，说明文字自己省略，不再互相压住 */
+.preset-row { display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "main actions" "meta meta"; align-items: center;
+  column-gap: 8px; row-gap: 2px; }
+.preset-main { grid-area: main; min-width: 0; }
+.preset-main strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preset-actions { grid-area: actions; display: flex; align-items: center; gap: 6px; flex: 0 0 auto; }
+.preset-meta { grid-area: meta; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-size: 11px; color: var(--text-2); }
+
+/* 说明气泡走 portal + fixed，不会被卡片/列表裁切 */
+.hint-bubble-portal { position: fixed; z-index: 600; }
+
+/* portal 气泡：覆盖旧的 bottom/left/动画，避免被拉伸或错位 */
+.hint-bubble.hint-bubble-portal { position: fixed; bottom: auto; right: auto;
+  animation: hint-fade 140ms var(--ease-out) both; }
+.hint-bubble.hint-bubble-portal::after { display: none; }
+@keyframes hint-fade { from { opacity: 0 } to { opacity: 1 } }
+
+/* ⋯ 菜单改为条目内展开：行高弹簧增长，不再被容器裁切 */
+.preset-row { grid-template-areas: "main actions" "meta meta" "menu menu"; }
+.preset-row .row-menu { grid-area: menu; position: static; right: auto; top: auto; z-index: 1;
+  margin-top: 8px; padding: 0; border: 0; background: none; box-shadow: none;
+  min-width: 0; overflow: hidden; display: block; }
+.preset-row .row-menu-inner { display: flex; gap: 6px; padding: 6px; border-radius: 10px;
+  background: var(--input); border: 1px solid var(--border); }
+.preset-row .row-menu button { flex: 1 1 0; text-align: center; padding: 6px 8px; border-radius: 7px;
+  font-size: 11.5px; background: var(--panel); border: 1px solid var(--border); }
+.preset-row .row-menu button:hover { border-color: var(--accent); color: var(--accent); }
+
+/* 云端盘：树 + 表格 + 容量 */
+.cloud-shell { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 12px; align-items: start; }
+.cloud-tree { padding: 0; overflow: hidden; position: sticky; top: 12px; }
+.cloud-tree .card-head { padding: 12px 14px 6px; }
+.tree-body { padding: 4px 6px 10px; max-height: 420px; overflow: auto; }
+.tree-row { display: flex; align-items: center; gap: 2px; border-radius: 7px; padding: 3px 6px; }
+.tree-row:hover { background: var(--input); }
+.tree-row.active { background: var(--accent-soft); }
+.tree-toggle { width: 16px; height: 18px; color: var(--text-2); font-size: 10px; flex: none; }
+.tree-name { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 11.5px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quota-box { padding: 10px 12px 12px; border-top: 1px solid var(--border); }
+.quota-head { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--text-2); margin-bottom: 6px; }
+.quota-track { height: 5px; border-radius: 99px; background: var(--input); overflow: hidden; }
+.quota-track i { display: block; height: 100%; border-radius: 99px; background: var(--accent); }
+
+.cloud-main { padding: 0; overflow: hidden; }
+.cloud-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between;
+  padding: 12px 14px 8px; border-bottom: 1px solid var(--border); }
+.crumb-row { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; min-width: 0; }
+.cloud-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cloud-search { display: flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--input); }
+.cloud-search input { border: 0; background: transparent; outline: none; width: 120px; font-size: 11.5px; }
+.switch-label { display: flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--text-2); }
+.cloud-meta { display: flex; align-items: center; gap: 10px; padding: 6px 14px; font-size: 10.5px;
+  color: var(--text-2); border-bottom: 1px solid var(--border); }
+.cloud-meta .text-btn { margin-left: auto; }
+.cloud-table { padding: 4px 8px 8px; }
+.cloud-tr { display: grid; grid-template-columns: minmax(0, 1fr) 80px 96px 110px; align-items: center;
+  gap: 8px; padding: 6px 6px; border-radius: 8px; font-size: 11.5px; }
+.cloud-tr:hover { background: var(--input); }
+.cloud-tr.head { color: var(--text-2); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+.cloud-td-name { display: flex; align-items: center; gap: 7px; min-width: 0; text-align: left; }
+.cloud-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cloud-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.cloud-ico { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; flex: none;
+  background: var(--accent-soft); color: var(--accent); }
+.cloud-ico.file { background: var(--input); color: var(--text-2); }
+
+/* 概览里的“预设与云端”表 */
+.preset-cloud-table { padding: 12px 14px; }
+.pct-row { display: grid; grid-template-columns: minmax(0, 1.3fr) 80px 104px minmax(0, 1fr) 168px;
+  gap: 8px; align-items: center; padding: 7px 4px; border-radius: 8px; font-size: 11.5px; }
+.pct-row:hover { background: var(--input); }
+.pct-head { color: var(--text-2); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+.pct-name { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pct-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pct-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.pct-row.unbound { opacity: .72; }
+.quota-box.inline { padding: 8px 0 10px; border-top: 0; }
+
+/* 云端文件详情 */
+.cloud-peek { margin: 6px 12px 10px; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--border); background: var(--input); }
+.cloud-peek-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
+.cloud-peek-head strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cloud-peek-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 8px; }
+.cloud-peek-grid div { display: flex; flex-direction: column; gap: 2px; font-size: 10.5px; color: var(--text-2); }
+.cloud-peek-grid strong { color: var(--text); font-size: 11.5px; }
+
+.pill.warning { background: rgba(201, 169, 97, .18); color: #8a6b24; }
+.pill.danger { background: rgba(201, 123, 123, .18); color: #a34b4b; }

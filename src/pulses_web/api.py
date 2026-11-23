@@ -97,6 +97,8 @@ class Api:
             "online.cloud.mkdir": lambda p: self._controller.cloud_mkdir(
                 p.get("parent", ""), p.get("name", "")),
             "online.cloud.quota": lambda p: self._controller.cloud_quota(),
+            "online.cloud.share": lambda p: self._controller.cloud_share(
+                p.get("path") or "/"),
             "online.cloud.upload": self._job("online.cloud.upload"),
             "online.cloud.delete": lambda p: self._controller.cloud_delete(
                 p.get("kind", "file"), p.get("id")),

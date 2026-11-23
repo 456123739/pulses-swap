@@ -334,14 +334,28 @@ function nextStepOf(snap) {
     return { tone: 'warn', title: '这个预设还没有枪包', text: '先点「导入枪包」选 .zip 或文件夹；空预设不能替换，否则会把 tacz 清空。', cta: '导入枪包', action: 'import' }
   }
   const pending = (selected.pending || 0) + (selected.extra || 0)
+  const lastOp = selected.last_op
+  const lastFailed = lastOp && lastOp.ok === false
   if (snap.role === 'developer') {
     if (!selected.bound) {
       return { tone: 'todo', title: '这个预设还没上传到云端', text: '点「上传到云端」会自动建 /PulsesSwap/预设名 并生成分享链接。', cta: '上传到云端', action: 'publishNew' }
     }
+    if (lastFailed) {
+      return { tone: 'warn', title: '上次上传没有完成', text: (lastOp.message || '看日志了解卡在哪一步') + '；修好后重试即可，云端仍是上一个完整版本。', cta: '重试上传', action: 'publishAuto' }
+    }
+    if (!selected.checked_at) {
+      return { tone: 'todo', title: '还没检查过云端', text: '先检查一次，确认云端和本地到底差在哪，再决定上传什么。', cta: '检查差异', action: 'check' }
+    }
     if (pending > 0) {
       return { tone: 'todo', title: `有 ${pending} 项待上传`, text: '点「一键上传」，只传有变化的枪包，版本号自动 +1，云端多余文件保留。', cta: '一键上传', action: 'publishAuto' }
     }
-    return { tone: 'done', title: '云端已是最新', text: '有改动时这里会提示；也可以随时重新上传。', cta: '', action: '' }
+    return { tone: 'done', title: '云端已是最新', text: '刚刚检查过，没有差异；有改动时这里会提示。', cta: '', action: '' }
+  }
+  if (lastFailed) {
+    return { tone: 'warn', title: '上次更新没有完成', text: (lastOp.message || '看日志了解卡在哪一步') + '；本地文件没有被清空，可以直接重试。', cta: '重试更新', action: 'sync' }
+  }
+  if (selected.bound && !selected.checked_at) {
+    return { tone: 'todo', title: '还没检查过云端', text: '先检查一次，确认云端有没有新版本；只检查，不改文件。', cta: '检查更新', action: 'check' }
   }
   if (pending > 0) {
     return { tone: 'todo', title: `有 ${pending} 项可以处理`, text: '点「一键更新」，只下载有变化的枪包；已替换的预设会自动收回再换回去。', cta: '一键更新', action: 'sync' }
@@ -395,9 +409,22 @@ function PresetRow({ item, selected, role, onSelect, onRename, onDelete, onDetai
   const updateWord = role === 'developer' ? '上传' : '更新'
   const accent = presetAccent(item.name)
   const [menuOpen, setMenuOpen] = useState(false)
+  const rowRef = useRef(null)
+  useEffect(() => {
+    if (!menuOpen) return undefined
+    const onDown = (e) => { if (!rowRef.current?.contains(e.target)) setMenuOpen(false) }
+    const onKey = (e) => { if (e.key === 'Escape') setMenuOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [menuOpen])
   return (
     <motion.div
       layout
+      ref={rowRef}
       className={`preset-row ${selected ? 'selected' : ''}`}
       style={{ '--preset-accent': accent }}
       tabIndex={0}
@@ -411,35 +438,47 @@ function PresetRow({ item, selected, role, onSelect, onRename, onDelete, onDetai
       <span className="preset-bar" aria-hidden="true" />
       <span className="preset-sheen" aria-hidden="true" />
       <div className="preset-main">
-        <strong>{item.name}</strong>
-        <span title={item.check_summary || ''}>
-          {item.version || 'v1.0.0'} · {item.count || 0} 个枪包
-          {item.needs_update && item.check_summary ? ` · ${item.check_summary}` : ''}
-        </span>
+        <strong title={item.name}>{item.name}</strong>
       </div>
-      {item.applied && <span className="pill success">已应用</span>}
-      {item.bound && (
-        <button className="mini-btn" data-testid={`preset-update-${item.name}`}
-          data-quiet={!item.needs_update || undefined}
-          title={item.check_summary || (item.checked_at ? '已是最新' : '还没检查过，点一下会检查并更新')}
-          onClick={(e) => { e.stopPropagation(); onUpdate(item) }}>
-          <Icon name="refresh" size={12} />{updateWord}{pending > 0 ? ` ${pending}` : ''}
-          <Hint text={role === 'developer'
-            ? '把这个预设的改动上传到云端，云端多余文件保留。'
-            : '把这个预设更新到云端最新，再自动换回游戏。'} />
-        </button>
-      )}
-      <div className="row-menu-wrap" onClick={(e) => e.stopPropagation()}>
-        <button className="row-menu-btn" aria-haspopup="menu" aria-expanded={menuOpen}
-          aria-label="更多操作" onClick={() => setMenuOpen((v) => !v)}>⋯</button>
-        {menuOpen && (
-          <div className="row-menu" role="menu">
-            <button role="menuitem" onClick={() => { setMenuOpen(false); onDetails(item) }}>详情</button>
-            <button role="menuitem" onClick={() => { setMenuOpen(false); onRename(item) }}>重命名</button>
-            <button role="menuitem" className="danger" onClick={() => { setMenuOpen(false); onDelete(item) }}>删除</button>
-          </div>
+      <div className="preset-actions" onClick={(e) => e.stopPropagation()}>
+        {item.last_op && item.last_op.ok === false && <span className="pill warning">上次失败</span>}
+        {item.applied && <span className="pill success">已应用</span>}
+        {item.bound && (
+          <button className="mini-btn" data-testid={`preset-update-${item.name}`}
+            data-quiet={!item.needs_update || undefined}
+            title={item.check_summary || (item.checked_at ? '已是最新' : '还没检查过，点一下会检查并更新')}
+            onClick={(e) => { e.stopPropagation(); onUpdate(item) }}>
+            <Icon name="refresh" size={12} />{updateWord}{pending > 0 ? ` ${pending}` : ''}
+            <Hint text={role === 'developer'
+              ? '把这个预设的改动上传到云端，云端多余文件保留。'
+              : '把这个预设更新到云端最新，再自动换回游戏。'} />
+          </button>
         )}
+        <div className="row-menu-wrap">
+          <button className="row-menu-btn" aria-haspopup="menu" aria-expanded={menuOpen}
+            aria-label="更多操作" onClick={() => setMenuOpen((v) => !v)}>⋯</button>
+        </div>
       </div>
+      <span className="preset-meta" title={item.check_summary || ''}>
+        {item.version || 'v1.0.0'} · {item.count || 0} 个枪包
+        {item.last_op && item.last_op.ok === false ? ` · 上次失败：${item.last_op.message || '查看日志'}`
+          : item.needs_update && item.check_summary ? ` · ${item.check_summary}` : ''}
+      </span>
+      <AnimatePresence initial={false}>
+        {menuOpen && (
+          <motion.div className="row-menu" role="menu"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 420, damping: 34, mass: 0.7 }}>
+            <div className="row-menu-inner">
+              <button role="menuitem" onClick={() => { setMenuOpen(false); onDetails(item) }}>详情</button>
+              <button role="menuitem" onClick={() => { setMenuOpen(false); onRename(item) }}>重命名</button>
+              <button role="menuitem" className="danger" onClick={() => { setMenuOpen(false); onDelete(item) }}>删除</button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   )
 }
@@ -517,6 +556,7 @@ function Home({ snap, actions, busy, publishNotes = '' }) {
     else if (action === 'import' && selected) actions.importGunpacks(selected.name)
     else if (action === 'publishNew' && selected) actions.openUpload(selected.name)
     else if (action === 'publishAuto' && selected) actions.publishAuto(selected.name)
+    else if (action === 'check' && selected) actions.check(selected.name)
   }
   return (
     <div className="page home-page">
@@ -787,7 +827,12 @@ function Manage({ snap, actions, busy, tab = 'overview', onTab, publishNotes = '
   const onlineReady = snap.online.available !== false
   const [selection, setSelection] = useState(null)
   const [publishVersion, setPublishVersion] = useState('')
+  const [quota, setQuota] = useState(null)
   const selected = snap.presets.find((p) => p.name === snap.selected)
+  useEffect(() => {
+    if (!snap.online.account?.label || snap.online.available === false) { setQuota(null); return }
+    invoke('online.cloud.quota').then((out) => setQuota(out?.quota || null)).catch(() => setQuota(null))
+  }, [snap.online.account?.label, snap.online.available, snap.revision])
   useEffect(() => { setUrl(snap.online.binding?.url || ''); setPassword(snap.online.binding?.password || '') }, [snap.online.binding?.url, snap.online.binding?.password])
   useEffect(() => { setPublishVersion(selected?.version || '') }, [selected?.name, selected?.version])
   const planMismatch = Boolean(snap.plan && snap.plan.role !== snap.role)
@@ -817,50 +862,10 @@ function Manage({ snap, actions, busy, tab = 'overview', onTab, publishNotes = '
         </div></div>
       <div className="tabs manage-tabs" role="tablist">
         <button role="tab" aria-selected={tab === 'overview'} className={tab === 'overview' ? 'active' : ''} onClick={() => onTab?.('overview')}>总览</button>
+        <button role="tab" aria-selected={tab === 'publish'} className={tab === 'publish' ? 'active' : ''} onClick={() => onTab?.('publish')}>发布</button>
         <button role="tab" aria-selected={tab === 'cloud'} className={tab === 'cloud' ? 'active' : ''} onClick={() => onTab?.('cloud')}>云端文件</button>
       </div>
-      {tab === 'cloud' ? <CloudFiles snap={snap} actions={actions} busy={busy} /> : <>
-      <section className="action-deck manage-action" aria-label="管理主要操作">
-        <div className="action-copy">
-          <span className="eyebrow">ONE CLICK</span>
-          <h2>全部云端预设 · {boundCount} 个</h2>
-          <p>{boundCount ? autoHint : (isDeveloper
-            ? '还没有云端预设：先在左侧选一个预设，点「上传到云端」。'
-            : '还没有绑定云端来源：从云端拉取预设，或先选一个本地预设直接替换。')}</p>
-          <div className="action-meta">
-            <span>{boundCount} 个已绑定</span>
-            <span>{plan?.summary || (isDeveloper ? '待上传检查' : '待更新检查')}</span>
-            <span>{isDeveloper ? '开发者' : '玩家'}</span>
-          </div>
-          {isDeveloper && <label className="field publish-notes-inline">
-            <span>这次更新了什么（可选） <Hint text="玩家更新时会看到这句话；留空会自动写「一键发布 · 上传 N 项」。" /></span>
-            <input value={publishNotes} onChange={(e) => setPublishNotes(e.target.value)}
-              placeholder="例如：新增 3 把枪，修了音效" />
-          </label>}
-        </div>
-        <div className="action-buttons">
-          <button className="btn xl primary action-primary" disabled={!boundCount || busy}
-            onClick={() => (isDeveloper ? actions.publishAllAuto(publishNotes) : runAuto())}>
-            <Icon name={isDeveloper ? 'upload' : 'cloud'} size={20} />{autoLabel}
-            <Hint text={isDeveloper
-              ? '遍历所有绑定过云端的预设：有变化就递增版本号上传，云端多余文件不会删。'
-              : '遍历所有绑定过云端的预设：有更新就下载，删除项进回收站，已替换的自动换回去。'} />
-          </button>
-          {isDeveloper && selected && !selectedBound && <button className="btn action-secondary create-cloud-action"
-            disabled={busy} onClick={() => actions.openUpload(selected.name)}>
-            <Icon name="upload" size={17} />上传到云端</button>}
-          {advanced && <button className="btn action-secondary" disabled={!selected || !url || busy}
-            onClick={() => actions.check(selected.name)}><Icon name="refresh" size={17} />检查差异</button>}
-          {advanced && isDeveloper && <button className="btn action-secondary" disabled={!selected || busy}
-            onClick={() => actions.publishPlan(selected.name)}><Icon name="upload" size={17} />仅生成计划</button>}
-        </div>
-      </section>
-      <div className="stat-grid">
-        <div className="stat"><span>预设计数</span><strong>{snap.presets.length}</strong><small>当前整合包</small></div>
-        <div className="stat"><span>云端状态</span><strong>{snap.online.binding?.url ? '已绑定' : '未绑定'}</strong><small>{plan?.summary || '尚未检查'}</small></div>
-        <div className="stat"><span>账号</span><strong>{snap.online.account?.label ? '已认证' : '未登录'}</strong><small>{snap.online.account?.label || '本地模式'}</small></div>
-        <div className="stat"><span>发布历史</span><strong>{(snap.online.binding?.history || []).length}</strong><small>最近记录</small></div>
-      </div>
+      {tab === 'cloud' ? <CloudFiles snap={snap} actions={actions} busy={busy} /> : tab === 'publish' ? (<>
       <section className={`card plan-card ${!plan ? 'plan-empty' : ''}`}>
         <div className="card-head"><div><span className="eyebrow">DIFF</span><h2>{isDeveloper ? '待上传差异' : '云端差异'}</h2></div>
           {plan && <span className="pill">{plan.summary}</span>}</div>
@@ -904,11 +909,80 @@ function Manage({ snap, actions, busy, tab = 'overview', onTab, publishNotes = '
           </div>
         </>}
       </section>
+      </>) : (<>
+      <section className="action-deck manage-action" aria-label="管理主要操作">
+        <div className="action-copy">
+          <span className="eyebrow">ONE CLICK</span>
+          <h2>全部云端预设 · {boundCount} 个</h2>
+          <p>{boundCount ? autoHint : (isDeveloper
+            ? '还没有云端预设：先在左侧选一个预设，点「上传到云端」。'
+            : '还没有绑定云端来源：从云端拉取预设，或先选一个本地预设直接替换。')}</p>
+          <div className="action-meta">
+            <span>{boundCount} 个已绑定</span>
+            <span>{plan?.summary || (isDeveloper ? '待上传检查' : '待更新检查')}</span>
+            <span>{isDeveloper ? '开发者' : '玩家'}</span>
+          </div>
+          {isDeveloper && <label className="field publish-notes-inline">
+            <span>这次更新了什么（可选） <Hint text="玩家更新时会看到这句话；留空会自动写「一键发布 · 上传 N 项」。" /></span>
+            <input value={publishNotes} onChange={(e) => setPublishNotes(e.target.value)}
+              placeholder="例如：新增 3 把枪，修了音效" />
+          </label>}
+        </div>
+        <div className="action-buttons">
+          <button className="btn xl primary action-primary" disabled={!boundCount || busy}
+            onClick={() => (isDeveloper ? actions.publishAllAuto(publishNotes) : runAuto())}>
+            <Icon name={isDeveloper ? 'upload' : 'cloud'} size={20} />{autoLabel}
+            <Hint text={isDeveloper
+              ? '遍历所有绑定过云端的预设：有变化就递增版本号上传，云端多余文件不会删。'
+              : '遍历所有绑定过云端的预设：有更新就下载，删除项进回收站，已替换的自动换回去。'} />
+          </button>
+          {isDeveloper && selected && !selectedBound && <button className="btn action-secondary create-cloud-action"
+            disabled={busy} onClick={() => actions.openUpload(selected.name)}>
+            <Icon name="upload" size={17} />上传到云端</button>}
+          {advanced && <button className="btn action-secondary" disabled={!selected || !url || busy}
+            onClick={() => actions.check(selected.name)}><Icon name="refresh" size={17} />检查差异</button>}
+          {advanced && isDeveloper && <button className="btn action-secondary" disabled={!selected || busy}
+            onClick={() => actions.publishPlan(selected.name)}><Icon name="upload" size={17} />仅生成计划</button>}
+        </div>
+      </section>
+      <div className="stat-grid">
+        <div className="stat"><span>预设计数</span><strong>{snap.presets.length}</strong><small>当前整合包</small></div>
+        <div className="stat"><span>云端状态</span><strong>{snap.online.binding?.url ? '已绑定' : '未绑定'}</strong><small>{plan?.summary || '尚未检查'}</small></div>
+        <div className="stat"><span>账号</span><strong>{snap.online.account?.label ? '已认证' : '未登录'}</strong><small>{snap.online.account?.label || '本地模式'}</small></div>
+        <div className="stat"><span>发布历史</span><strong>{(snap.online.binding?.history || []).length}</strong><small>最近记录</small></div>
+      </div>
+      <section className="card preset-cloud-table">
+        <div className="card-head"><div><span className="eyebrow">PRESETS</span><h2>预设与云端</h2></div>
+          <span className="pill">{snap.presets.filter((p) => p.bound).length} 个已绑定</span></div>
+        <div className="pct-row pct-head"><span>预设</span><span>本地版本</span><span>状态</span><span>检查结果</span><span>操作</span></div>
+        {snap.presets.map((p) => (
+          <div key={p.name} className={`pct-row ${p.bound ? '' : 'unbound'}`}>
+            <button className="pct-name" onClick={() => actions.select(p.name)} title={p.name}>{p.name}</button>
+            <span className="muted">{p.version || 'v1.0.0'}</span>
+            <span><span className={`pill ${p.last_op && p.last_op.ok === false ? 'danger'
+              : !p.bound ? '' : p.needs_update ? 'warning' : p.checked_at ? 'success' : ''}`}>
+              {p.last_op && p.last_op.ok === false ? '上次失败'
+                : !p.bound ? '未绑定'
+                : p.needs_update ? `待处理 ${(p.pending || 0) + (p.extra || 0)}`
+                : p.checked_at ? '已同步' : '未检查'}</span></span>
+            <span className="muted pct-summary">{p.last_op && p.last_op.ok === false
+              ? (p.last_op.message || '查看日志') : (p.check_summary || (p.checked_at ? '已检查' : '未检查'))}</span>
+            <span className="pct-actions">
+              {p.bound && <button className="text-btn" disabled={busy} onClick={() => actions.check(p.name)}>检查</button>}
+              {isDeveloper && !p.bound && <button className="text-btn" disabled={busy} onClick={() => actions.openUpload(p.name)}>上传</button>}
+              {isDeveloper && p.bound && <button className="text-btn" disabled={busy} onClick={() => actions.publishAuto(p.name)}>上传更新</button>}
+              <button className="text-btn" onClick={() => onTab?.('cloud')}>云盘</button>
+            </span>
+          </div>
+        ))}
+      </section>
       <div className="manage-grid">
         <section className="card">
           <div className="card-head"><div><span className="eyebrow">ACCOUNT</span><h2>{snap.online.account?.label || '未登录'}</h2></div>
             <span className={`pill ${isDeveloper ? 'success' : ''}`}>{isDeveloper ? '开发者' : '玩家'}</span></div>
           <p className="muted">{snap.online.available ? '蓝奏云在线模块已就绪' : '在线模块未加载（可离线使用本地预设；需要云端功能请查看日志）'}</p>
+          {quota && <div className="quota-box inline"><div className="quota-head"><span>云端容量</span><span>{quota.used_text} / {quota.total_text}</span></div>
+            <div className="quota-track"><i style={{ width: `${Math.min(100, quota.percent || 0)}%` }} /></div></div>}
           <div className="button-row">
             {snap.online.account?.label ? <button className="btn ghost" onClick={actions.logout}>退出认证</button> : <button className="btn primary" onClick={actions.login}>登录蓝奏云</button>}
           </div>
@@ -968,7 +1042,7 @@ function Manage({ snap, actions, busy, tab = 'overview', onTab, publishNotes = '
           </div>
         </section>
       </div>
-      </>}
+      </>)}
     </div>
   )
 }
