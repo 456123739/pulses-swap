@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import assert from 'node:assert'
 
 const state = {
-  revision: 7, version: '3.3.2', role: 'developer',
+  revision: 7, version: '3.3.3', role: 'developer',
   pack: { path: 'D:\\Games\\Minecraft\\PCL\\.minecraft\\versions\\1.20.1-Fabric', name: '1.20.1-Fabric', tacz: 'D:\\Games\\Minecraft\\PCL\\.minecraft\\versions\\1.20.1-Fabric\\tacz', loaded: true },
   presets: [
     { name: '默认枪包', version: 'v1.2.0', applied: true, count: 18, path: '', bound: true, pending: 0, extra: 0, needs_update: false, checked_at: 0, check_summary: '' },
@@ -206,7 +206,10 @@ await page.locator('.manage-tabs button', { hasText: '总览' }).click()
 await page.waitForTimeout(300)
 await page.screenshot({ path: '/tmp/web_shots/12-player-manage.png' })
 await page.locator('.manage-action .action-primary').click()
-await page.waitForTimeout(120)
+await page.waitForTimeout(150)
+assert.equal(await page.locator('.modal-card').count(), 1, '批量更新缺少确认')
+await page.locator('.modal-card button.primary').click()
+await page.waitForTimeout(150)
 assert.equal(await page.evaluate(() => window.__autoMethod), 'online.sync.all')
 await page.evaluate(() => window.PS.push({ type: 'job.done', jobId: 'j_auto', data: { result: { message: '一键更新完成', state: null } } }))
 await page.waitForTimeout(120)
@@ -272,7 +275,10 @@ await page.mouse.move(700, 500)
 await page.waitForTimeout(400)
 // 主按钮必须真的调用“一键上传全部”
 await managePrimary.click()
-await page.waitForTimeout(120)
+await page.waitForTimeout(150)
+assert.equal(await page.locator('.modal-card').count(), 1, '批量上传缺少确认')
+await page.locator('.modal-card button.primary').click()
+await page.waitForTimeout(150)
 assert.equal(await page.evaluate(() => window.__autoMethod), 'online.publish.all')
 await page.evaluate(() => window.PS.push({ type: 'job.done', jobId: 'j_auto', data: { result: { message: '一键上传完成', state: null } } }))
 await page.waitForTimeout(120)

@@ -461,3 +461,110 @@ class CloudSummaryTests(unittest.TestCase):
         self.ctrl.online = FakeShare()
         out = self.ctrl.cloud_share("/PulsesSwap/测试")
         self.assertEqual(out["share"]["path"], "/PulsesSwap/测试")
+
+
+class AuditGuardTests(unittest.TestCase):
+    """审计修复：空勾选、离线计划、登录角色、成功后的状态。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.ctrl = AppController(base_dir=Path(self.tmp.name) / "db")
+        self.ctrl.preset_manager = FakePM()
+        self.ctrl.preset_manager.presets["P"]["applied"] = False
+        self.ctrl.selected = "P"
+        self.ctrl.state = lambda: {"ok": True}
+        self.ctrl.settings.role = "developer"
+        self.ctrl.apply_preset = lambda name, ctx=None: {"state": {"ok": True}}
+
+    def tearDown(self):
+        self.ctrl._stop_watcher()
+        self.tmp.cleanup()
+
+    def _plan(self, offline=False):
+        p = diff.Plan(role="developer", cloud_version="v1.0.0", offline=offline)
+        p.items.append(diff.DiffItem("f0.zip", diff.UPLOAD,
+                                     local={"path": "f0.zip", "sha256": "a"},
+                                     cloud=None))
+        return p
+
+    def test_empty_selection_is_rejected(self):
+        fake = FakeOnline(self._plan(), bound=True)
+        fake.account_info = lambda: {"label": "测试"}
+        self.ctrl.online = fake
+        fake.publish_plan = lambda ref, on_phase=None: self._plan()
+        self.ctrl.publish_plan("P")
+        with self.assertRaises(ValueError):
+            self.ctrl.publish("P", "v1.0.1", "", "", [])
+        self.assertIsNone(fake.published)
+
+    def test_offline_plan_cannot_publish(self):
+        fake = FakeOnline(self._plan(), bound=True)
+        fake.account_info = lambda: {"label": "测试"}
+        self.ctrl.online = fake
+        fake.publish_plan = lambda ref, on_phase=None: self._plan(offline=True)
+        self.ctrl.publish_plan("P")
+        with self.assertRaises(ValueError):
+            self.ctrl.publish("P", "v1.0.1", "", "", ["f0.zip"])
+
+    def test_login_does_not_switch_role(self):
+        class FakeAccount:
+            def login(self, *a, **k):
+                return {"label": "测试"}
+        self.ctrl.online = FakeAccount()
+        self.ctrl.settings.role = "player"
+        self.ctrl.login("u", "p")
+        self.assertEqual(self.ctrl.settings.role, "player")
+
+    def test_success_writes_clean_check(self):
+        fake = FakeOnline(self._plan(), bound=True)
+        fake.account_info = lambda: {"label": "测试"}
+        self.ctrl.online = fake
+        fake.publish_plan = lambda ref, on_phase=None: self._plan()
+        self.ctrl.publish_plan("P")
+        self.ctrl.state = AppController.state.__get__(self.ctrl)
+        self.ctrl.publish("P", "v1.0.1", "", "", ["f0.zip"])
+        preset = next(p for p in self.ctrl.state()["presets"] if p["name"] == "P")
+        self.assertTrue(preset["checked_at"])
+        self.assertEqual(preset["pending"], 0)
+
+    def test_state_plan_has_preset_name(self):
+        fake = FakeOnline(self._plan(), bound=True)
+        fake.account_info = lambda: {"label": "测试"}
+        self.ctrl.online = fake
+        self.ctrl.state = AppController.state.__get__(self.ctrl)
+        fake.publish_plan = lambda ref, on_phase=None: self._plan()
+        self.ctrl.publish_plan("P")
+        self.assertEqual(self.ctrl.state()["plan"]["preset"], "P")
+
+
+class PersistenceAndGuardTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name) / "db"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_last_op_survives_restart(self):
+        c1 = AppController(base_dir=self.base)
+        c1._record_op("P", False, "publish", "网络中断")
+        c1._stop_watcher()
+        c2 = AppController(base_dir=self.base)
+        try:
+            self.assertEqual(c2._last_ops["P"]["message"], "网络中断")
+        finally:
+            c2._stop_watcher()
+
+    def test_cannot_delete_bound_cloud_folder(self):
+        ctrl = AppController(base_dir=self.base)
+        ctrl.settings.role = "developer"
+        ctrl._bound_names = lambda: ["P"]
+        ctrl.online = type("Fake", (), {
+            "source_of": lambda self, name: {"cloud_path": "/PulsesSwap/P"},
+            "cloud_delete": lambda self, kind, obj_id: {"ok": True},
+        })()
+        try:
+            with self.assertRaises(ValueError):
+                ctrl.cloud_delete("folder", 1, "/PulsesSwap/P")
+        finally:
+            ctrl._stop_watcher()

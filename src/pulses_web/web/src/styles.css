@@ -1224,3 +1224,30 @@ h3 { font-size: 15px; font-weight: 600; }
 
 .pill.warning { background: rgba(201, 169, 97, .18); color: #8a6b24; }
 .pill.danger { background: rgba(201, 123, 123, .18); color: #a34b4b; }
+
+/* 发布台：左侧预设列表 + 右侧该预设的差异 */
+.publish-workspace { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 12px; align-items: start; }
+.publish-rail { padding: 0 0 10px; position: sticky; top: 12px; overflow: hidden; }
+.publish-rail-list { padding: 4px 8px; display: flex; flex-direction: column; gap: 4px; max-height: 480px; overflow: auto; }
+.publish-preset { display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "name ver" "state state"; gap: 2px 6px; text-align: left;
+  padding: 8px 10px; border-radius: 9px; border: 1px solid transparent; }
+.publish-preset:hover { background: var(--input); }
+.publish-preset.active { border-color: var(--accent); background: var(--accent-soft); }
+.pp-name { grid-area: name; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-weight: 600; font-size: 12px; }
+.pp-version { grid-area: ver; font-size: 10.5px; color: var(--text-2); }
+.publish-preset .pill { grid-area: state; justify-self: start; font-size: 9.5px; padding: 1px 7px; }
+@media (max-width: 1100px) { .publish-workspace { grid-template-columns: 1fr; }
+  .publish-rail { position: static; } .publish-rail-list { flex-direction: row; overflow-x: auto; } }
+
+/* 最近操作 */
+.recent-ops { padding: 12px 14px; }
+.op-row { display: grid; grid-template-columns: 10px minmax(0, 1.1fr) 44px 56px 132px minmax(0, 1.4fr);
+  gap: 8px; align-items: center; padding: 5px 4px; border-radius: 7px; font-size: 11px; }
+.op-row:hover { background: var(--input); }
+.op-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+.op-row.failed .op-dot { background: var(--error); }
+.op-name { text-align: left; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.op-time { color: var(--text-2); font-variant-numeric: tabular-nums; }
+.op-msg { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

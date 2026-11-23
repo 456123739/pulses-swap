@@ -132,11 +132,14 @@ class AppController:
         self.last_publish_plan = None
         self._plan_owner = None
         self._publish_owner = None
+        self._plan_name = None
         # 每个预设最近一次检查的摘要（键 = 预设名）。用来给预设条目和枪包列表
         # 标“待更新 / 缺失 / 多余 / 变更”，不用等用户再点一次检查。
         self._checks: dict[str, dict] = {}
         # 每个预设最近一次上传/下载的结果：失败/取消后不能装作“已是最新”
         self._last_ops: dict[str, dict] = {}
+        self._online_state_file = self.base_dir / ".online_state.json"
+        self._load_online_state()
         self._rev = 0
         self._init_online()
         self.add_log(f"Pulses Swap Web {getattr(paths, 'VERSION', '')}",
@@ -182,6 +185,7 @@ class AppController:
         self.last_publish_plan = None
         self._plan_owner = None
         self._publish_owner = None
+        self._plan_name = None
         self._checks.clear()
 
     def _clear_current_plans(self):
@@ -190,6 +194,7 @@ class AppController:
         self.last_publish_plan = None
         self._plan_owner = None
         self._publish_owner = None
+        self._plan_name = None
 
     def _plan_for(self, name):
         if self.last_plan is None or self._plan_owner != self._owner(name):
@@ -251,6 +256,8 @@ class AppController:
             plan = (self._plan_summary(self.last_plan)
                     if self.last_plan and self._plan_owner == self._owner(self.selected)
                     else None)
+            if plan is not None:
+                plan["preset"] = self._plan_name or self.selected
             return {
                 "revision": self._rev,
                 "version": getattr(paths, "VERSION", ""),
@@ -333,10 +340,50 @@ class AppController:
                             "file_count": 1, "target": ""})
         return out
 
+    def _load_online_state(self) -> None:
+        try:
+            raw = self._online_state_file.read_text(encoding="utf-8")
+            data = json.loads(raw)
+            if isinstance(data.get("last_ops"), dict):
+                self._last_ops = data["last_ops"]
+            if isinstance(data.get("checks"), dict):
+                self._checks = data["checks"]
+        except (OSError, ValueError, TypeError):
+            pass
+
+    def _save_online_state(self) -> None:
+        try:
+            self._online_state_file.write_text(json.dumps({
+                "last_ops": self._last_ops, "checks": self._checks,
+            }, ensure_ascii=False), encoding="utf-8")
+        except OSError:
+            pass
+
     def _record_op(self, name: str, ok: bool, action: str, message: str) -> None:
         self._last_ops[name] = {"ok": bool(ok), "action": action,
                                 "message": str(message or ""),
                                 "at": int(time.time())}
+        self._save_online_state()
+
+    def _store_check_from_plan(self, name: str, plan, summary: str = "",
+                               same_paths=None) -> None:
+        """把一次真实计划/发布结果写回检查缓存，让左栏与右侧用同一份数字。"""
+        counts: dict[str, int] = {}
+        by_name: dict[str, str] = {}
+        same = set(same_paths or ())
+        for item in getattr(plan, "items", []) or []:
+            status = STATUS_SAME if item.path in same else _diff_status(item)
+            counts[status] = counts.get(status, 0) + 1
+            if item.display_name:
+                by_name[item.display_name] = status
+        self._checks[name] = {
+            "role": self.role,
+            "at": int(time.time()),
+            "status_counts": counts,
+            "by_name": by_name,
+            "summary": summary or (plan.summary() if plan is not None else ""),
+        }
+        self._save_online_state()
 
     def _check_view(self, name: str) -> dict:
         """某个预设最近一次检查的“给人看”的结果（没查过就返回空）。"""
@@ -677,7 +724,7 @@ class AppController:
     @_locked
     def login(self, username: str, password: str, remember=True):
         data = self._require_online().login(username, password, remember=remember)
-        self.settings.role = "developer"
+        # 登录只代表“有账号”，是否开发者由用户自己切换，避免玩家一登录就拿到发布权限
         self.settings.save()
         self._rev += 1
         return {"account": data, "state": self.state()}
@@ -733,9 +780,15 @@ class AppController:
         return {"result": result, "state": self.state()}
 
     @_locked
-    def cloud_delete(self, kind: str, obj_id: int):
+    def cloud_delete(self, kind: str, obj_id: int, path: str = ""):
         if self.role != "developer":
             raise PermissionError("只有开发者可以删除云端文件")
+        if kind == "folder" and path:
+            target = path.rstrip("/")
+            for name in self._bound_names():
+                source = (self.online.source_of(name) or {}) if self.online else {}
+                if str(source.get("cloud_path") or "").rstrip("/") == target:
+                    raise ValueError(f"这个目录属于已绑定预设「{name}」；先解除绑定再删，避免预设指向空目录")
         out = self._require_online().cloud_delete(kind, obj_id)
         self._rev += 1
         return {"result": out, "state": self.state()}
@@ -891,6 +944,7 @@ class AppController:
             on_phase=lambda text: ctx.progress(None, phase="check", message=text)
             if ctx else None)
         self.last_plan = plan
+        self._plan_name = name
         self._plan_owner = self._owner(name)
         summary = self._plan_summary(plan)
         by_name = {}
@@ -950,11 +1004,16 @@ class AppController:
         plan = self._plan_for(name)
         if plan is None:
             raise ValueError("当前差异计划不属于这个预设，请重新检查")
-        if not selection:
-            if plan is None:
-                raise ValueError("请先检查差异")
+        if plan.offline:
+            raise ValueError("云端暂时不可用，这是缓存计划，不能拿来同步；请联网后重新检查")
+        planned = {i.path for i in plan.items if i.action not in ("skip", "blocked")}
+        if selection is None:
             selection = [i.path for i in plan.items
                          if i.action not in ("skip", "blocked")]
+        else:
+            selection = [p for p in selection if p in planned]
+            if not selection:
+                raise ValueError("请至少勾选一项属于当前计划的文件")
         if ctx:
             def on_progress(done, total, index, count, entry):
                 pct = (done / total * 100.0) if total else None
@@ -973,8 +1032,8 @@ class AppController:
         result = online.sync(self._ref(name), plan, selection,
                              on_item=on_item, on_progress=on_progress,
                              cancel=(lambda: ctx.cancelled) if ctx else None)
-        # 下载/删除已经改过本地文件，旧的检查结果不再成立
-        self._checks.pop(name, None)
+        # 下载/删除已经改过本地文件：用这次计划写一份干净状态，避免成功后回落“未检查”
+        self._store_check_from_plan(name, plan, "已是最新", same_paths=set(selection))
         self._rev += 1
         return {"result": self._serialize(result), "state": self.state()}
 
@@ -1289,6 +1348,8 @@ class AppController:
         self.last_plan = plan
         self._publish_owner = self._owner(name)
         self._plan_owner = self._owner(name)
+        self._plan_name = name
+        self._store_check_from_plan(name, plan)
         self._rev += 1
         return {"plan": self._plan_summary(plan), "state": self.state()}
 
@@ -1303,13 +1364,20 @@ class AppController:
         plan = self._publish_for(name)
         if plan is None:
             raise ValueError("发布计划已过期，请重新生成")
+        if plan.offline:
+            raise ValueError("云端暂时不可用，这是缓存计划，不能用来发布；请联网后重新检查")
         uploads = sum(1 for i in plan.items if i.action == "upload")
         extras = sum(1 for i in plan.items if i.action == "delete_cloud")
         self.add_log(f"差异计划：待上传 {uploads} 项、云端多余 {extras} 项",
                      "INFO", verbose=True)
-        if not selection:
+        planned = {i.path for i in plan.items if i.action not in ("skip", "blocked")}
+        if selection is None:
             selection = [i.path for i in plan.items
                          if i.action not in ("skip", "blocked")]
+        else:
+            selection = [p for p in selection if p in planned]
+            if not selection:
+                raise ValueError("请至少勾选一项属于当前计划的文件；空选择不会发布")
         result = online.publish(
             self._ref(name), plan, selection, version=version,
             notes=notes, min_app=min_app,
@@ -1326,8 +1394,11 @@ class AppController:
         self.add_log(f"发布结束：上传 {len(_get('uploaded', []))} 项、"
                      f"删除 {len(_get('deleted', []))} 项、失败 {len(_get('failed', []))} 项",
                      "SUCCESS" if _get('ok', False) else "WARNING")
-        # 云端内容变了，旧的检查结果不再成立
-        self._checks.pop(name, None)
+        if _get("ok", False):
+            self._store_check_from_plan(name, plan, f"已上传 {version} · {plan.summary()}",
+                                        same_paths=set(selection))
+        else:
+            self._checks.pop(name, None)
         self._rev += 1
         return {"result": self._serialize(result), "state": self.state()}
 

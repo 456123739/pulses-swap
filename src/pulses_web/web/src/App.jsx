@@ -692,7 +692,9 @@ function Home({ snap, actions, busy, publishNotes = '' }) {
                   </button>
                 )}
                 {(snap.online.bound_count || 0) > 0 && <button className="btn hero-secondary" disabled={busy}
-                  onClick={actions.syncAllAuto}><Icon name="refresh" size={17} />一键更新全部
+                  onClick={() => actions.confirm('一键更新全部预设',
+                    `将依次检查所有已绑定预设并下载更新；已替换的预设会自动换回去。继续？`,
+                    () => actions.syncAllAuto())}><Icon name="refresh" size={17} />一键更新全部
                   <Hint text="把所有绑定过云端的预设都检查一遍，有更新就下载，已替换的会自动换回去。" />
                 </button>}
               </> : selected && !snap.online.binding?.url
@@ -711,7 +713,9 @@ function Home({ snap, actions, busy, publishNotes = '' }) {
                     </button>
                   )}
                   {(snap.online.bound_count || 0) > 0 && <button className="btn hero-secondary" disabled={busy}
-                    onClick={() => actions.publishAllAuto(publishNotes)}><Icon name="upload" size={17} />一键上传全部
+                    onClick={() => actions.confirm('一键上传全部预设',
+                      `将依次处理所有已绑定预设：逐个检查、递增版本并上传有变化的内容。继续？`,
+                      () => actions.publishAllAuto(publishNotes))}><Icon name="upload" size={17} />一键上传全部
                     <Hint text="把所有绑定过云端的预设扫一遍，有变化就递增版本并上传。" />
                   </button>}
                   {!selected && <button className="btn hero-secondary" disabled>
@@ -837,6 +841,7 @@ function Manage({ snap, actions, busy, tab = 'overview', onTab, publishNotes = '
   useEffect(() => { setPublishVersion(selected?.version || '') }, [selected?.name, selected?.version])
   const planMismatch = Boolean(snap.plan && snap.plan.role !== snap.role)
   const plan = planMismatch ? null : snap.plan
+  useEffect(() => { setSelection(null) }, [snap.selected, plan?.generation, snap.role])
   const selectedPaths = selection ?? new Set((plan?.items || []).filter((i) => i.checked).map((i) => i.path))
   const toggle = (path) => {
     const next = new Set(selectedPaths)
@@ -865,10 +870,43 @@ function Manage({ snap, actions, busy, tab = 'overview', onTab, publishNotes = '
         <button role="tab" aria-selected={tab === 'publish'} className={tab === 'publish' ? 'active' : ''} onClick={() => onTab?.('publish')}>发布</button>
         <button role="tab" aria-selected={tab === 'cloud'} className={tab === 'cloud' ? 'active' : ''} onClick={() => onTab?.('cloud')}>云端文件</button>
       </div>
-      {tab === 'cloud' ? <CloudFiles snap={snap} actions={actions} busy={busy} /> : tab === 'publish' ? (<>
+      {tab === 'cloud' ? <CloudFiles snap={snap} actions={actions} busy={busy} /> : tab === 'publish' ? (
+      <div className="publish-workspace">
+      <aside className="card publish-rail">
+        <div className="card-head"><div><span className="eyebrow">PRESETS</span><h2>选择预设</h2></div>
+          <span className="pill">{snap.presets.filter((p) => p.bound).length} 已绑定</span></div>
+        <div className="publish-rail-list">
+          {snap.presets.map((p) => {
+            const failed = p.last_op && p.last_op.ok === false
+            const label = failed ? '上次失败' : !p.bound ? '未绑定'
+              : p.needs_update ? `待处理 ${(p.pending || 0) + (p.extra || 0)}`
+              : p.checked_at ? '已同步' : '未检查'
+            const tone = failed ? 'danger' : !p.bound ? '' : p.needs_update ? 'warning'
+              : p.checked_at ? 'success' : ''
+            return (
+              <button key={p.name} className={`publish-preset ${p.name === snap.selected ? 'active' : ''}`}
+                onClick={() => actions.select(p.name)} title={p.name}>
+                <span className="pp-name">{p.name}</span>
+                <span className={`pill ${tone}`}>{label}</span>
+                <span className="pp-version">{p.version || 'v1.0.0'}</span>
+              </button>
+            )
+          })}
+        </div>
+        <p className="field-note">选中预设后，右侧显示它的差异；计划会标注属于哪个预设，不会混用。</p>
+      </aside>
+      <div className="publish-main">
       <section className={`card plan-card ${!plan ? 'plan-empty' : ''}`}>
-        <div className="card-head"><div><span className="eyebrow">DIFF</span><h2>{isDeveloper ? '待上传差异' : '云端差异'}</h2></div>
-          {plan && <span className="pill">{plan.summary}</span>}</div>
+        <div className="card-head"><div><span className="eyebrow">DIFF</span>
+          <h2>{isDeveloper ? '待上传差异' : '云端差异'} · {plan?.preset || selected?.name || '未选择'}</h2></div>
+          <div className="button-row">
+            {plan && <span className="pill">{plan.summary}</span>}
+            <button className="btn small ghost" disabled={!selected || busy} onClick={() => actions.check(selected.name)}>检查当前预设</button>
+            {isDeveloper && <button className="btn small" disabled={!selected || busy} onClick={() => actions.publishPlan(selected.name)}>生成发布计划</button>}
+          </div></div>
+        {plan && plan.preset && plan.preset !== snap.selected &&
+          <p className="auto-note warning-note">这份差异计划属于「{plan.preset}」，不是当前选中的「{snap.selected}”。
+            <button className="text-btn" onClick={() => actions.select(plan.preset)}>切换到 {plan.preset}</button></p>}
         {plan?.offline && <p className="auto-note warning-note">云端暂时连不上，这是上次缓存的结果；恢复后再点「{autoLabel}」会重新联网检查。</p>}
         {planMismatch ? <p className="auto-note warning-note">当前差异计划属于另一个身份，已隐藏；点上方“{autoLabel}”会按当前身份重新计算。</p>
           : !plan ? <p className="muted pad">不需要手动检查。点上方“{autoLabel}”，软件会逐个比对所有已绑定预设并完成操作。</p> : <>
@@ -885,11 +923,21 @@ function Manage({ snap, actions, busy, tab = 'overview', onTab, publishNotes = '
           {!advanced && isDeveloper && <p className="auto-note">版本号会自动在当前版本上 +1，说明写「一键发布 · 上传 N 项」。想自己写？<button className="text-btn" onClick={() => actions.updateSettings({ advanced_actions: true })}>打开高级操作</button></p>}
           {advanced ? <div className="plan-cta">
             {!isDeveloper
-              ? <button className="btn primary plan-primary" disabled={!selected || !selectedPaths.size || busy} onClick={() => actions.sync(selected.name, [...selectedPaths])}>同步选中</button>
+              ? <button className="btn primary plan-primary" disabled={!selected || !selectedPaths.size || busy || plan?.offline} onClick={() => actions.sync(selected.name, [...selectedPaths])}>同步选中</button>
               : snap.publish_ready
-              ? <button className="btn primary plan-primary" disabled={busy} onClick={() => actions.publish(selected.name, publishVersion || selected.version, publishNotes, [...selectedPaths])}>发布选中</button>
+              ? <button className="btn primary plan-primary" disabled={busy || plan?.offline} onClick={() => actions.publish(selected.name, publishVersion || selected.version, publishNotes, [...selectedPaths])}>发布选中</button>
               : <button className="btn primary plan-primary" disabled={busy || !selected} onClick={() => actions.publishPlan(selected.name)}>生成发布计划</button>}
-          </div> : <p className="auto-note">软件已按最稳妥方案选择：{isDeveloper ? '只上传变更，保留云端多余文件' : '下载更新，并按设置处理本地多余项'}。</p>}
+          </div> : <>
+            <div className="plan-cta">
+              <button className="btn primary plan-primary" disabled={busy || !selected || plan?.offline}
+                onClick={() => (isDeveloper ? actions.publishAuto(selected.name) : actions.syncAuto(selected.name))}>
+                {isDeveloper ? '上传这个预设' : '更新这个预设'}
+              </button>
+              {isDeveloper && selected && !selectedBound && <button className="btn ghost" disabled={busy}
+                onClick={() => actions.openUpload(selected.name)}>上传这个预设</button>}
+            </div>
+            <p className="auto-note">软件已按最稳妥方案选择：{isDeveloper ? '只上传变更，保留云端多余文件' : '下载更新，并按设置处理本地多余项'}。</p>
+          </>}
           <div className="plan-list">
             <AnimatePresence mode="popLayout" initial={false}>
               {plan.items.map((item, i) => (
@@ -909,7 +957,9 @@ function Manage({ snap, actions, busy, tab = 'overview', onTab, publishNotes = '
           </div>
         </>}
       </section>
-      </>) : (<>
+      </div>
+      </div>
+      ) : (<>
       <section className="action-deck manage-action" aria-label="管理主要操作">
         <div className="action-copy">
           <span className="eyebrow">ONE CLICK</span>
@@ -930,7 +980,10 @@ function Manage({ snap, actions, busy, tab = 'overview', onTab, publishNotes = '
         </div>
         <div className="action-buttons">
           <button className="btn xl primary action-primary" disabled={!boundCount || busy}
-            onClick={() => (isDeveloper ? actions.publishAllAuto(publishNotes) : runAuto())}>
+            onClick={() => actions.confirm(
+              isDeveloper ? '一键上传全部预设' : '一键更新全部预设',
+              `将依次处理 ${boundCount} 个已绑定预设${isDeveloper ? '：逐个检查、递增版本并上传有变化的内容' : '：逐个检查并下载更新'}。中途失败会停下并保留已完成的结果。`,
+              () => (isDeveloper ? actions.publishAllAuto(publishNotes) : actions.syncAllAuto()))}>
             <Icon name={isDeveloper ? 'upload' : 'cloud'} size={20} />{autoLabel}
             <Hint text={isDeveloper
               ? '遍历所有绑定过云端的预设：有变化就递增版本号上传，云端多余文件不会删。'
@@ -951,6 +1004,26 @@ function Manage({ snap, actions, busy, tab = 'overview', onTab, publishNotes = '
         <div className="stat"><span>账号</span><strong>{snap.online.account?.label ? '已认证' : '未登录'}</strong><small>{snap.online.account?.label || '本地模式'}</small></div>
         <div className="stat"><span>发布历史</span><strong>{(snap.online.binding?.history || []).length}</strong><small>最近记录</small></div>
       </div>
+      <section className="card recent-ops">
+        <div className="card-head"><div><span className="eyebrow">ACTIVITY</span><h2>最近操作</h2></div>
+          <div className="button-row">
+            <span className={`pill ${snap.presets.some((p) => p.last_op && p.last_op.ok === false) ? 'warning' : ''}`}>
+              {snap.presets.filter((p) => p.needs_update || (p.last_op && p.last_op.ok === false)).length} 个预设待处理</span>
+            <button className="text-btn" onClick={() => actions.navigate('log')}>查看日志</button>
+          </div></div>
+        {snap.presets.filter((p) => p.last_op).length === 0
+          ? <p className="muted pad">还没有上传/更新记录；操作一次后这里会显示结果、时间和原因。</p>
+          : snap.presets.filter((p) => p.last_op).sort((a, b) => (b.last_op.at || 0) - (a.last_op.at || 0)).slice(0, 6).map((p) => (
+            <div key={p.name} className={`op-row ${p.last_op.ok ? 'ok' : 'failed'}`}>
+              <span className="op-dot" />
+              <button className="op-name" onClick={() => actions.select(p.name)} title={p.name}>{p.name}</button>
+              <span className="muted">{p.last_op.action === 'publish' ? '上传' : '更新'}</span>
+              <span className={`pill ${p.last_op.ok ? 'success' : 'danger'}`}>{p.last_op.ok ? '成功' : '失败'}</span>
+              <span className="op-time">{p.last_op.at ? new Date(p.last_op.at * 1000).toLocaleString('zh-CN', { hour12: false }) : ''}</span>
+              <span className="op-msg" title={p.last_op.message || ''}>{p.last_op.message || '—'}</span>
+            </div>
+          ))}
+      </section>
       <section className="card preset-cloud-table">
         <div className="card-head"><div><span className="eyebrow">PRESETS</span><h2>预设与云端</h2></div>
           <span className="pill">{snap.presets.filter((p) => p.bound).length} 个已绑定</span></div>
@@ -1425,11 +1498,11 @@ export default function App() {
   const apply = useCallback((item) => confirm('确认替换', `将应用「${item.name}」并替换 TACZ 枪包。`, () =>
     startJob('preset.apply', { name: item.name }, '一键替换')), [confirm, startJob])
 
-  const cloudDelete = useCallback((kind, id, name) => confirm('删除云端内容',
+  const cloudDelete = useCallback((kind, id, name, path = '') => confirm('删除云端内容',
     `删除${kind === 'folder' ? '文件夹' : '文件'}「${name}」？云端删除不可恢复；玩家如果已经下载则不受影响。`,
     async () => {
       try {
-        const out = await invoke('online.cloud.delete', { kind, id })
+        const out = await invoke('online.cloud.delete', { kind, id, path })
         setSnap(out.state)
         showToast('已删除', 'success')
       } catch (err) { showToast(err.message, 'error'); throw err }
@@ -1622,7 +1695,7 @@ export default function App() {
         ? { ...m, details: { error: err.message } } : m))
     }
   }, [refresh, showToast])
-  const actions = { openPack, openCloud, startJob, reorderPresets, detach, cloudDelete, openTacz, clearCache, clearLogs, addFromCloud, openDatabase, select, createPreset, rename, delete: remove, saveVersion, apply, bind, unbind, check, sync, syncAuto, publishAuto, syncAllAuto, publishAllAuto, publishNew, openUpload, publishPlan, publish, login, logout, updateSettings, switchRole, prompt, toast: showToast, navigate, cancelJob, presetDetails: openPresetDetail, importGunpacks }
+  const actions = { openPack, openCloud, startJob, reorderPresets, detach, cloudDelete, openTacz, clearCache, clearLogs, addFromCloud, openDatabase, select, createPreset, rename, delete: remove, saveVersion, apply, bind, unbind, check, sync, syncAuto, publishAuto, syncAllAuto, publishAllAuto, publishNew, openUpload, publishPlan, publish, login, logout, updateSettings, switchRole, prompt, confirm, toast: showToast, navigate, cancelJob, presetDetails: openPresetDetail, importGunpacks }
   const animations = snap.settings?.animations !== false
   const pageEl = page === 'home' ? <Home snap={snap} actions={actions} busy={busy} publishNotes={publishNotes} />
     : page === 'manage' ? <Manage snap={snap} actions={actions} busy={busy} tab={manageTab} onTab={setManageTab} publishNotes={publishNotes} setPublishNotes={setPublishNotes} />

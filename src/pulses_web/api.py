@@ -101,7 +101,7 @@ class Api:
                 p.get("path") or "/"),
             "online.cloud.upload": self._job("online.cloud.upload"),
             "online.cloud.delete": lambda p: self._controller.cloud_delete(
-                p.get("kind", "file"), p.get("id")),
+                p.get("kind", "file"), p.get("id"), p.get("path") or ""),
             "online.account.state": lambda p: self._controller.account_state(),
             "online.unbind": lambda p: self._controller.unbind_source(p["name"]),
             "online.check": self._job("online.check"),

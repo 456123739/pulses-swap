@@ -2,7 +2,7 @@ import { chromium } from 'playwright'
 import fs from 'node:fs'
 
 const state = {
-  revision: 7, version: '3.3.2', role: 'developer',
+  revision: 7, version: '3.3.3', role: 'developer',
   pack: { path: 'D:\\Games\\Minecraft\\PCL\\.minecraft\\versions\\1.20.1-Fabric', name: '1.20.1-Fabric', tacz: 'D:\\Games\\Minecraft\\PCL\\.minecraft\\versions\\1.20.1-Fabric\\tacz', loaded: true },
   presets: [
     { name: '默认枪包', version: 'v1.2.0', applied: true, count: 18, path: '' },

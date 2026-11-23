@@ -192,7 +192,7 @@ export default function CloudFiles({ snap, actions, busy }) {
               <span role="cell" className="cloud-actions">
                 <button className="text-btn" onClick={() => copyShare(full(folder.name))}>分享</button>
                 {snap.role === 'developer' && <button className="text-btn danger-text"
-                  onClick={() => actions.cloudDelete('folder', folder.id, folder.name)}>删除</button>}
+                  onClick={() => actions.cloudDelete('folder', folder.id, folder.name, full(folder.name))}>删除</button>}
               </span>
             </div>
           ))}
