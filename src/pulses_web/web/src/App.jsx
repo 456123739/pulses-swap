@@ -860,6 +860,8 @@ function Manage({ snap, actions, busy, tab = 'overview', onTab, publishNotes = '
     <div className="page manage-page">
       <div className="page-head"><div><span className="eyebrow">GLOBAL</span><h1>管理</h1></div>
         <div className="head-actions">
+          <button className="btn ghost" onClick={actions.diagnose} disabled={!snap.online.account?.label}>网络诊断
+            <Hint text="按真实顺序试一遍：账号 → 云端目录 → 分享页 → manifest；结果同时写进日志。" /></button>
           <button className="btn ghost" onClick={actions.login}>{snap.online.account?.label ? '账号' : '登录蓝奏'}</button>
           <button className="btn ghost" onClick={() => actions.switchRole(isDeveloper ? 'player' : 'developer')}>
             {isDeveloper ? '切换为玩家' : '切换为开发者'}
@@ -1566,6 +1568,18 @@ export default function App() {
   const syncAllAuto = useCallback(() => startJob('online.sync.all', {}, '一键更新全部'), [startJob])
   const publishAllAuto = useCallback((notes = '') => startJob('online.publish.all', { notes }, '一键发布全部'), [startJob])
   const publishNew = useCallback((name) => startJob('online.publish.new', { name }, '上传到云端'), [startJob])
+  const diagnose = useCallback(async () => {
+    try {
+      const out = await invoke('system.net.diagnose', { preset: snap.selected || '' })
+      const steps = out?.steps || []
+      const bad = steps.filter((s) => !s.ok)
+      showToast(bad.length
+        ? `网络诊断：${bad.length} 项失败 · ${bad[0].name}：${bad[0].detail}`
+        : `网络诊断：${steps.length} 项全部通过`, bad.length ? 'warning' : 'success')
+    } catch (err) { showToast(err.message, 'error') }
+  }, [snap.selected, showToast])
+
+
   const openUpload = useCallback((name) => {
     const preset = (snap.presets || []).find((p) => p.name === name)
     if (preset?.bound) { publishNew(name); return }        // 已绑定的走一键上传
@@ -1695,7 +1709,7 @@ export default function App() {
         ? { ...m, details: { error: err.message } } : m))
     }
   }, [refresh, showToast])
-  const actions = { openPack, openCloud, startJob, reorderPresets, detach, cloudDelete, openTacz, clearCache, clearLogs, addFromCloud, openDatabase, select, createPreset, rename, delete: remove, saveVersion, apply, bind, unbind, check, sync, syncAuto, publishAuto, syncAllAuto, publishAllAuto, publishNew, openUpload, publishPlan, publish, login, logout, updateSettings, switchRole, prompt, confirm, toast: showToast, navigate, cancelJob, presetDetails: openPresetDetail, importGunpacks }
+  const actions = { openPack, openCloud, startJob, reorderPresets, detach, cloudDelete, openTacz, clearCache, clearLogs, addFromCloud, openDatabase, select, createPreset, rename, delete: remove, saveVersion, apply, bind, unbind, check, sync, syncAuto, publishAuto, syncAllAuto, publishAllAuto, publishNew, openUpload, publishPlan, diagnose, publish, login, logout, updateSettings, switchRole, prompt, confirm, toast: showToast, navigate, cancelJob, presetDetails: openPresetDetail, importGunpacks }
   const animations = snap.settings?.animations !== false
   const pageEl = page === 'home' ? <Home snap={snap} actions={actions} busy={busy} publishNotes={publishNotes} />
     : page === 'manage' ? <Manage snap={snap} actions={actions} busy={busy} tab={manageTab} onTab={setManageTab} publishNotes={publishNotes} setPublishNotes={setPublishNotes} />

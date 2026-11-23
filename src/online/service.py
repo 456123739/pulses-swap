@@ -1093,16 +1093,11 @@ class OnlineService:
         try:
             files = account.list_files(folder)
         except OnlineError as exc:
-            # 账号接口都不通的时候，分享页那条路只会更慢（分钟级）。
-            # 有缓存就用缓存；连缓存都没有就明确报错 —— 不能假装「云端是空的」，
-            # 否则界面会显示「有 N 项待发布」，用户一发布就是整包重传。
-            self._log(f"列云端文件失败：{exc}", "WARNING")
-            if cached is not None:
-                self._log("改用上次缓存的云端 manifest 进行比对", "WARNING")
-                self._cloud_offline = True
-                return cached
-            raise SourceError(f"无法读取云端文件夹：{exc}",
-                              hint="检查网络，或确认云端路径还在。") from exc
+            # 账号接口失败就是真的连不上：不再拿缓存冒充云端，
+            # 否则用户会看到一份“看起来能发布”的计划，实际全是旧数据。
+            self._log(f"列云端文件失败：{exc}", "ERROR")
+            raise SourceError(f"云端连接失败：{exc}",
+                              hint="检查网络后重试；不要用缓存计划发布。") from exc
 
         names = {str(f.get("name") or "").lower() for f in files}
         if not names or not any(is_manifest_name(name) for name in names):
@@ -1133,10 +1128,12 @@ class OnlineService:
                 self._log(f"读取云端 manifest 失败：{exc}", "WARNING")
 
         if cached is not None:
-            self._log("使用上次缓存的云端 manifest 进行比对", "WARNING")
-            self._cloud_offline = True
+            self._log("账号在线，但分享页暂时读不到 manifest：用上次记录做比对（发布前仍会重新列云端文件）",
+                      "WARNING")
             return cached
-        return manifest_mod.empty_manifest(preset)
+        raise SourceError(
+            "云端已经有文件，但读不到 manifest（分享页不可用）",
+            hint="稍后重试；或确认这个文件夹的分享链接还能打开。不会用缓存假装成功。")
 
     def test_cloud_path(self, cloud_path: str) -> dict:
         """测试云端路径：连得上、文件夹建得出来、里面有几个文件。
@@ -1161,6 +1158,51 @@ class OnlineService:
     def _clean_cloud_path(path: str) -> str:
         parts = [p for p in str(path or "").replace("\\", "/").split("/") if p]
         return "/" + "/".join(parts) if parts else "/"
+
+    def diagnose_network(self, preset: str = "") -> list[dict]:
+        """按真实业务顺序探一遍网络：账号 → 目录 → 分享页 → manifest。"""
+        import time as _time
+        steps: list[dict] = []
+
+        def run(name, fn):
+            started = _time.monotonic()
+            try:
+                detail = fn() or ""
+                steps.append({"name": name, "ok": True, "detail": str(detail),
+                              "ms": int((_time.monotonic() - started) * 1000)})
+            except Exception as exc:                    # noqa: BLE001
+                steps.append({"name": name, "ok": False, "detail": str(exc),
+                              "ms": int((_time.monotonic() - started) * 1000)})
+            return steps[-1]["ok"]
+
+        account = self._require_account()
+        ok = run("账号会话", lambda: self.account_info().get("label", "已登录"))
+        if not ok:
+            return steps
+        run("读取云端根目录", lambda: f"{len(account.list_folders(-1))} 个文件夹")
+        record = self.sources.get(preset) if preset else {}
+        folder = record.get("folder_id") if record else None
+        path = str(record.get("cloud_path") or "") if record else ""
+        if path and not folder:
+            run("定位预设目录", lambda: (account.ensure_path(path) and path))
+        elif path:
+            run("读取预设目录", lambda: f"{len(account.list_files(int(folder)))} 个文件")
+        if path:
+            share = {}
+            ok = run("取分享链接",
+                     lambda: share.update(account.folder_share(int(folder))) or
+                     share.get("url", ""))
+            if ok and share.get("url"):
+                def open_share():
+                    reader = LanzouShare(share["url"], share.get("password", ""),
+                                         log=self.log, sleep=self.sleep)
+                    info = reader.find_manifest()
+                    if not info:
+                        raise SourceError("分享页能打开，但没有找到 manifest")
+                    return f"{info.get('version', '')} · {len(info.get('files') or [])} 项"
+                run("打开分享页并读取 manifest", open_share)
+        run("账号容量", lambda: (account.quota() or {}).get("used", ""))
+        return steps
 
     def cloud_browse(self, path: str = "") -> dict:
         """列出一个云端文件夹（不创建任何目录）。
@@ -1374,7 +1416,7 @@ class OnlineService:
                             app_version=self.app_version)
         plan.cloud_name = plan.cloud_name or ref.name
         # 云端这次没读到时，计划是基于缓存的：可以展示，但不能拿来发布
-        plan.offline = bool(getattr(self, "_cloud_offline", False))
+        plan.offline = False
         return plan
 
     def publish(self, ref: PresetRef, plan: diff.Plan, selection,

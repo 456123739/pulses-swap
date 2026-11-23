@@ -29,7 +29,7 @@ class FakeOnline:
         self.bound = bound
         self.bind_args = None
 
-    def check(self, ref, role="player", on_phase=None):
+    def check(self, ref, role="player", on_phase=None, **kwargs):
         assert role == self.plan.role
         return self.plan
 
@@ -182,7 +182,7 @@ class AutoActionTests(unittest.TestCase):
         }
 
         class FailOne(FakeOnline):
-            def check(self, ref, role="player", on_phase=None):
+            def check(self, ref, role="player", on_phase=None, **kwargs):
                 if ref.name == "Q":
                     raise RuntimeError("模拟网络失败")
                 return self.plan

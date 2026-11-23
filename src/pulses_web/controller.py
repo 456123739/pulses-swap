@@ -806,6 +806,15 @@ class AppController:
                           "total_text": _size_text(total),
                           "percent": round(used / total * 100, 1) if total else 0}}
 
+    def net_diagnose(self, preset: str = ""):
+        online = self._require_online()
+        steps = online.diagnose_network(preset or self.selected or "")
+        for step in steps:
+            self.add_log(f"网络诊断 · {step['name']}：{'通过' if step['ok'] else '失败'}"
+                         f"（{step['ms']} ms）{step['detail']}",
+                         "SUCCESS" if step["ok"] else "ERROR")
+        return {"steps": steps}
+
     def cloud_share(self, path: str):
         return {"share": self._require_online().cloud_share_path(path)}
 
@@ -940,7 +949,7 @@ class AppController:
         self.last_publish_plan = None
         self._publish_owner = None
         plan = online.check(
-            self._ref(name), role=self.role,
+            self._ref(name), role=self.role, allow_cache=False, prefer_cache=False,
             on_phase=lambda text: ctx.progress(None, phase="check", message=text)
             if ctx else None)
         self.last_plan = plan

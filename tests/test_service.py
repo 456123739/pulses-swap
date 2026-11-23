@@ -458,7 +458,7 @@ class CloudProbeTest(unittest.TestCase):
             self.service._cloud_manifest_for_publish(
                 "测试预设", BrokenAccount(), 1)
 
-    def test_cached_manifest_used_when_list_fails(self):
+    def test_cached_manifest_not_used_when_list_fails(self):
         from online import manifest as manifest_mod
 
         cached = manifest_mod.empty_manifest("测试预设")
@@ -472,9 +472,10 @@ class CloudProbeTest(unittest.TestCase):
             def folder_share(self, folder):
                 raise AssertionError("不该走分享页")
 
-        data = self.service._cloud_manifest_for_publish(
-            "测试预设", BrokenAccount(), 1)
-        self.assertEqual(data.get("generation"), 7)
+        # 账号接口不通就是连不上：不允许拿缓存冒充云端
+        with self.assertRaises(SourceError):
+            self.service._cloud_manifest_for_publish(
+                "测试预设", BrokenAccount(), 1)
 
 
 class SourceStoreConcurrencyTests(unittest.TestCase):
