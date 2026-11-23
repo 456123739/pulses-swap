@@ -352,9 +352,13 @@ class Api:
                                            ctx, notes=notes))
             elif method == "online.publish.new":
                 name = params.get("name", "")
+                cloud_path = params.get("cloud_path") or ""
+                version = params.get("version") or ""
+                notes = params.get("notes") or ""
                 job = self._jobs.submit("上传到云端",
                                        lambda ctx: self._controller.publish_new(
-                                           name, ctx))
+                                           name, ctx, cloud_path=cloud_path,
+                                           version=version, notes=notes))
             elif method == "online.publish.plan":
                 name = params.get("name", "")
                 job = self._jobs.submit("生成发布计划",

@@ -116,6 +116,9 @@ function Modal({ modal, onClose }) {
   const [password, setPassword] = useState('')
   const [presetName, setPresetName] = useState('')
   const [presetVersion, setPresetVersion] = useState('')
+  const [cloudPath, setCloudPath] = useState('')
+  const [uploadVersion, setUploadVersion] = useState('')
+  const [uploadNotes, setUploadNotes] = useState('')
   const [error, setError] = useState('')
   const [pending, setPending] = useState(false)
   const submitted = useRef(false)
@@ -134,7 +137,12 @@ function Modal({ modal, onClose }) {
       setPresetName(modal.preset?.name || '')
       setPresetVersion(modal.preset?.version || '')
     }
-  }, [modal?.kind, modal?.preset?.name])
+    if (modal?.kind === 'upload') {
+      setCloudPath(modal.cloudPath || '')
+      setUploadVersion(modal.version || '')
+      setUploadNotes(modal.notes || '')
+    }
+  }, [modal?.kind, modal?.preset?.name, modal?.cloudPath])
   if (!modal) return null
   const submit = async () => {
     if (submitted.current || pending) return
@@ -143,6 +151,7 @@ function Modal({ modal, onClose }) {
       ? { username: value, password }
       : modal.kind === 'cloudadd' ? { url: value, password }
       : modal.kind === 'preset' ? { name: presetName.trim(), version: presetVersion.trim() }
+      : modal.kind === 'upload' ? { cloud_path: cloudPath.trim(), version: uploadVersion.trim(), notes: uploadNotes.trim() }
       : value
     setError('')
     setPending(true)
@@ -198,6 +207,24 @@ function Modal({ modal, onClose }) {
                 onKeyDown={(e) => { if (e.key === 'Enter') submit() }} /></label>
           </>
         )}
+        {modal.kind === 'upload' && (
+          <>
+            <div className="preset-detail-meta">
+              <span className="pill">{modal.preset?.count ?? 0} 个枪包</span>
+              <span className="pill">首次上传会初始化云端</span>
+            </div>
+            <label className="field"><span>云端文件夹 <Hint text="默认 /PulsesSwap/预设名；可以改成你想要的路径，例如 /PulsesSwap/我的整合包。" /></span>
+              <input autoFocus value={cloudPath} onChange={(e) => setCloudPath(e.target.value)}
+                placeholder="/PulsesSwap/预设名" /></label>
+            <div className="preset-detail-fields">
+              <label className="field"><span>版本号</span>
+                <input value={uploadVersion} onChange={(e) => setUploadVersion(e.target.value)} placeholder="v1.0.0" /></label>
+              <label className="field"><span>更新说明（可选）</span>
+                <input value={uploadNotes} onChange={(e) => setUploadNotes(e.target.value)} placeholder="例如：首次上传" /></label>
+            </div>
+            <p className="modal-hint">流程：生成本地清单 → 建云端目录 → 初始化 manifest → 上传枪包 → 提交 manifest → 取分享链接。进度会显示在右下角。</p>
+          </>
+        )}
         {modal.kind === 'preset' && (
           <>
             <div className="preset-detail-meta">
@@ -228,6 +255,38 @@ function Modal({ modal, onClose }) {
           <button className="btn primary" disabled={pending} onClick={submit}>{pending ? '处理中…' : (modal.confirm || '确定')}</button>
         </div>
       </motion.div>
+    </div>
+  )
+}
+
+function JobBar({ busy, onCancel }) {
+  const rate = useRef({ t: 0, cur: 0, value: 0 })
+  useEffect(() => {
+    if (!busy) { rate.current = { t: 0, cur: 0, value: 0 }; return }
+    const now = performance.now()
+    const cur = Number(busy.current) || 0
+    const prev = rate.current
+    if (!prev.t) rate.current = { t: now, cur, value: 0 }
+    else if (cur > prev.cur) {
+      const dt = (now - prev.t) / 1000
+      if (dt >= 0.35) {
+        const inst = (cur - prev.cur) / dt
+        rate.current = { t: now, cur, value: prev.value ? prev.value * 0.55 + inst * 0.45 : inst }
+      }
+    }
+  }, [busy?.current, busy?.updatedAt])
+  if (!busy) return null
+  const pct = Math.max(0, Math.min(100, Number(busy.progress) || 0))
+  const speed = rate.current.value
+  const speedText = speed > 0 ? `${(speed / 1048576).toFixed(1)} MB/s` : ''
+  return (
+    <div className="job-bar" role="status" aria-live="polite">
+      <div className="job-bar-head"><strong>{busy.title || '处理中'}</strong><span>{Math.round(pct)}%</span></div>
+      <div className={`job-bar-track ${busy.progress == null ? 'indeterminate' : ''}`}><i style={{ width: `${pct}%` }} /></div>
+      <div className="job-bar-foot"><span className="job-bar-text">{busy.text || '准备中…'}</span>
+        {speedText && <span className="job-bar-speed">{speedText}</span>}
+        {busy.cancelable && onCancel && <button className="btn tiny ghost" onClick={onCancel}>取消</button>}
+      </div>
     </div>
   )
 }
@@ -456,7 +515,7 @@ function Home({ snap, actions, busy, publishNotes = '' }) {
     else if (action === 'sync' && selected) (snap.role === 'developer' ? actions.publishAuto : actions.syncAuto)(selected.name)
     else if (action === 'apply' && selected) actions.apply(selected)
     else if (action === 'import' && selected) actions.importGunpacks(selected.name)
-    else if (action === 'publishNew' && selected) actions.publishNew(selected.name)
+    else if (action === 'publishNew' && selected) actions.openUpload(selected.name)
     else if (action === 'publishAuto' && selected) actions.publishAuto(selected.name)
   }
   return (
@@ -598,7 +657,7 @@ function Home({ snap, actions, busy, publishNotes = '' }) {
                 </button>}
               </> : selected && !snap.online.binding?.url
                 ? <button className="btn hero-secondary cloud-action" disabled={busy}
-                    onClick={() => actions.publishNew(selected.name)}><Icon name="upload" size={17} />上传到云端
+                    onClick={() => actions.openUpload(selected.name)}><Icon name="upload" size={17} />上传到云端
                     <Hint text="在云端给这个预设建一个文件夹并上传全部枪包，完成后会给你一条分享链接。" />
                   </button>
                 : <>
@@ -788,7 +847,7 @@ function Manage({ snap, actions, busy, tab = 'overview', onTab, publishNotes = '
               : '遍历所有绑定过云端的预设：有更新就下载，删除项进回收站，已替换的自动换回去。'} />
           </button>
           {isDeveloper && selected && !selectedBound && <button className="btn action-secondary create-cloud-action"
-            disabled={busy} onClick={() => actions.publishNew(selected.name)}>
+            disabled={busy} onClick={() => actions.openUpload(selected.name)}>
             <Icon name="upload" size={17} />上传到云端</button>}
           {advanced && <button className="btn action-secondary" disabled={!selected || !url || busy}
             onClick={() => actions.check(selected.name)}><Icon name="refresh" size={17} />检查差异</button>}
@@ -859,7 +918,7 @@ function Manage({ snap, actions, busy, tab = 'overview', onTab, publishNotes = '
           {selected ? <>
             {isDeveloper && !selectedBound && <div className="create-cloud-panel">
               <div><strong>这个预设还没有云端副本</strong><span>自动创建 /PulsesSwap/{selected.name}，上传后生成分享链接。</span></div>
-              <button className="btn primary" disabled={busy} onClick={() => actions.publishNew(selected.name)}>
+              <button className="btn primary" disabled={busy} onClick={() => actions.openUpload(selected.name)}>
                 <Icon name="upload" size={16} />上传到云端
               </button>
             </div>}
@@ -1085,7 +1144,9 @@ export default function App() {
           showToast('任务长时间没有响应，已自动解锁；可以重试或到日志页看原因', 'warning')
         }, 5 * 60 * 1000)
         const d = event.data || {}
-        setBusy((prev) => prev ? { ...prev, progress: d.percent ?? prev.progress, text: d.message || prev.text } : prev)
+        setBusy((prev) => prev ? { ...prev, progress: d.percent ?? prev.progress,
+          text: d.message || prev.text, current: d.current ?? prev.current,
+          total: d.total ?? prev.total, updatedAt: Date.now() } : prev)
       } else if (type === 'job.done') {
         if (jobIdRef.current && event.jobId !== jobIdRef.current) return
         const st = event.data?.result?.state
@@ -1358,6 +1419,19 @@ export default function App() {
   const syncAllAuto = useCallback(() => startJob('online.sync.all', {}, '一键更新全部'), [startJob])
   const publishAllAuto = useCallback((notes = '') => startJob('online.publish.all', { notes }, '一键发布全部'), [startJob])
   const publishNew = useCallback((name) => startJob('online.publish.new', { name }, '上传到云端'), [startJob])
+  const openUpload = useCallback((name) => {
+    const preset = (snap.presets || []).find((p) => p.name === name)
+    if (preset?.bound) { publishNew(name); return }        // 已绑定的走一键上传
+    setModal({
+      kind: 'upload', title: '上传到云端 · 首次初始化', preset,
+      cloudPath: `/PulsesSwap/${name}`, version: preset?.version || 'v1.0.0', notes: '',
+      confirm: '开始上传',
+      onConfirm: async ({ cloud_path, version, notes }) => {
+        await startJob('online.publish.new',
+          { name, cloud_path, version, notes }, '上传到云端')
+      },
+    })
+  }, [snap.presets, publishNew, startJob])
   const publishPlan = useCallback((name) => startJob('online.publish.plan', { name }, '生成发布计划'), [startJob])
   const publish = useCallback((name, version, notes, selection) => {
     if (!version?.trim()) { showToast('请填写版本号', 'warning'); return }
@@ -1474,7 +1548,7 @@ export default function App() {
         ? { ...m, details: { error: err.message } } : m))
     }
   }, [refresh, showToast])
-  const actions = { openPack, openCloud, startJob, reorderPresets, detach, cloudDelete, openTacz, clearCache, clearLogs, addFromCloud, openDatabase, select, createPreset, rename, delete: remove, saveVersion, apply, bind, unbind, check, sync, syncAuto, publishAuto, syncAllAuto, publishAllAuto, publishNew, publishPlan, publish, login, logout, updateSettings, switchRole, prompt, toast: showToast, navigate, cancelJob, presetDetails: openPresetDetail, importGunpacks }
+  const actions = { openPack, openCloud, startJob, reorderPresets, detach, cloudDelete, openTacz, clearCache, clearLogs, addFromCloud, openDatabase, select, createPreset, rename, delete: remove, saveVersion, apply, bind, unbind, check, sync, syncAuto, publishAuto, syncAllAuto, publishAllAuto, publishNew, openUpload, publishPlan, publish, login, logout, updateSettings, switchRole, prompt, toast: showToast, navigate, cancelJob, presetDetails: openPresetDetail, importGunpacks }
   const animations = snap.settings?.animations !== false
   const pageEl = page === 'home' ? <Home snap={snap} actions={actions} busy={busy} publishNotes={publishNotes} />
     : page === 'manage' ? <Manage snap={snap} actions={actions} busy={busy} tab={manageTab} onTab={setManageTab} publishNotes={publishNotes} setPublishNotes={setPublishNotes} />
@@ -1513,6 +1587,7 @@ export default function App() {
         </footer>
       </main>
       <Cover state={cover} />
+      <JobBar busy={busy} onCancel={cancelJob} />
       <Modal modal={modal} onClose={() => setModal(null)} />
     </div>
   )

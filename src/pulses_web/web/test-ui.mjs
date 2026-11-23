@@ -3,7 +3,7 @@ import fs from 'node:fs'
 import assert from 'node:assert'
 
 const state = {
-  revision: 7, version: '3.3.0', role: 'developer',
+  revision: 7, version: '3.3.1', role: 'developer',
   pack: { path: 'D:\\Games\\Minecraft\\PCL\\.minecraft\\versions\\1.20.1-Fabric', name: '1.20.1-Fabric', tacz: 'D:\\Games\\Minecraft\\PCL\\.minecraft\\versions\\1.20.1-Fabric\\tacz', loaded: true },
   presets: [
     { name: '默认枪包', version: 'v1.2.0', applied: true, count: 18, path: '', bound: true, pending: 0, extra: 0, needs_update: false, checked_at: 0, check_summary: '' },

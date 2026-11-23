@@ -298,3 +298,45 @@ class PublishNotesTests(unittest.TestCase):
     def test_empty_version_is_rejected(self):
         with self.assertRaises(ValueError):
             self.ctrl.save_version("P", "   ")
+
+
+class FirstUploadTests(unittest.TestCase):
+    """首次上传：可指定云端文件夹/版本/说明，并留下初始化步骤日志。"""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.ctrl = AppController(base_dir=Path(self.tmp.name) / "db")
+        self.ctrl.preset_manager = FakePM()
+        self.ctrl.preset_manager.presets["P"]["applied"] = False
+        self.ctrl.selected = "P"
+        self.ctrl.state = lambda: {"ok": True}
+        self.ctrl.settings.role = "developer"
+        self.ctrl.apply_preset = lambda name, ctx=None: {"state": {"ok": True}}
+        p = diff.Plan(role="developer", cloud_version="")
+        p.items.append(diff.DiffItem("f0.zip", diff.UPLOAD,
+                                     local={"path": "f0.zip", "sha256": "a"},
+                                     cloud=None))
+        self.fake = FakeOnline(p, bound=False)
+        self.ctrl.online = self.fake
+
+    def tearDown(self):
+        self.ctrl._stop_watcher()
+        self.tmp.cleanup()
+
+    def test_custom_cloud_path_and_version(self):
+        out = self.ctrl.publish_new("P", cloud_path="/PulsesSwap/我的预设/子目录",
+                                    version="v9.9.9", notes="首次上传")
+        self.assertTrue(out.get("changed"))
+        self.assertEqual(self.fake.bind_args[3], "/PulsesSwap/我的预设/子目录")
+        self.assertEqual(self.fake.published[1].get("version"), "v9.9.9")
+        self.assertEqual(self.fake.published[1].get("notes"), "首次上传")
+
+    def test_invalid_folder_name_rejected(self):
+        with self.assertRaises(ValueError):
+            self.ctrl.publish_new("P", cloud_path="/PulsesSwap/坏:名字")
+
+    def test_init_steps_are_logged(self):
+        self.ctrl.publish_new("P", cloud_path="/PulsesSwap/P")
+        joined = "\n".join(str(getattr(x, "message", x)) for x in self.ctrl.logs)
+        self.assertIn("步骤 1/6", joined)
+        self.assertIn("初始化上传", joined)

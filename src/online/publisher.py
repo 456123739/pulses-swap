@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import time
 from dataclasses import dataclass, field
 
 from . import diff, hashing, packing
@@ -117,7 +118,31 @@ class Publisher:
             result.failed.append(("", str(exc)))
             return result
 
+        self._log(f"云端目录已有 {len(cloud_list)} 个文件", "INFO", verbose=True)
         total_bytes = sum(int(i.size or 0) for i in uploads)
+        self._log(f"本次计划上传 {len(uploads)} 个、删除 {len(deletes)} 个，"
+                  f"共 {format_size(total_bytes)}", "INFO")
+
+        # 云端还没有 manifest：先把初始 manifest（generation 0、空文件表）放上去，
+        # 让“初始化”是一个真实存在的状态，而不是等最后一步才出现。
+        # 只有空目录（真正首次上传）才写初始 manifest；目录里已有文件但缺
+        # manifest 时不能凭空生成空表，否则会把旧文件误判成“云端多余”。
+        if previous_manifest is None and not cloud_list:
+            self._log("云端没有 manifest：生成初始 manifest…", "INFO")
+            try:
+                initial = normalize({
+                    "name": name or plan.cloud_name,
+                    "version": str(version or "v1.0.0"),
+                    "generation": 0,
+                    "min_app": min_app,
+                    "notes": "初始化",
+                    "files": [],
+                })
+                self._upload_manifest(initial, folder_id, pack_dir, cloud_files,
+                                      previous_manifest=None, cloud_list=cloud_list)
+                self._log("初始 manifest 已写入云端（generation 0）", "SUCCESS")
+            except (OnlineError, OSError) as exc:
+                self._log(f"初始 manifest 写入失败，稍后随发布一起写：{exc}", "WARNING")
         done_bytes = 0
         packed: dict[str, int] = {}
         uploaded_names: dict[str, str] = {}
@@ -173,6 +198,7 @@ class Publisher:
             return result
 
         self._check_cancel()
+        self._log(f"生成 manifest：{len(entries)} 个条目", "INFO")
         try:
             files = self._build_files(entries, plan, packed, uploaded_names,
                                       {i.path.lower() for i in deletes},
@@ -190,6 +216,7 @@ class Publisher:
             self._drop_uploads(uploaded_ids)
             return result
 
+        self._log(f"上传 manifest（generation {result.generation}）…", "INFO")
         try:
             saved_manifest = self._upload_manifest(
                 manifest, folder_id, pack_dir, cloud_files,
@@ -204,6 +231,7 @@ class Publisher:
         self._delete_stale(cloud_list, uploaded_ids, previous_manifest,
                            files, deletes, result)
 
+        self._log("获取分享链接…", "INFO", verbose=True)
         try:
             share = self.account.folder_share(folder_id)
             result.share_url = share.get("url", "")
@@ -280,20 +308,32 @@ class Publisher:
         cloud_name = self._cloud_name_for(entry, name)
         path = self._prepare_upload(entry, pack_dir, cloud_name)
 
+        started = time.monotonic()
+
         def progress(done: int, _total: int) -> None:
             if on_progress is not None:
+                elapsed = max(0.001, time.monotonic() - started)
+                rate = format_size(int(done / elapsed)) + "/s"
                 on_progress(base_done + min(done, item.size or done),
-                            total_bytes, name)
+                            total_bytes, f"{name} · {rate}")
 
         try:
             size = os.path.getsize(path)
-            digest = hashing.sha256_file(path)
+            self._log(f"准备上传 {item.path}（{format_size(size)}）", "INFO", verbose=True)
+            # 普通文件在扫描阶段已经算过 sha256，直接复用，避免再读一遍大文件
+            if entry.get("type") == "folder":
+                digest = hashing.sha256_file(path)
+                self._log(f"打包指纹 {digest[:12]}… 计算完成", "INFO", verbose=True)
+            else:
+                digest = str(entry.get("sha256") or "") or hashing.sha256_file(path)
         except OSError as exc:
             raise SourceError(f"读取待上传文件失败：{item.path}",
                               detail=str(exc)) from exc
+        self._log(f"开始上传 {cloud_name}", "INFO")
         info = self.account.upload(path, folder_id, progress=progress,
                                    cancel=self.cancel)
         returned = str(info.get("name") or cloud_name)
+        self._log(f"上传完成 {returned}（{format_size(size)}）", "SUCCESS", verbose=True)
         return {"id": info.get("id"), "name": returned,
                 "size": size, "packed_sha256": digest}
 
@@ -375,10 +415,18 @@ class Publisher:
         except OSError as exc:
             raise SourceError("生成云端 manifest 失败",
                               detail=str(exc)) from exc
-        for entry in cloud_list or []:
-            if is_manifest_name(entry.get("name")):
-                if not self.account.delete_file(entry["id"]):
-                    raise SourceError("旧 manifest 删除失败")
+        seen_ids = set()
+        for entry in list(cloud_files.values()) + list(cloud_list or []):
+            name = str(entry.get("name") or "")
+            ident = entry.get("id")
+            if not is_manifest_name(name) or not ident:
+                continue                     # 没有 id 的缓存条目不能删，交给下次
+            key = str(ident)
+            if key in seen_ids:
+                continue
+            seen_ids.add(key)
+            if not self.account.delete_file(ident):
+                raise SourceError("旧 manifest 删除失败")
         for name in MANIFEST_NAMES:
             cloud_files.pop(name.lower(), None)
         try:
@@ -397,6 +445,7 @@ class Publisher:
                 self._restore_manifest(previous_manifest, folder_id, pack_dir,
                                        cloud_files)
             raise
+        cloud_files[str(returned or MANIFEST_NAME).lower()] = info
         self._log("云端 manifest 已更新", "SUCCESS")
         return saved
 

@@ -935,7 +935,7 @@ class AppController:
                 name = str((entry or {}).get("path") or "")
                 ctx.progress(pct, phase="sync",
                              message=f"下载 {index}/{count}  {name}",
-                             current=index, total=count)
+                             current=done, total=total)
 
             def on_item(index, count, entry, status):
                 name = str((entry or {}).get("path") or "")
@@ -1103,7 +1103,7 @@ class AppController:
             raise
 
     @_locked
-    def publish_auto(self, name: str, ctx=None, notes: str = ""):
+    def publish_auto(self, name: str, ctx=None, notes: str = "", version: str = ""):
         """开发者一键发布：收回已应用预设 → 自动计划/递增版本/上传 → 再应用。
 
         notes: 给玩家看的更新说明；留空时自动写“一键发布 · 上传 N 项”。
@@ -1149,7 +1149,7 @@ class AppController:
                 self.preset_manager.presets[name].get("version")
                 if self.preset_manager and name in self.preset_manager.presets
                 else "")
-            version = self._next_version(base_version)
+            version = str(version or "").strip() or self._next_version(base_version)
             out = self.publish(name, version,
                                str(notes or "").strip()
                                or f"一键发布 · 上传 {len(selection)} 项",
@@ -1173,8 +1173,9 @@ class AppController:
             raise
 
     @_locked
-    def publish_new(self, name: str, ctx=None):
-        """开发者把未绑定本地预设上传到云端，自动创建 /PulsesSwap/<name>。"""
+    def publish_new(self, name: str, ctx=None, cloud_path: str = "",
+                    version: str = "", notes: str = ""):
+        """首次上传：可指定云端文件夹、版本与说明，按标准步骤初始化。"""
         pm = self.preset_manager
         info = (pm.presets.get(name) if pm else None) or {}
         if not info.get("gunpacks"):
@@ -1191,16 +1192,38 @@ class AppController:
         if not self.preset_manager or name not in self.preset_manager.presets:
             raise ValueError("预设不存在")
         if self.online.is_bound(name):
-            return self.publish_auto(name, ctx=ctx)
+            if str(cloud_path or "").strip():
+                current = str((self.online.source_of(name) or {}).get("cloud_path") or "")
+                if current.rstrip("/") != str(cloud_path).rstrip("/"):
+                    raise ValueError("这个预设已经绑定云端了：要换目录请先解除绑定")
+            return self.publish_auto(name, ctx=ctx, notes=notes, version=version)
         source = self.online.source_of(name) or {}
-        cloud_path = str(source.get("cloud_path") or "").strip()
-        if not cloud_path:
+        chosen = str(cloud_path or source.get("cloud_path") or "").strip()
+        if not chosen:
             safe = str(name).replace("/", "-").strip() or "预设"
-            cloud_path = f"/PulsesSwap/{safe}"
+            chosen = f"/PulsesSwap/{safe}"
+        # 规范化：统一斜杠、去掉空段与首尾空白
+        parts = [seg.strip() for seg in chosen.replace("\\", "/").split("/") if seg.strip()]
+        if not parts:
+            raise ValueError("云端文件夹名不能为空")
+        if any(set(seg) & set(':*?"<>|') for seg in parts):
+            raise ValueError("云端文件夹名里不能有 \\ / : * ? \" < > |")
+        cloud_path = "/" + "/".join(parts)
+        self.add_log(f"初始化上传：预设「{name}」→ 云端 {cloud_path}", "INFO")
+        self.add_log("步骤 1/6：校验本地枪包", "INFO", verbose=True)
+        try:
+            ref = self._ref(name)
+            entries = self.online.scan(ref)
+            self.add_log(f"步骤 2/6：本地清单已生成（{len(entries)} 个文件）",
+                         "INFO", verbose=True)
+        except Exception as exc:
+            self.add_log(f"本地清单生成失败：{exc}", "WARNING")
         # 先把云端路径绑定到该预设；发布成功后 _remember_share 会补上分享链接。
+        self.add_log(f"步骤 3/6：绑定云端路径 {cloud_path}", "INFO", verbose=True)
         self.bind_source(name, "", "", cloud_path=cloud_path)
         try:
-            out = self.publish_auto(name, ctx=ctx)
+            self.add_log("步骤 4/6：检查云端并初始化 manifest", "INFO")
+            out = self.publish_auto(name, ctx=ctx, notes=notes, version=version)
         except Exception:
             # 上传失败且还没生成分享链接：把刚写进去的空绑定撤掉，避免残留
             record = self.online.source_of(name) or {}
@@ -1215,8 +1238,10 @@ class AppController:
             if "最新" in message or "无需发布" in message or "没有需要上传" in message:
                 return out                      # 云端已一致，不算失败
             raise ValueError("云端还没有这个预设的内容可传：先导入枪包，再上传")
+        self.add_log("步骤 6/6：回写分享链接与发布记录", "INFO", verbose=True)
         out["message"] = (out.get("message", "上传完成")
                           + f" · 云端 {cloud_path} · 分享链接在「管理 → 云端来源」可复制")
+        out["cloud_path"] = cloud_path
         return out
 
     @_locked
@@ -1241,9 +1266,15 @@ class AppController:
         online = self._require_online()
         if self.role != "developer":
             raise PermissionError("只有开发者可以发布")
+        self.add_log(f"发布准备：预设「{name}」", "INFO")
+        self.add_log("读取云端 manifest 与本地文件…", "INFO", verbose=True)
         plan = self._publish_for(name)
         if plan is None:
             raise ValueError("发布计划已过期，请重新生成")
+        uploads = sum(1 for i in plan.items if i.action == "upload")
+        extras = sum(1 for i in plan.items if i.action == "delete_cloud")
+        self.add_log(f"差异计划：待上传 {uploads} 项、云端多余 {extras} 项",
+                     "INFO", verbose=True)
         if not selection:
             selection = [i.path for i in plan.items
                          if i.action not in ("skip", "blocked")]
@@ -1256,6 +1287,13 @@ class AppController:
                 message=message, current=current, total=total))
             if ctx else None,
             role=self.role)
+        def _get(key, default):
+            if isinstance(result, dict):
+                return result.get(key, default)
+            return getattr(result, key, default)
+        self.add_log(f"发布结束：上传 {len(_get('uploaded', []))} 项、"
+                     f"删除 {len(_get('deleted', []))} 项、失败 {len(_get('failed', []))} 项",
+                     "SUCCESS" if _get('ok', False) else "WARNING")
         # 云端内容变了，旧的检查结果不再成立
         self._checks.pop(name, None)
         self._rev += 1
