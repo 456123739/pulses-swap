@@ -3,7 +3,7 @@
   "line": "webui",
   "batch": "2026-11",
   "repo": "456123739/pulses-swap",
-  "updated_at": "2026-11-15",
+  "updated_at": "2026-11-24",
   "tool": "python archive/webui/tools/fetch_archive.py --list",
   "isolation": {
     "branch": "release/webui-3.2",
@@ -20,6 +20,24 @@
     }
   ],
   "items": [
+    {
+      "id": "session-5cfbc263",
+      "kind": "session",
+      "name": "session-5cfbc263.sanitized.jsonl.zst",
+      "release_tag": "archive-webui-2026-11",
+      "size": 2685590,
+      "sha256": "f6a051f5abfb89e69a5eaeeaefa9a23441aa4d94ee377cae1e433796961d7be6",
+      "format": "zstd(JSONL)",
+      "unpack": "zstd",
+      "note": "已脱敏：GitHub token / 引号手机号 / password 字段 → REDACTED；保留时间戳",
+      "session": {
+        "id": "session-5cfbc263-16b8-4f5d-95fa-9b7c0621045d",
+        "title": "【新UI】Pulses Swap 3.3.x · 业务修复与交付",
+        "events": 8382,
+        "span": "2026-11-16 .. 2026-11-24",
+        "outcome": "3.3.0~3.3.5 发布；网络/缓存退路修复、首传→增量更新验证、发布台与云盘界面完善"
+      }
+    },
     {
       "id": "session-5a5350c1",
       "kind": "session",

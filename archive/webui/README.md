@@ -20,8 +20,10 @@ archive/webui/
     └── easier-shots/*.png            Easier 界面截图（6 态 + 真机 e2e）
 ```
 
-大会话（`session-5a5350c1.sanitized.jsonl.zst`，10.6 MB）挂在 Release
-`archive-webui-2026-11`，不在 git 里。
+大会话挂在 Release `archive-webui-2026-11`，不在 git 里：
+
+- `session-5a5350c1.sanitized.jsonl.zst`（10.6 MB）—— 2026-10-07..11-07 的新界面 3.0.x→3.2.0 开发会话
+- `session-5cfbc263.sanitized.jsonl.zst`（2.6 MB）—— 2026-11-16..11-24 的 3.3.x 业务修复会话
 
 ## 取用
 
