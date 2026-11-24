@@ -2,7 +2,7 @@ import { chromium } from 'playwright'
 import fs from 'node:fs'
 
 const base = {
-  revision: 9, version: '3.3.4', role: 'player',
+  revision: 9, version: '3.3.5', role: 'player',
   pack: {
     path: 'D:\\Games\\Minecraft\\PCL\\.minecraft\\versions\\1.20.1-Fabric',
     name: '1.20.1-Fabric',
